@@ -28,6 +28,84 @@ import {
 } from './store/scheduleStore.js';
 
 /**
+ * 患者が月13単位制限（算定日数上限超過・維持期介護・個別制限）の対象か判定
+ * @param {Object} patient 
+ * @param {Date} dateObj 
+ * @returns {boolean}
+ */
+function isPatientRestrictedTo13Units(patient, dateObj) {
+  if (!patient) return false;
+  if (patient.isLimitExempt) return false; // 除外規定適用者は制限なし
+
+  // 1. 維持期介護区分
+  if (patient.category && patient.category.includes('maintenance')) {
+    return true;
+  }
+
+  // 2. 個別指定フラグ
+  if (patient.is13UnitLimited) {
+    return true;
+  }
+
+  // 3. 疾患別標準算定日数上限（運動器150日、脳血管180日、廃用120日）を超過しているか
+  const deadlines = calculatePatientDeadlines(patient, dateObj);
+  if (deadlines.isOverLimit) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * コマ配置時に月13単位制限を超過しないかバリデーション検証
+ * @param {string} dateStr - 'YYYY-MM-DD'
+ * @param {string} therapistCode - 'A'|'B'|'C'
+ * @param {string} slotId - 'am_1' 等
+ * @param {string} patientId - 患者記号
+ * @param {number} newUnits - 追加・設定しようとしている単位数
+ * @param {boolean} isEditMode - 既存コマの編集か
+ * @returns {boolean} 配置可能なら true, 制限超過なら false
+ */
+function validateMonthly13UnitsLimit(dateStr, therapistCode, slotId, patientId, newUnits, isEditMode = false) {
+  const normId = normalizePatientId(patientId);
+  const patient = getAllPatients().find((p) => normalizePatientId(p.id) === normId);
+  if (!patient) return true;
+
+  const dateObj = new Date(dateStr);
+  const isRestricted = isPatientRestrictedTo13Units(patient, dateObj);
+  if (!isRestricted) {
+    return true; // 13単位制限の対象外患者（算定期間内の通常患者など）は制限なし
+  }
+
+  // 対象年月の集計を取得
+  const year = dateObj.getFullYear();
+  const month = dateObj.getMonth() + 1;
+  const aggregated = aggregateFromAppSchedule(year, month);
+  let currentMonthUnits = aggregated.patientTotals[normId]?.totalUnits || 0;
+
+  // 編集中のコマにすでに割り当てられていた既存単位があれば、二重加算防止のため差し引く
+  if (isEditMode) {
+    const schedule = getDailySchedule(dateStr);
+    const existingSlot = schedule[therapistCode]?.[slotId];
+    if (existingSlot && normalizePatientId(existingSlot.patientId) === normId) {
+      currentMonthUnits -= (existingSlot.units || 0);
+    }
+  }
+
+  const projectedTotal = currentMonthUnits + newUnits;
+  if (projectedTotal > 13) {
+    const pName = patient.name || patientId.toUpperCase();
+    showToast(
+      `⚠️【13単位制限エラー】${pName} 様は月13単位上限の対象です。当月現在 ${currentMonthUnits}単位のため、${newUnits}単位を追加すると13単位を超過 (${projectedTotal}単位) します。配置できません。`,
+      'error'
+    );
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * 入院19名・外来50名（計69名）のテスト患者データセット
  */
 const SEED_TEST_PATIENTS = [
@@ -559,6 +637,11 @@ function handleSlotDropped(dateStr, therapistCode, slotId, patientId) {
   const p = getAllPatients().find((item) => normalizePatientId(item.id) === normalizePatientId(patientId));
   const pName = p?.name || patientId.toUpperCase();
 
+  // デフォルト2単位の配置前に月13単位制限を検証
+  if (!validateMonthly13UnitsLimit(dateStr, therapistCode, slotId, patientId, 2, false)) {
+    return;
+  }
+
   // デフォルト2単位 (40分) で配置
   setScheduleSlot(dateStr, therapistCode, slotId, {
     patientId: normalizePatientId(patientId),
@@ -663,6 +746,12 @@ function initSlotEditModal() {
     if (units <= 0) {
       showToast('有効な単位数を指定してください。', 'warning');
       return;
+    }
+
+    // 月13単位制限の超過チェック
+    const isSameSlot = (targetSlotId === origSlotId && targetTherapist === origTherapist);
+    if (!validateMonthly13UnitsLimit(dateStr, origTherapist, origSlotId, patientId, units, isSameSlot)) {
+      return; // 制限超過の場合は設定を中断
     }
 
     // 開始時間または担当PTが変更されている場合は、元のコマを空にして新位置へ移動
