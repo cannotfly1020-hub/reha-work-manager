@@ -2,7 +2,8 @@
  * @file scheduleStore.js
  * @description セラピスト別当日時間割（午前・午後コマ）および単位入力のローカル保存ストア
  * 
- * - 各セラピスト（A, B, C）の当日のタイムスケジュール（9:00〜12:20、14:00〜17:20）を直接管理
+ * - 各セラピスト（A, B, C）の当日のタイムスケジュール（午前9:00〜12:20、午後14:00〜18:00）を直接管理
+ * - 17:20～17:40、17:40～18:00 の夕方リハビリ枠を完備
  * - 入力された患者・単位数・コマデータをブラウザのLocalStorageに完全ローカル蓄積
  * - Excelファイルに毎日手入力することなく、本アプリ内の蓄積データから月末の受付提出・業務日誌を即座に自動集計可能
  */
@@ -12,7 +13,7 @@ import { formatDate } from '../core/deadlineCalc.js';
 
 const STORAGE_KEY_SCHEDULES = 'reha_manager_schedules_v1';
 
-// リハビリ記録のコマ枠定義（午前10コマ、午後10コマ）
+// リハビリ記録のコマ枠定義（午前10コマ、午後12コマ: 18:00まで対応）
 export const TIME_SLOTS = [
   // 午前セッション（10コマ）
   { id: 'am_1', period: 'am', time: '9:00～9:20', label: '9:00' },
@@ -26,7 +27,7 @@ export const TIME_SLOTS = [
   { id: 'am_9', period: 'am', time: '11:40～12:00', label: '11:40' },
   { id: 'am_10', period: 'am', time: '12:00～12:20', label: '12:00' },
 
-  // 午後セッション（10コマ）
+  // 午後セッション（12コマ: 14:00～18:00）
   { id: 'pm_1', period: 'pm', time: '14:00～14:20', label: '14:00' },
   { id: 'pm_2', period: 'pm', time: '14:20～14:40', label: '14:20' },
   { id: 'pm_3', period: 'pm', time: '14:40～15:00', label: '14:40' },
@@ -37,6 +38,8 @@ export const TIME_SLOTS = [
   { id: 'pm_8', period: 'pm', time: '16:20～16:40', label: '16:20' },
   { id: 'pm_9', period: 'pm', time: '16:40～17:00', label: '16:40' },
   { id: 'pm_10', period: 'pm', time: '17:00～17:20', label: '17:00' },
+  { id: 'pm_11', period: 'pm', time: '17:20～17:40', label: '17:20' },
+  { id: 'pm_12', period: 'pm', time: '17:40～18:00', label: '17:40' },
 ];
 
 /**
@@ -79,7 +82,7 @@ export function getDailySchedule(dateStr) {
  * 
  * @param {string} dateStr - 'YYYY-MM-DD'
  * @param {string} therapistCode - 'A'|'B'|'C'
- * @param {string} slotId - 例: 'am_1'
+ * @param {string} slotId - 例: 'am_1', 'pm_11'
  * @param {Object} slotData - { patientId: 'a', units: 2, note?: string }
  */
 export function setScheduleSlot(dateStr, therapistCode, slotId, slotData) {
