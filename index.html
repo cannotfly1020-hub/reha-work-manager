@@ -35,8 +35,11 @@
     <!-- ナビゲーションタブ -->
     <nav class="tab-navigation">
       <div class="tab-nav-container">
-        <button class="nav-tab-btn active" data-target="reha-aggregate">
-          📊 リハ記録集計・Excel出力
+        <button class="nav-tab-btn active" data-target="daily-schedule">
+          📅 当日時間割・単位入力
+        </button>
+        <button class="nav-tab-btn" data-target="reha-aggregate">
+          📊 月末集計・Excel出力
         </button>
         <button class="nav-tab-btn" data-target="patient-deadlines">
           ⏳ 患者期限・加算管理
@@ -50,9 +53,117 @@
     <!-- メインコンテンツ領域 -->
     <main class="main-content">
       <!-- ======================================================== -->
+      <!-- タブ0: 当日時間割・単位入力（メイン日常業務） -->
+      <!-- ======================================================== -->
+      <section id="daily-schedule" class="tab-panel active">
+        <div class="schedule-workspace-layout">
+          <!-- 左側: 患者パレット（サイドバー: 外来50名・入院19名対応） -->
+          <aside class="patient-palette-sidebar">
+            <div class="palette-header">
+              <div class="palette-title-row">
+                <h3 class="palette-title">👥 患者パレット</h3>
+                <span class="palette-subtitle">ドラッグして時間割へ</span>
+              </div>
+              <!-- 入院・外来・全員 切り替えタブ -->
+              <div class="palette-filter-tabs">
+                <button type="button" class="palette-tab-btn active" data-filter="ALL">全員</button>
+                <button type="button" class="palette-tab-btn" data-filter="INPATIENT">入院 <span id="count-badge-inpatient" class="badge-count">19</span></button>
+                <button type="button" class="palette-tab-btn" data-filter="OUTPATIENT">外来 <span id="count-badge-outpatient" class="badge-count">50</span></button>
+              </div>
+              <!-- リアルタイムあいまい検索窓 -->
+              <div class="palette-search-box">
+                <input type="text" id="patient-palette-search" placeholder="🔍 名前・記号・かなで検索..." autocomplete="off">
+                <button type="button" id="btn-clear-palette-search" class="btn-clear-search" title="検索クリア">&times;</button>
+              </div>
+              <!-- 五十音クイックジャンプバー -->
+              <div class="palette-kana-bar">
+                <button type="button" class="kana-jump-btn active" data-kana="ALL">全</button>
+                <button type="button" class="kana-jump-btn" data-kana="ア">あ</button>
+                <button type="button" class="kana-jump-btn" data-kana="カ">か</button>
+                <button type="button" class="kana-jump-btn" data-kana="サ">さ</button>
+                <button type="button" class="kana-jump-btn" data-kana="タ">た</button>
+                <button type="button" class="kana-jump-btn" data-kana="ナ">な</button>
+                <button type="button" class="kana-jump-btn" data-kana="ハ">は</button>
+                <button type="button" class="kana-jump-btn" data-kana="マ">ま</button>
+                <button type="button" class="kana-jump-btn" data-kana="ヤ">や</button>
+                <button type="button" class="kana-jump-btn" data-kana="ラ">ら</button>
+                <button type="button" class="kana-jump-btn" data-kana="ワ">わ</button>
+              </div>
+            </div>
+
+            <!-- 患者チップ一覧表示コンテナ（ドラッグ可能要素） -->
+            <div class="palette-body" id="patient-palette-list">
+              <!-- JavaScriptにより動的生成（入院／外来のチップ一覧） -->
+            </div>
+
+            <div class="palette-footer">
+              <button type="button" id="btn-quick-add-patient" class="btn btn-outline btn-sm w-full">
+                ＋ 新規患者を追加
+              </button>
+            </div>
+          </aside>
+
+          <!-- 右側: タイムスケジュール・時間割メインエリア -->
+          <div class="schedule-main-area">
+            <!-- 日付選択バー ＆ 日計サマリーカード -->
+            <div class="schedule-top-bar">
+              <div class="schedule-date-nav">
+                <button id="btn-prev-day" class="btn btn-outline btn-sm">◀ 前日</button>
+                <input type="date" id="schedule-target-date">
+                <button id="btn-next-day" class="btn btn-outline btn-sm">翌日 ▶</button>
+                <button id="btn-today" class="btn btn-primary btn-sm">今日</button>
+                <span id="schedule-day-label" class="day-label font-bold"></span>
+              </div>
+
+              <!-- 当日リアルタイム集計カウンター -->
+              <div class="daily-kpi-group">
+                <div class="kpi-card">
+                  <span class="kpi-title">セラピスト A</span>
+                  <span class="kpi-value" id="kpi-therapist-A">0 <small>単位</small></span>
+                  <span class="kpi-sub" id="kpi-patients-A">0名</span>
+                </div>
+                <div class="kpi-card">
+                  <span class="kpi-title">セラピスト B</span>
+                  <span class="kpi-value" id="kpi-therapist-B">0 <small>単位</small></span>
+                  <span class="kpi-sub" id="kpi-patients-B">0名</span>
+                </div>
+                <div class="kpi-card">
+                  <span class="kpi-title">セラピスト C</span>
+                  <span class="kpi-value" id="kpi-therapist-C">0 <small>単位</small></span>
+                  <span class="kpi-sub" id="kpi-patients-C">0名</span>
+                </div>
+                <div class="kpi-card kpi-total">
+                  <span class="kpi-title">本日 全体合計</span>
+                  <span class="kpi-value" id="kpi-clinic-total">0 <small>単位</small></span>
+                  <span class="kpi-sub" id="kpi-clinic-patients">実人数 0名</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- セラピスト別 タイムスケジュールボード -->
+            <div class="card timetable-card">
+              <div class="card-header">
+                <div>
+                  <h2 class="card-title">🕒 当日のタイムスケジュール・コマ割り</h2>
+                  <div class="text-sm text-muted">左の患者パレットからコマへドラッグ＆ドロップ（またはコマをクリックして直接選択）できます</div>
+                </div>
+                <div class="drag-hint-badge">
+                  <span>💡 コマのドラッグで移動も可能</span>
+                </div>
+              </div>
+
+              <div class="timetable-grid" id="timetable-grid">
+                <!-- JavaScriptで動的生成（Aさん・Bさん・Cさんの列） -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================================================== -->
       <!-- タブ1: リハ記録集計・Excel出力 -->
       <!-- ======================================================== -->
-      <section id="reha-aggregate" class="tab-panel active">
+      <section id="reha-aggregate" class="tab-panel">
         <!-- 操作コントロールバー -->
         <div class="control-bar">
           <div class="date-selector-group">
@@ -74,6 +185,74 @@
               <option value="12">12月</option>
             </select>
           </div>
+          <div class="actions-row" style="margin-bottom: 0;">
+            <button id="btn-aggregate-from-app" class="btn btn-primary">
+              ⚡ アプリ内蓄積データから今月を集計する
+            </button>
+          </div>
+        </div>
+
+        <!-- テンプレート読み込み＆出力エリア -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">📥 提出用Excel原本の指定＆ワンクリック出力</h2>
+          </div>
+          <div class="upload-grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
+            <!-- 受付提出原本 -->
+            <div class="drop-zone" id="drop-zone-uketsuke">
+              <div class="drop-zone-icon">📑</div>
+              <div class="drop-zone-title">受付提出用 原本</div>
+              <div class="drop-zone-desc">受付提出_単位管理.xlsm</div>
+              <span class="status-badge waiting" id="badge-uketsuke">未選択</span>
+              <input type="file" id="file-input-uketsuke" class="file-hidden-input" accept=".xlsx,.xlsm,.xls">
+            </div>
+
+            <!-- 業務日誌原本 -->
+            <div class="drop-zone" id="drop-zone-diary">
+              <div class="drop-zone-icon">📒</div>
+              <div class="drop-zone-title">業務日誌 原本</div>
+              <div class="drop-zone-desc">業務日誌 原本.xlsx</div>
+              <span class="status-badge waiting" id="badge-diary">未選択</span>
+              <input type="file" id="file-input-diary" class="file-hidden-input" accept=".xlsx,.xlsm,.xls">
+            </div>
+          </div>
+
+          <div class="actions-row">
+            <button id="btn-export-uketsuke" class="btn btn-success" disabled>
+              📥 受付提出用Excelを出力（印刷・事務提出用）
+            </button>
+            <button id="btn-export-diary" class="btn btn-success" disabled>
+              📥 業務日誌Excelを出力（日別完成版）
+            </button>
+          </div>
+
+          <details style="margin-top: 1rem; font-size: 0.85rem; color: var(--text-muted);">
+            <summary style="cursor: pointer; font-weight: 600;">📁 過去のExcelファイル（リハ記録A/B/C）から集計・移行したい場合はこちら</summary>
+            <div class="upload-grid" style="margin-top: 0.75rem;">
+              <div class="drop-zone" id="drop-zone-rehaA">
+                <div class="drop-zone-icon">📄</div>
+                <div class="drop-zone-title">リハ記録 (A)</div>
+                <span class="status-badge waiting" id="badge-rehaA">未選択</span>
+                <input type="file" id="file-input-rehaA" class="file-hidden-input" accept=".xlsx,.xlsm,.xls">
+              </div>
+              <div class="drop-zone" id="drop-zone-rehaB">
+                <div class="drop-zone-icon">📄</div>
+                <div class="drop-zone-title">リハ記録 (B)</div>
+                <span class="status-badge waiting" id="badge-rehaB">未選択</span>
+                <input type="file" id="file-input-rehaB" class="file-hidden-input" accept=".xlsx,.xlsm,.xls">
+              </div>
+              <div class="drop-zone" id="drop-zone-rehaC">
+                <div class="drop-zone-icon">📄</div>
+                <div class="drop-zone-title">リハ記録 (C)</div>
+                <span class="status-badge waiting" id="badge-rehaC">未選択</span>
+                <input type="file" id="file-input-rehaC" class="file-hidden-input" accept=".xlsx,.xlsm,.xls">
+              </div>
+            </div>
+            <button id="btn-run-aggregate" class="btn btn-outline btn-sm" disabled>
+              Excelファイルから集計実行
+            </button>
+          </details>
+        </div>
           <div>
             <span class="text-sm text-muted">※全角・半角スペースや大文字小文字の揺れは自動で吸収されます</span>
           </div>
@@ -338,6 +517,48 @@
       <div class="modal-footer">
         <button id="btn-cancel-loan" class="btn btn-outline">キャンセル</button>
         <button id="btn-save-loan" class="btn btn-primary">登録する</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- コマ編集モーダル（時間割スロットクリック時） -->
+  <!-- ======================================================== -->
+  <div id="slot-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 440px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="slot-modal-title">コマの入力・編集</h3>
+        <button id="modal-close-slot" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="form-group">
+        <label for="slot-modal-patient">患者記号または氏名 (必須)</label>
+        <div style="display: flex; gap: 0.5rem;">
+          <input type="text" id="slot-modal-patient" placeholder="例: a または 山田" autofocus>
+          <select id="slot-modal-patient-select" style="max-width: 140px;">
+            <option value="">登録患者から選択</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="slot-modal-units">実施単位数</label>
+        <div class="unit-preset-group">
+          <button type="button" class="btn-preset-unit" data-unit="1">1単位</button>
+          <button type="button" class="btn-preset-unit active" data-unit="2">2単位</button>
+          <button type="button" class="btn-preset-unit" data-unit="3">3単位</button>
+          <button type="button" class="btn-preset-unit" data-unit="4">4単位</button>
+          <input type="number" id="slot-modal-units" min="1" max="9" value="2" style="width: 80px; text-align: center;">
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="slot-modal-note">備考メモ (任意)</label>
+        <input type="text" id="slot-modal-note" placeholder="例: 歩行訓練、評価など">
+      </div>
+      <div class="modal-footer" style="justify-content: space-between;">
+        <button id="btn-clear-slot" class="btn btn-outline-danger">このコマを空にする</button>
+        <div style="display: flex; gap: 0.5rem;">
+          <button id="btn-cancel-slot" class="btn btn-outline">キャンセル</button>
+          <button id="btn-save-slot" class="btn btn-primary">設定する</button>
+        </div>
       </div>
     </div>
   </div>
