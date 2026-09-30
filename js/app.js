@@ -607,6 +607,8 @@ function initSlotEditModal() {
   const presetChips = document.querySelectorAll('.preset-chip');
   const patientSelect = document.getElementById('slot-modal-patient-select');
   const patientInput = document.getElementById('slot-modal-patient');
+  const timeSelect = document.getElementById('slot-modal-time');
+  const therapistSelect = document.getElementById('slot-modal-therapist');
 
   const closeModal = () => modal?.classList.remove('show');
   closeBtn?.addEventListener('click', closeModal);
@@ -628,6 +630,16 @@ function initSlotEditModal() {
     updateModalDurationHint(val);
   });
 
+  timeSelect?.addEventListener('change', () => {
+    const val = parseInt(customUnitInput?.value, 10) || 2;
+    updateModalDurationHint(val);
+  });
+
+  therapistSelect?.addEventListener('change', () => {
+    const val = parseInt(customUnitInput?.value, 10) || 2;
+    updateModalDurationHint(val);
+  });
+
   patientSelect?.addEventListener('change', (e) => {
     if (e.target.value && patientInput) {
       patientInput.value = e.target.value;
@@ -636,7 +648,10 @@ function initSlotEditModal() {
 
   saveBtn?.addEventListener('click', () => {
     if (!state.activeSlotModal) return;
-    const { dateStr, therapistCode, slotId } = state.activeSlotModal;
+    const { dateStr, therapistCode: origTherapist, slotId: origSlotId } = state.activeSlotModal;
+    const targetSlotId = timeSelect?.value || origSlotId;
+    const targetTherapist = therapistSelect?.value || origTherapist;
+
     const patientId = patientInput?.value?.trim();
     const units = parseInt(customUnitInput?.value, 10) || 0;
     const note = document.getElementById('slot-modal-note')?.value?.trim() || '';
@@ -650,13 +665,20 @@ function initSlotEditModal() {
       return;
     }
 
-    setScheduleSlot(dateStr, therapistCode, slotId, { patientId, units, note });
+    // 開始時間または担当PTが変更されている場合は、元のコマを空にして新位置へ移動
+    if (targetSlotId !== origSlotId || targetTherapist !== origTherapist) {
+      clearScheduleSlot(dateStr, origTherapist, origSlotId);
+    }
+
+    // 新しい時間枠・担当者枠へ設定
+    setScheduleSlot(dateStr, targetTherapist, targetSlotId, { patientId, units, note });
+
     closeModal();
     renderTimetable();
     renderDailyKPIs();
     renderDailyDiaryPreview();
     renderMonthlyUnitsTable();
-    showToast(`PT ${therapistCode} のコマを更新しました (${units}単位 / ${units * 20}分)`, 'success');
+    showToast(`PT ${targetTherapist} のコマを設定しました (${units}単位 / ${units * 20}分)`, 'success');
   });
 
   clearBtn?.addEventListener('click', () => {
@@ -674,13 +696,19 @@ function initSlotEditModal() {
 
 function updateModalDurationHint(units) {
   if (!state.activeSlotModal) return;
-  const slotInfo = TIME_SLOTS.find((s) => s.id === state.activeSlotModal.slotId);
+  const timeSelect = document.getElementById('slot-modal-time');
+  const therapistSelect = document.getElementById('slot-modal-therapist');
+
+  const selectedSlotId = timeSelect?.value || state.activeSlotModal.slotId;
+  const selectedTherapist = therapistSelect?.value || state.activeSlotModal.therapistCode;
+
+  const slotInfo = TIME_SLOTS.find((s) => s.id === selectedSlotId);
   if (!slotInfo) return;
 
   const durationStr = getSlotDurationText(slotInfo.label, units);
   const title = document.getElementById('slot-modal-title');
   if (title) {
-    title.textContent = `PT ${state.activeSlotModal.therapistCode} | ${durationStr} (${units * 20}分)`;
+    title.textContent = `PT ${selectedTherapist} | ${durationStr} (${units * 20}分)`;
   }
 }
 
@@ -689,6 +717,25 @@ function openSlotEditModal(dateStr, therapistCode, slotId) {
   if (!modal) return;
 
   state.activeSlotModal = { dateStr, therapistCode, slotId };
+
+  // 開始時間ドロップダウンの選択肢を生成
+  const timeSelect = document.getElementById('slot-modal-time');
+  if (timeSelect) {
+    timeSelect.innerHTML = '';
+    TIME_SLOTS.forEach((slot) => {
+      const opt = document.createElement('option');
+      opt.value = slot.id;
+      opt.textContent = `${slot.period === 'am' ? '午前' : '午後'} ${slot.time}`;
+      if (slot.id === slotId) opt.selected = true;
+      timeSelect.appendChild(opt);
+    });
+  }
+
+  // 担当セラピストの選択
+  const therapistSelect = document.getElementById('slot-modal-therapist');
+  if (therapistSelect) {
+    therapistSelect.value = therapistCode;
+  }
 
   const select = document.getElementById('slot-modal-patient-select');
   if (select) {
