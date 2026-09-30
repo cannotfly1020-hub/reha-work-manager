@@ -9,6 +9,8 @@
  * - 外来50名・入院19名（計69名）の患者パレット・あいまい検索・五十音絞り込み
  * - セラピスト別リアルタイム日計カウンターおよび月13単位モニタリング
  * - アプリ内蓄積データからの受付提出用Excel・日別業務日誌Excelのワンクリック出力
+ * - 同時間帯の重複配置（ダブルブッキング）防止バリデーション
+ * - 疾患別算定日数上限（運動器150日・脳血管180日・廃用120日）超過連動の13単位制限
  */
 
 import { REHA_RULES } from './config/rules.js';
@@ -29,9 +31,9 @@ import {
 
 /**
  * 患者が月13単位制限（算定日数上限超過・維持期介護・個別制限）の対象か判定
- * @param {Object} patient 
- * @param {Date} dateObj 
- * @returns {boolean}
+ * @param {Object} patient - 患者オブジェクト
+ * @param {Date} dateObj - 判定基準日
+ * @returns {boolean} 13単位制限対象なら true
  */
 function isPatientRestrictedTo13Units(patient, dateObj) {
   if (!patient) return false;
@@ -54,6 +56,71 @@ function isPatientRestrictedTo13Units(patient, dateObj) {
   }
 
   return false;
+}
+
+/**
+ * 同一時間帯に他のセラピストで既に同じ患者が配置されていないか重複検証（ダブルブッキング防止）
+ * @param {string} dateStr - 'YYYY-MM-DD'
+ * @param {string} targetTherapist - 配置先PT 'A'|'B'|'C'
+ * @param {string} targetSlotId - 配置先スロットID
+ * @param {string} patientId - 患者記号
+ * @param {number} newUnits - 配置する単位数 (1〜4)
+ * @param {string|null} [origTherapist=null] - 編集元のPT（既存コマ移動時の除外用）
+ * @param {string|null} [origSlotId=null] - 編集元のスロットID
+ * @returns {boolean} 重複がなければ true, 重複があれば false
+ */
+function validatePatientTimeConflict(dateStr, targetTherapist, targetSlotId, patientId, newUnits, origTherapist = null, origSlotId = null) {
+  const normId = normalizePatientId(patientId);
+  const patient = getAllPatients().find((p) => normalizePatientId(p.id) === normId);
+  const pName = patient?.name || patientId.toUpperCase();
+
+  const targetIdx = TIME_SLOTS.findIndex((s) => s.id === targetSlotId);
+  if (targetIdx === -1) return true;
+
+  const targetSlot = TIME_SLOTS[targetIdx];
+  // 配置しようとしている全スロットIDを列挙
+  const targetCoveredSlotIds = new Set();
+  for (let i = 0; i < newUnits; i++) {
+    const s = TIME_SLOTS[targetIdx + i];
+    if (s && s.period === targetSlot.period) {
+      targetCoveredSlotIds.add(s.id);
+    }
+  }
+
+  const schedule = getDailySchedule(dateStr);
+
+  // 全セラピスト（A, B, C）を走査して重複を検出
+  for (const tCode of ['A', 'B', 'C']) {
+    const slots = schedule[tCode] || {};
+    for (let idx = 0; idx < TIME_SLOTS.length; idx++) {
+      const slot = TIME_SLOTS[idx];
+      const slotData = slots[slot.id];
+      if (!slotData || !slotData.patientId || slotData.units <= 0) continue;
+
+      // 編集モード時、移動元のコマ自身は重複チェック対象から除外
+      if (origTherapist && origSlotId && tCode === origTherapist && slot.id === origSlotId) {
+        continue;
+      }
+
+      if (normalizePatientId(slotData.patientId) === normId) {
+        // このコマが占有している全スロットID
+        const occupiedCount = Math.max(1, slotData.units);
+        for (let u = 0; u < occupiedCount; u++) {
+          const occSlot = TIME_SLOTS[idx + u];
+          if (occSlot && occSlot.period === slot.period && targetCoveredSlotIds.has(occSlot.id)) {
+            const conflictTime = occSlot.time;
+            showToast(
+              `⚠️【重複エラー】${pName} 様は、同時間帯（${conflictTime}）に既に PT ${tCode} でリハビリが予定されています。同一時間帯に重複して配置することはできません。`,
+              'error'
+            );
+            return false;
+          }
+        }
+      }
+    }
+  }
+
+  return true;
 }
 
 /**
@@ -637,7 +704,12 @@ function handleSlotDropped(dateStr, therapistCode, slotId, patientId) {
   const p = getAllPatients().find((item) => normalizePatientId(item.id) === normalizePatientId(patientId));
   const pName = p?.name || patientId.toUpperCase();
 
-  // デフォルト2単位の配置前に月13単位制限を検証
+  // 1. 同一時間帯・他セラピストとの重複（ダブルブッキング）を検証
+  if (!validatePatientTimeConflict(dateStr, therapistCode, slotId, patientId, 2)) {
+    return;
+  }
+
+  // 2. デフォルト2単位の配置前に月13単位制限を検証
   if (!validateMonthly13UnitsLimit(dateStr, therapistCode, slotId, patientId, 2, false)) {
     return;
   }
@@ -748,7 +820,12 @@ function initSlotEditModal() {
       return;
     }
 
-    // 月13単位制限の超過チェック
+    // 1. 同一時間帯・他セラピストとの重複（ダブルブッキング）を検証
+    if (!validatePatientTimeConflict(dateStr, targetTherapist, targetSlotId, patientId, units, origTherapist, origSlotId)) {
+      return;
+    }
+
+    // 2. 月13単位制限の超過チェック
     const isSameSlot = (targetSlotId === origSlotId && targetTherapist === origTherapist);
     if (!validateMonthly13UnitsLimit(dateStr, origTherapist, origSlotId, patientId, units, isSameSlot)) {
       return; // 制限超過の場合は設定を中断
@@ -905,6 +982,9 @@ function renderMonthlyUnitsTable() {
     return;
   }
 
+  // 集計対象月の日付オブジェクト（月の初日）
+  const targetDateObj = new Date(state.targetYear, state.targetMonth - 1, 1);
+
   activeIds.forEach((pId) => {
     const totals = aggregated.patientTotals[pId];
     const p = patientMap[pId] || { id: pId, name: `患者${pId.toUpperCase()}`, category: 'inpatient_1', diseaseType: 'LOCOMOTIVE' };
@@ -915,11 +995,22 @@ function renderMonthlyUnitsTable() {
     const catLabel = isOut ? '外来' : '入院';
     const disLabel = REHA_RULES.LIMIT_DAYS[p.diseaseType]?.shortLabel || '運動器Ⅱ';
 
-    let statusBadge = `<span style="color: var(--success); font-weight: 700;">算定枠内 (${units}/13)</span>`;
-    if (units > 13) {
-      statusBadge = `<span style="color: var(--danger); font-weight: 800; background: var(--danger-light); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill);">⚠️ 13単位超過 (${units}単位)</span>`;
-    } else if (units >= 11) {
-      statusBadge = `<span style="color: var(--warning); font-weight: 700; background: var(--warning-light); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill);">残枠わずか (${units}/13)</span>`;
+    // 13単位制限の対象患者（算定上限超過・維持期介護・個別指定）か判定
+    const isRestricted = isPatientRestrictedTo13Units(p, targetDateObj);
+
+    let statusBadge = '';
+    if (isRestricted) {
+      // 13単位制限の対象患者
+      if (units > 13) {
+        statusBadge = `<span style="color: var(--danger); font-weight: 800; background: var(--danger-light); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill);">⚠️ 13単位超過 (${units}単位)</span>`;
+      } else if (units >= 11) {
+        statusBadge = `<span style="color: var(--warning); font-weight: 700; background: var(--warning-light); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill);">残枠わずか (${units}/13)</span>`;
+      } else {
+        statusBadge = `<span style="color: var(--success); font-weight: 700;">算定枠内 (${units}/13)</span>`;
+      }
+    } else {
+      // 期限内の通常患者（上限なし・自由に算定可能）
+      statusBadge = `<span style="color: var(--primary); font-weight: 700; background: var(--primary-light); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill);">通常算定中 (上限期限内)</span>`;
     }
 
     tr.innerHTML = `
