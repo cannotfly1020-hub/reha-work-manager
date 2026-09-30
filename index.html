@@ -204,8 +204,8 @@
       <section id="view-monthly-units" class="view-panel">
         <div class="panel-header-strip">
           <div>
-            <h2 class="view-title">📊 月間単位モニタリング ＆ 業務日誌管理</h2>
-            <p class="view-subtitle">患者別累計単位・月13単位制限の追跡および日別業務日誌のリアルタイムプレビュー</p>
+            <h2 class="view-title">📊 月間単位モニタリング ＆ 収益・日誌管理</h2>
+            <p class="view-subtitle">患者別累計単位・月13単位制限の追跡、本日の収益・当月累計収益、および日別業務日誌プレビュー</p>
           </div>
           <div class="month-selector-group">
             <select id="monthly-target-year" class="form-select-sm"></select>
@@ -215,6 +215,39 @@
               <option value="7" selected>7月</option><option value="8">8月</option><option value="9">9月</option>
               <option value="10">10月</option><option value="11">11月</option><option value="12">12月</option>
             </select>
+          </div>
+        </div>
+
+        <!-- ★ 新設: リアルタイム収益ダッシュボード（本日 ＆ 当月累計） -->
+        <div class="revenue-summary-strip" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+          <!-- 本日のリハビリ収益 -->
+          <div class="dashboard-card" style="background: linear-gradient(135deg, #ffffff, #f0fdf4); border: 1.5px solid var(--success-border); padding: 1.25rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <span style="font-weight: 800; font-size: 0.9rem; color: var(--success-text);">💴 本日のリハビリ収益（見込）</span>
+              <span id="revenue-today-date-badge" class="date-tag-badge" style="background: var(--success-light); color: var(--success-text); border: 1px solid var(--success-border);">本日</span>
+            </div>
+            <div style="display: flex; align-items: baseline; gap: 0.6rem;">
+              <span id="revenue-today-amount" style="font-size: 1.85rem; font-weight: 800; color: #065f46; letter-spacing: -0.02em;">¥ 0</span>
+              <span id="revenue-today-points" style="font-size: 0.85rem; font-weight: 700; color: var(--text-muted);">(0 点)</span>
+            </div>
+            <div id="revenue-today-breakdown" style="font-size: 0.775rem; color: var(--text-secondary); margin-top: 0.45rem; padding-top: 0.45rem; border-top: 1px dashed var(--success-border);">
+              リハ基本料: ¥0 | 総合計画書: ¥0 | 早期加算: ¥0
+            </div>
+          </div>
+
+          <!-- 今月の累計リハビリ収益 -->
+          <div class="dashboard-card" style="background: linear-gradient(135deg, #ffffff, #eff6ff); border: 1.5px solid var(--primary-border); padding: 1.25rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <span style="font-weight: 800; font-size: 0.9rem; color: var(--primary);">📈 今月の累計リハビリ収益</span>
+              <span id="revenue-month-badge" class="date-tag-badge">当月累計</span>
+            </div>
+            <div style="display: flex; align-items: baseline; gap: 0.6rem;">
+              <span id="revenue-month-amount" style="font-size: 1.85rem; font-weight: 800; color: var(--primary-dark); letter-spacing: -0.02em;">¥ 0</span>
+              <span id="revenue-month-points" style="font-size: 0.85rem; font-weight: 700; color: var(--text-muted);">(0 点)</span>
+            </div>
+            <div id="revenue-month-breakdown" style="font-size: 0.775rem; color: var(--text-secondary); margin-top: 0.45rem; padding-top: 0.45rem; border-top: 1px dashed var(--primary-border);">
+              総実施単位: 0単位 | 総合計画書: 0件 | 早期加算: 0件
+            </div>
           </div>
         </div>
 
@@ -386,6 +419,18 @@
             <input type="number" id="slot-modal-units" min="1" max="9" value="2" class="unit-custom-input">
           </div>
         </div>
+
+        <!-- ★ 新設: 総合実施計画書 算定チェック項目 -->
+        <div class="form-group" style="background: #f8fafc; padding: 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--border-light);">
+          <label style="display: flex; align-items: center; gap: 0.55rem; cursor: pointer; font-weight: 800; color: var(--text-main); margin-bottom: 0;">
+            <input type="checkbox" id="slot-modal-billing-plan" style="width: 18px; height: 18px; cursor: pointer; accent-color: var(--primary);">
+            <span>📝 本日、総合実施計画書を算定する</span>
+          </label>
+          <div id="slot-modal-plan-hint" style="font-size: 0.775rem; color: var(--text-secondary); margin-top: 0.45rem; padding-left: 1.65rem; line-height: 1.5; display: none;">
+            <!-- JSで自動判定した結果（計画書料1/2・初回/2回目・点数・金額・減算警告）を表示 -->
+          </div>
+        </div>
+
         <div class="form-group">
           <label for="slot-modal-note">備考メモ (任意)</label>
           <input type="text" id="slot-modal-note" placeholder="例: 歩行訓練、評価" class="form-input">
@@ -439,6 +484,16 @@
             </select>
           </div>
         </div>
+
+        <!-- ★ 新設: 要介護認定（介護保険）の有無 -->
+        <div class="form-group">
+          <label for="patient-modal-care-insurance">介護保険・要介護認定（計画書2および10%減算の判定基準）</label>
+          <select id="patient-modal-care-insurance" class="form-select">
+            <option value="NONE">要介護認定なし（医療保険のみ：常に計画書料1対象）</option>
+            <option value="CERTIFIED">要介護認定あり（要支援・要介護：3分の1経過で計画書料2へ移行）</option>
+          </select>
+        </div>
+
         <div class="form-row">
           <div class="form-group flex-1">
             <label for="patient-modal-admission">当院入院日</label>
@@ -451,7 +506,7 @@
         </div>
         <div class="form-row">
           <div class="form-group flex-1">
-            <label for="patient-modal-onset">発症日 / 手術日</label>
+            <label for="patient-modal-onset">発症日 / 手術日 / 起算日</label>
             <input type="date" id="patient-modal-onset" class="form-input">
           </div>
           <div class="form-group flex-1">
