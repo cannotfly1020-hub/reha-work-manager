@@ -7,14 +7,16 @@
  *   ・カード背景＆バッジ：1単位（ミントグリーン）／2単位（スカイブルー）／3単位（ラベンダーパープル）
  * - 複数コマブロック結合（1単位20分・2単位40分・3単位60分）のグリッド完全吸着（連続配置可能）
  * - 外来50名・入院19名（計69名）の患者パレット・あいまい検索・五十音絞り込み
- * - セラピスト別リアルタイム日計カウンターおよび月13単位モニタリング
+ * - セラピスト別リアルタイム日計・週計カウンターおよび月13単位モニタリング
  * - アプリ内蓄積データからの受付提出用Excel・日別業務日誌Excelのワンクリック出力
  * - 同時間帯の重複配置（ダブルブッキング）防止バリデーション
  * - 疾患別算定日数上限（運動器150日・脳血管180日・廃用120日）超過連動の13単位制限
+ * - 患者の1日算定上限（運動器6単位、脳血管・廃用14日以内9単位/以降6単位）ブロック機能
+ * - セラピストの人員基準上限（1日18単位/特例24単位、週108単位）監視機能
  */
 
 import { REHA_RULES } from './config/rules.js';
-import { calculatePatientDeadlines, formatDate } from './core/deadlineCalc.js';
+import { calculatePatientDeadlines, formatDate, getDiffDays, normalizeDate } from './core/deadlineCalc.js';
 import { normalizePatientId, normalizeString } from './core/dataNormalizer.js';
 import { exportUketsukeSubmissionWorkbook } from './excel/uketsukeWriter.js';
 import { exportDiaryWorkbook } from './excel/diaryWriter.js';
@@ -22,6 +24,7 @@ import { getAllPatients, upsertPatient } from './store/patientStore.js';
 import { getAllLoans, registerLoan, markAsReturned, deleteLoan } from './store/loanStore.js';
 import {
   TIME_SLOTS,
+  getAllSchedules,
   getDailySchedule,
   setScheduleSlot,
   clearScheduleSlot,
@@ -59,13 +62,67 @@ function isPatientRestrictedTo13Units(patient, dateObj) {
 }
 
 /**
+ * 患者の1日あたりの算定上限単位数を取得
+ * - 運動器・消炎鎮痛: 1日 6単位まで
+ * - 脳血管・廃用症候群: 発症/入院起算日から14日以内は 9単位まで、15日目以降は 6単位まで
+ * @param {Object} patient 
+ * @param {Date} dateObj 
+ * @returns {number} 1日上限単位数 (6 または 9)
+ */
+function getPatientDailyMaxUnits(patient, dateObj) {
+  if (!patient) return 6;
+  const dType = patient.diseaseType || 'LOCOMOTIVE';
+
+  if (dType === 'CEREBROVASCULAR' || dType === 'DISUSE') {
+    const onsetOrAdmin = normalizeDate(patient.onsetDate) || normalizeDate(patient.admissionDate);
+    if (onsetOrAdmin) {
+      const elapsedDays = getDiffDays(onsetOrAdmin, normalizeDate(dateObj)) + 1;
+      if (elapsedDays >= 1 && elapsedDays <= 14) {
+        return 9; // 14日以内特例: 9単位
+      }
+    }
+  }
+
+  return 6; // 原則: 6単位
+}
+
+/**
+ * 特定日において、該当患者が全セラピストで合計何単位取得しているか算出
+ * @param {string} dateStr 
+ * @param {string} patientId 
+ * @param {string|null} [excludeTherapist=null] 
+ * @param {string|null} [excludeSlotId=null] 
+ * @returns {number}
+ */
+function getPatientUnitsOnDate(dateStr, patientId, excludeTherapist = null, excludeSlotId = null) {
+  const normId = normalizePatientId(patientId);
+  const schedule = getDailySchedule(dateStr);
+  let total = 0;
+
+  for (const tCode of ['A', 'B', 'C']) {
+    const slots = schedule[tCode] || {};
+    for (const [sId, slot] of Object.entries(slots)) {
+      if (!slot || !slot.patientId || slot.units <= 0) continue;
+      if (excludeTherapist && excludeSlotId && tCode === excludeTherapist && sId === excludeSlotId) {
+        continue;
+      }
+      if (normalizePatientId(slot.patientId) === normId) {
+        total += slot.units;
+      }
+    }
+  }
+
+  return total;
+}
+
+/**
  * 同一時間帯に他のセラピストで既に同じ患者が配置されていないか重複検証（ダブルブッキング防止）
  * @param {string} dateStr - 'YYYY-MM-DD'
  * @param {string} targetTherapist - 配置先PT 'A'|'B'|'C'
  * @param {string} targetSlotId - 配置先スロットID
  * @param {string} patientId - 患者記号
  * @param {number} newUnits - 配置する単位数 (1〜4)
- * @param {string|null} [origTherapist=null] - 編集元のPT（既存コマ移動時の除外用）
+ * @param {string|null} [origTherapist=null] - 編集元のPT
  * @param {string|null} [origSlotId=null] - 編集元のスロットID
  * @returns {boolean} 重複がなければ true, 重複があれば false
  */
@@ -78,7 +135,6 @@ function validatePatientTimeConflict(dateStr, targetTherapist, targetSlotId, pat
   if (targetIdx === -1) return true;
 
   const targetSlot = TIME_SLOTS[targetIdx];
-  // 配置しようとしている全スロットIDを列挙
   const targetCoveredSlotIds = new Set();
   for (let i = 0; i < newUnits; i++) {
     const s = TIME_SLOTS[targetIdx + i];
@@ -89,7 +145,6 @@ function validatePatientTimeConflict(dateStr, targetTherapist, targetSlotId, pat
 
   const schedule = getDailySchedule(dateStr);
 
-  // 全セラピスト（A, B, C）を走査して重複を検出
   for (const tCode of ['A', 'B', 'C']) {
     const slots = schedule[tCode] || {};
     for (let idx = 0; idx < TIME_SLOTS.length; idx++) {
@@ -97,13 +152,11 @@ function validatePatientTimeConflict(dateStr, targetTherapist, targetSlotId, pat
       const slotData = slots[slot.id];
       if (!slotData || !slotData.patientId || slotData.units <= 0) continue;
 
-      // 編集モード時、移動元のコマ自身は重複チェック対象から除外
       if (origTherapist && origSlotId && tCode === origTherapist && slot.id === origSlotId) {
         continue;
       }
 
       if (normalizePatientId(slotData.patientId) === normId) {
-        // このコマが占有している全スロットID
         const occupiedCount = Math.max(1, slotData.units);
         for (let u = 0; u < occupiedCount; u++) {
           const occSlot = TIME_SLOTS[idx + u];
@@ -124,14 +177,45 @@ function validatePatientTimeConflict(dateStr, targetTherapist, targetSlotId, pat
 }
 
 /**
+ * 患者の1日算定上限（運動器6単位、脳血管14日以内9単位/以降6単位）の検証
+ * @param {string} dateStr 
+ * @param {string} patientId 
+ * @param {number} newUnits 
+ * @param {string|null} [origTherapist=null] 
+ * @param {string|null} [origSlotId=null] 
+ * @returns {boolean}
+ */
+function validatePatientDailyUnitsLimit(dateStr, patientId, newUnits, origTherapist = null, origSlotId = null) {
+  const normId = normalizePatientId(patientId);
+  const patient = getAllPatients().find((p) => normalizePatientId(p.id) === normId);
+  const pName = patient?.name || patientId.toUpperCase();
+  const dateObj = new Date(dateStr);
+
+  const maxAllowed = getPatientDailyMaxUnits(patient, dateObj);
+  const currentDaily = getPatientUnitsOnDate(dateStr, patientId, origTherapist, origSlotId);
+  const projectedTotal = currentDaily + newUnits;
+
+  if (projectedTotal > maxAllowed) {
+    const diseaseName = patient?.diseaseType === 'CEREBROVASCULAR' ? '脳血管疾患' : patient?.diseaseType === 'DISUSE' ? '廃用症候群' : '運動器等';
+    showToast(
+      `⚠️【1日上限エラー】${pName} 様（${diseaseName}）の1日算定上限は ${maxAllowed}単位 です。本日現在 ${currentDaily}単位 のため、${newUnits}単位を追加すると上限を超過 (${projectedTotal}単位) します。`,
+      'error'
+    );
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * コマ配置時に月13単位制限を超過しないかバリデーション検証
- * @param {string} dateStr - 'YYYY-MM-DD'
- * @param {string} therapistCode - 'A'|'B'|'C'
- * @param {string} slotId - 'am_1' 等
- * @param {string} patientId - 患者記号
- * @param {number} newUnits - 追加・設定しようとしている単位数
- * @param {boolean} isEditMode - 既存コマの編集か
- * @returns {boolean} 配置可能なら true, 制限超過なら false
+ * @param {string} dateStr 
+ * @param {string} therapistCode 
+ * @param {string} slotId 
+ * @param {string} patientId 
+ * @param {number} newUnits 
+ * @param {boolean} isEditMode 
+ * @returns {boolean}
  */
 function validateMonthly13UnitsLimit(dateStr, therapistCode, slotId, patientId, newUnits, isEditMode = false) {
   const normId = normalizePatientId(patientId);
@@ -141,16 +225,14 @@ function validateMonthly13UnitsLimit(dateStr, therapistCode, slotId, patientId, 
   const dateObj = new Date(dateStr);
   const isRestricted = isPatientRestrictedTo13Units(patient, dateObj);
   if (!isRestricted) {
-    return true; // 13単位制限の対象外患者（算定期間内の通常患者など）は制限なし
+    return true;
   }
 
-  // 対象年月の集計を取得
   const year = dateObj.getFullYear();
   const month = dateObj.getMonth() + 1;
   const aggregated = aggregateFromAppSchedule(year, month);
   let currentMonthUnits = aggregated.patientTotals[normId]?.totalUnits || 0;
 
-  // 編集中のコマにすでに割り当てられていた既存単位があれば、二重加算防止のため差し引く
   if (isEditMode) {
     const schedule = getDailySchedule(dateStr);
     const existingSlot = schedule[therapistCode]?.[slotId];
@@ -167,6 +249,90 @@ function validateMonthly13UnitsLimit(dateStr, therapistCode, slotId, patientId, 
       'error'
     );
     return false;
+  }
+
+  return true;
+}
+
+/**
+ * 指定日が含まれる週（月曜〜日曜）におけるセラピストの実施単位数を集計
+ * @param {string} dateStr 
+ * @param {string} therapistCode 
+ * @returns {number} 週累計単位数
+ */
+function getTherapistWeeklyUnits(dateStr, therapistCode) {
+  const d = new Date(dateStr);
+  const day = d.getDay();
+  // 月曜日を起点 (0:日曜〜6:土曜)
+  const diffToMonday = (day === 0 ? -6 : 1) - day;
+  const monday = new Date(d);
+  monday.setDate(d.getDate() + diffToMonday);
+
+  const allSchedules = getAllSchedules();
+  let weeklyTotal = 0;
+
+  for (let i = 0; i < 7; i++) {
+    const cur = new Date(monday);
+    cur.setDate(monday.getDate() + i);
+    const curStr = formatDate(cur);
+    const daySchedule = allSchedules[curStr]?.[therapistCode] || {};
+
+    for (const slot of Object.values(daySchedule)) {
+      if (slot && slot.units > 0 && slot.patientId) {
+        weeklyTotal += slot.units;
+      }
+    }
+  }
+
+  return weeklyTotal;
+}
+
+/**
+ * セラピストの人員基準上限（1日18単位/特例24単位、週108単位）の検証
+ * @param {string} dateStr 
+ * @param {string} therapistCode 
+ * @param {number} newUnits 
+ * @param {string|null} [origTherapist=null] 
+ * @param {string|null} [origSlotId=null] 
+ * @returns {boolean} 配置可能なら true
+ */
+function validateTherapistWorkloadLimit(dateStr, therapistCode, newUnits, origTherapist = null, origSlotId = null) {
+  const dailyStats = getDailyStats(dateStr);
+  let currentDaily = dailyStats.therapistStats[therapistCode]?.totalUnits || 0;
+
+  if (origTherapist === therapistCode && origSlotId) {
+    const schedule = getDailySchedule(dateStr);
+    const origSlot = schedule[origTherapist]?.[origSlotId];
+    if (origSlot) currentDaily -= (origSlot.units || 0);
+  }
+
+  const projectedDaily = currentDaily + newUnits;
+
+  // 1. 1日24単位の絶対特例上限（完全ブロック）
+  if (projectedDaily > 24) {
+    showToast(
+      `⚠️【人員基準エラー】PT ${therapistCode} の本日の実施単位が24単位を超過 (${projectedDaily}単位) します。法令上の1日最大特例上限（24単位）を超えるため配置できません。`,
+      'error'
+    );
+    return false;
+  }
+
+  // 2. 1日18単位の標準上限（警告トースト）
+  if (projectedDaily > 18) {
+    showToast(
+      `ℹ️【注意】PT ${therapistCode} は本日標準上限（18単位）を超えて ${projectedDaily}単位 となります（特例枠内）。`,
+      'warning'
+    );
+  }
+
+  // 3. 週108単位の標準上限（警告トースト）
+  const currentWeekly = getTherapistWeeklyUnits(dateStr, therapistCode);
+  const projectedWeekly = currentWeekly + newUnits;
+  if (projectedWeekly > 108) {
+    showToast(
+      `⚠️【人員基準警告】PT ${therapistCode} は今週の実施単位が週108単位を超過 (${projectedWeekly}/108単位) します。過重業務および人員基準にご注意ください。`,
+      'warning'
+    );
   }
 
   return true;
@@ -569,7 +735,6 @@ function renderTimetable() {
     patientMap[normalizePatientId(p.id)] = p;
   });
 
-  // 占有スロットトラッカー（前のコマの単位数に応じて後続スロットを占有）
   const occupiedSlots = {
     A: new Map(),
     B: new Map(),
@@ -600,13 +765,11 @@ function renderTimetable() {
     row.className = 'slot-row';
     row.dataset.slotId = slot.id;
 
-    // 時間ラベル列
     const timeCell = document.createElement('div');
     timeCell.className = 'slot-time-cell';
     timeCell.textContent = slot.time;
     row.appendChild(timeCell);
 
-    // セラピスト A, B, C 列
     ['A', 'B', 'C'].forEach((tCode) => {
       const cell = document.createElement('div');
       cell.className = 'slot-drop-cell';
@@ -617,14 +780,12 @@ function renderTimetable() {
       const isOccupiedByPrior = occupiedSlots[tCode].has(slot.id);
 
       if (slotData && slotData.patientId && slotData.units > 0) {
-        // [1] このスロットが結合ブロックの開始コマ
         const units = Math.max(1, slotData.units);
         const pInfo = patientMap[normalizePatientId(slotData.patientId)];
         const pName = pInfo?.name || `患者${slotData.patientId.toUpperCase()}`;
         const isOutpatient = pInfo?.category && pInfo.category.startsWith('outpatient');
         const durationText = getSlotDurationText(slot.label, units);
 
-        // パターンCのクラス判定
         const typeClass = isOutpatient ? 'patient-type-outpatient' : 'patient-type-inpatient';
         const unitThemeClass = units >= 4 ? 'unit-theme-4' : `unit-theme-${units}`;
         const spanClass = `span-units-${Math.min(units, 4)}`;
@@ -654,7 +815,6 @@ function renderTimetable() {
 
         cell.appendChild(card);
       } else if (isOccupiedByPrior) {
-        // [2] 前のコマ（2単位/3単位）の結合により占有されているコマ
         const parentInfo = occupiedSlots[tCode].get(slot.id);
         cell.classList.add('slot-covered-placeholder');
         cell.title = `前のコマ（${parentInfo.rootSlotId}）により ${parentInfo.rootSlotData.patientId.toUpperCase()} さんが実施中`;
@@ -662,13 +822,11 @@ function renderTimetable() {
           openSlotEditModal(state.selectedDate, tCode, parentInfo.rootSlotId);
         });
       } else {
-        // [3] 空きコマ（ドロップ ＆ クリックで配置可能）
         const hint = document.createElement('span');
         hint.className = 'slot-empty-hint';
         hint.textContent = '＋ 追加';
         cell.appendChild(hint);
 
-        // ドラッグ＆ドロップイベント
         cell.addEventListener('dragover', (e) => {
           e.preventDefault();
           e.dataTransfer.dropEffect = 'copy';
@@ -703,21 +861,31 @@ function renderTimetable() {
 function handleSlotDropped(dateStr, therapistCode, slotId, patientId) {
   const p = getAllPatients().find((item) => normalizePatientId(item.id) === normalizePatientId(patientId));
   const pName = p?.name || patientId.toUpperCase();
+  const defaultUnits = 2; // デフォルト2単位 (40分)
 
   // 1. 同一時間帯・他セラピストとの重複（ダブルブッキング）を検証
-  if (!validatePatientTimeConflict(dateStr, therapistCode, slotId, patientId, 2)) {
+  if (!validatePatientTimeConflict(dateStr, therapistCode, slotId, patientId, defaultUnits)) {
     return;
   }
 
-  // 2. デフォルト2単位の配置前に月13単位制限を検証
-  if (!validateMonthly13UnitsLimit(dateStr, therapistCode, slotId, patientId, 2, false)) {
+  // 2. 患者の1日算定上限（6単位または9単位）を検証
+  if (!validatePatientDailyUnitsLimit(dateStr, patientId, defaultUnits)) {
     return;
   }
 
-  // デフォルト2単位 (40分) で配置
+  // 3. 患者の月13単位制限を検証
+  if (!validateMonthly13UnitsLimit(dateStr, therapistCode, slotId, patientId, defaultUnits, false)) {
+    return;
+  }
+
+  // 4. セラピストの人員基準上限（日18単位/特例24単位、週108単位）を検証
+  if (!validateTherapistWorkloadLimit(dateStr, therapistCode, defaultUnits)) {
+    return;
+  }
+
   setScheduleSlot(dateStr, therapistCode, slotId, {
     patientId: normalizePatientId(patientId),
-    units: 2,
+    units: defaultUnits,
     note: '',
   });
 
@@ -725,7 +893,7 @@ function handleSlotDropped(dateStr, therapistCode, slotId, patientId) {
   renderDailyKPIs();
   renderDailyDiaryPreview();
   renderMonthlyUnitsTable();
-  showToast(`${pName} を PT ${therapistCode} に配置しました (2単位 / 40分)`, 'success');
+  showToast(`${pName} を PT ${therapistCode} に配置しました (${defaultUnits}単位 / ${defaultUnits * 20}分)`, 'success');
 }
 
 function renderDailyKPIs() {
@@ -740,13 +908,18 @@ function renderDailyKPIs() {
   const kpiTotal = document.getElementById('kpi-clinic-total');
   const patTotal = document.getElementById('kpi-clinic-patients');
 
+  const weekA = getTherapistWeeklyUnits(state.selectedDate, 'A');
+  const weekB = getTherapistWeeklyUnits(state.selectedDate, 'B');
+  const weekC = getTherapistWeeklyUnits(state.selectedDate, 'C');
+
   if (kpiA) kpiA.textContent = String(stats.therapistStats.A.totalUnits);
   if (kpiB) kpiB.textContent = String(stats.therapistStats.B.totalUnits);
   if (kpiC) kpiC.textContent = String(stats.therapistStats.C.totalUnits);
 
-  if (patA) patA.textContent = `${stats.therapistStats.A.patientCount}名`;
-  if (patB) patB.textContent = `${stats.therapistStats.B.patientCount}名`;
-  if (patC) patC.textContent = `${stats.therapistStats.C.patientCount}名`;
+  // 本日実人数に加えて、週累計（/108単位）を表示
+  if (patA) patA.innerHTML = `${stats.therapistStats.A.patientCount}名 <span style="font-size: 0.7rem; color: ${weekA > 108 ? 'var(--danger)' : 'var(--text-muted)'}; font-weight: 700;">(週${weekA}/108)</span>`;
+  if (patB) patB.innerHTML = `${stats.therapistStats.B.patientCount}名 <span style="font-size: 0.7rem; color: ${weekB > 108 ? 'var(--danger)' : 'var(--text-muted)'}; font-weight: 700;">(週${weekB}/108)</span>`;
+  if (patC) patC.innerHTML = `${stats.therapistStats.C.patientCount}名 <span style="font-size: 0.7rem; color: ${weekC > 108 ? 'var(--danger)' : 'var(--text-muted)'}; font-weight: 700;">(週${weekC}/108)</span>`;
 
   if (kpiTotal) kpiTotal.textContent = String(stats.grandTotalUnits);
   if (patTotal) patTotal.textContent = `実人数 ${stats.grandPatientCount}名`;
@@ -825,18 +998,27 @@ function initSlotEditModal() {
       return;
     }
 
-    // 2. 月13単位制限の超過チェック
-    const isSameSlot = (targetSlotId === origSlotId && targetTherapist === origTherapist);
-    if (!validateMonthly13UnitsLimit(dateStr, origTherapist, origSlotId, patientId, units, isSameSlot)) {
-      return; // 制限超過の場合は設定を中断
+    // 2. 患者の1日算定上限（6単位または9単位）を検証
+    if (!validatePatientDailyUnitsLimit(dateStr, patientId, units, origTherapist, origSlotId)) {
+      return;
     }
 
-    // 開始時間または担当PTが変更されている場合は、元のコマを空にして新位置へ移動
+    // 3. 月13単位制限の超過チェック
+    const isSameSlot = (targetSlotId === origSlotId && targetTherapist === origTherapist);
+    if (!validateMonthly13UnitsLimit(dateStr, origTherapist, origSlotId, patientId, units, isSameSlot)) {
+      return;
+    }
+
+    // 4. セラピストの人員基準上限（日18単位/特例24単位、週108単位）を検証
+    if (!validateTherapistWorkloadLimit(dateStr, targetTherapist, units, origTherapist, origSlotId)) {
+      return;
+    }
+
+    // 移動元のコマを空にして新位置へ移動
     if (targetSlotId !== origSlotId || targetTherapist !== origTherapist) {
       clearScheduleSlot(dateStr, origTherapist, origSlotId);
     }
 
-    // 新しい時間枠・担当者枠へ設定
     setScheduleSlot(dateStr, targetTherapist, targetSlotId, { patientId, units, note });
 
     closeModal();
@@ -884,7 +1066,6 @@ function openSlotEditModal(dateStr, therapistCode, slotId) {
 
   state.activeSlotModal = { dateStr, therapistCode, slotId };
 
-  // 開始時間ドロップダウンの選択肢を生成
   const timeSelect = document.getElementById('slot-modal-time');
   if (timeSelect) {
     timeSelect.innerHTML = '';
@@ -897,7 +1078,6 @@ function openSlotEditModal(dateStr, therapistCode, slotId) {
     });
   }
 
-  // 担当セラピストの選択
   const therapistSelect = document.getElementById('slot-modal-therapist');
   if (therapistSelect) {
     therapistSelect.value = therapistCode;
@@ -982,7 +1162,6 @@ function renderMonthlyUnitsTable() {
     return;
   }
 
-  // 集計対象月の日付オブジェクト（月の初日）
   const targetDateObj = new Date(state.targetYear, state.targetMonth - 1, 1);
 
   activeIds.forEach((pId) => {
@@ -995,12 +1174,10 @@ function renderMonthlyUnitsTable() {
     const catLabel = isOut ? '外来' : '入院';
     const disLabel = REHA_RULES.LIMIT_DAYS[p.diseaseType]?.shortLabel || '運動器Ⅱ';
 
-    // 13単位制限の対象患者（算定上限超過・維持期介護・個別指定）か判定
     const isRestricted = isPatientRestrictedTo13Units(p, targetDateObj);
 
     let statusBadge = '';
     if (isRestricted) {
-      // 13単位制限の対象患者
       if (units > 13) {
         statusBadge = `<span style="color: var(--danger); font-weight: 800; background: var(--danger-light); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill);">⚠️ 13単位超過 (${units}単位)</span>`;
       } else if (units >= 11) {
@@ -1009,7 +1186,6 @@ function renderMonthlyUnitsTable() {
         statusBadge = `<span style="color: var(--success); font-weight: 700;">算定枠内 (${units}/13)</span>`;
       }
     } else {
-      // 期限内の通常患者（上限なし・自由に算定可能）
       statusBadge = `<span style="color: var(--primary); font-weight: 700; background: var(--primary-light); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill);">通常算定中 (上限期限内)</span>`;
     }
 
