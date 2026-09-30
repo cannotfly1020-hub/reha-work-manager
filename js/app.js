@@ -2,12 +2,12 @@
  * @file app.js
  * @description リハビリ業務管理Webアプリ（reha-work-manager）メインコントローラー
  * 
- * - Googleカレンダーライクな洗練された当日時間割・単位管理
- * - 入院19名・外来50名（計69名）の患者パレット・あいまい検索・五十音絞り込み
- * - ドラッグ＆ドロップおよびクリックによるタイムスロット配置
+ * - Googleカレンダーライクな洗練された時間割ブロック管理（1単位20分・2単位40分・3単位60分の縦結合）
+ * - 外来50名・入院19名（計69名）の患者パレット・あいまい検索・五十音絞り込み
+ * - 直感的なドラッグ＆ドロップおよびクリックによるタイムスロット配置
  * - セラピスト別リアルタイム日計カウンターおよび月13単位モニタリング
  * - アプリ内蓄積データからの受付提出用Excel・日別業務日誌Excelのワンクリック出力
- * - 完全オフライン・外部通信ゼロ設計
+ * - 完全オフライン・ローカルストレージ安全保持
  */
 
 import { REHA_RULES } from './config/rules.js';
@@ -107,7 +107,7 @@ const SEED_TEST_PATIENTS = [
 
 const state = {
   currentTab: 'view-daily-schedule',
-  selectedDate: '2026-07-01', // デフォルト対象日
+  selectedDate: '2026-07-01',
   targetYear: 2026,
   targetMonth: 7,
   paletteFilter: 'ALL', // 'ALL' | 'INPATIENT' | 'OUTPATIENT'
@@ -122,26 +122,20 @@ document.addEventListener('DOMContentLoaded', () => {
   initNavigationTabs();
   initDateControls();
   initPaletteFiltersAndSearch();
-  initTimetableGrid();
   initSlotEditModal();
   initPatientMasterModal();
   initLoanModal();
   initMonthlyViews();
   initExportActionButtons();
 
-  // 初期描画の実行
   renderAll();
 });
 
-/**
- * 初回起動時、LocalStorageに患者データがなければテスト患者69名を自動登録
- */
 function ensureInitialTestPatients() {
   const existing = getAllPatients();
   if (!existing || existing.length === 0) {
     SEED_TEST_PATIENTS.forEach((p) => upsertPatient(p));
   } else {
-    // 既存データがあっても外来患者が不足している場合は補完
     const ids = new Set(existing.map((e) => e.id));
     SEED_TEST_PATIENTS.forEach((p) => {
       if (!ids.has(p.id)) {
@@ -151,9 +145,6 @@ function ensureInitialTestPatients() {
   }
 }
 
-/**
- * 画面全体の再描画
- */
 function renderAll() {
   renderPalette();
   renderTimetable();
@@ -250,7 +241,6 @@ function updateYearMonthFromSelectedDate() {
 }
 
 function initPaletteFiltersAndSearch() {
-  // セグメントフィルター（全員/入院/外来）
   const segButtons = document.querySelectorAll('.segment-btn');
   segButtons.forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -261,7 +251,6 @@ function initPaletteFiltersAndSearch() {
     });
   });
 
-  // あいまい検索ボックス
   const searchInput = document.getElementById('patient-palette-search');
   const clearBtn = document.getElementById('btn-clear-palette-search');
 
@@ -278,7 +267,6 @@ function initPaletteFiltersAndSearch() {
     }
   });
 
-  // 五十音クイックバー
   const kanaChips = document.querySelectorAll('.kana-chip');
   kanaChips.forEach((chip) => {
     chip.addEventListener('click', () => {
@@ -289,16 +277,12 @@ function initPaletteFiltersAndSearch() {
     });
   });
 
-  // パレット下部の新規患者クイック追加
   const btnQuickAdd = document.getElementById('btn-quick-add-patient');
   btnQuickAdd?.addEventListener('click', () => {
     openPatientMasterModal();
   });
 }
 
-/**
- * 五十音グループ判定（ア行、カ行、サ行など）
- */
 function matchesKanaGroup(kana, group) {
   if (!kana || group === 'ALL') return true;
   const first = kana.trim().charAt(0);
@@ -317,9 +301,6 @@ function matchesKanaGroup(kana, group) {
   return groups[group] ? groups[group].includes(first) : true;
 }
 
-/**
- * 左側患者パレットのレンダリング
- */
 function renderPalette() {
   const container = document.getElementById('patient-palette-list');
   if (!container) return;
@@ -334,7 +315,6 @@ function renderPalette() {
     else inpCount++;
   });
 
-  // バッジ更新
   const badgeAll = document.getElementById('badge-count-all');
   const badgeIn = document.getElementById('badge-count-inpatient');
   const badgeOut = document.getElementById('badge-count-outpatient');
@@ -342,19 +322,16 @@ function renderPalette() {
   if (badgeIn) badgeIn.textContent = String(inpCount);
   if (badgeOut) badgeOut.textContent = String(outCount);
 
-  // フィルタリング
   const filtered = all.filter((p) => {
     const isOut = p.category && p.category.startsWith('outpatient');
     if (state.paletteFilter === 'INPATIENT' && isOut) return false;
     if (state.paletteFilter === 'OUTPATIENT' && !isOut) return false;
 
-    // 五十音
     if (state.paletteKanaFilter !== 'ALL') {
       const match = matchesKanaGroup(p.kana || p.name, state.paletteKanaFilter);
       if (!match) return false;
     }
 
-    // あいまい検索
     if (state.paletteSearchTerm) {
       const term = state.paletteSearchTerm;
       const targetStr = `${p.id} ${p.name || ''} ${p.kana || ''}`.toLowerCase();
@@ -389,7 +366,6 @@ function renderPalette() {
       <div class="palette-patient-name" title="${p.name || p.id}">${p.name || `患者${p.id.toUpperCase()}`}</div>
     `;
 
-    // ドラッグイベント
     card.addEventListener('dragstart', (e) => {
       state.draggedPatientId = p.id;
       e.dataTransfer.setData('text/plain', p.id);
@@ -402,7 +378,6 @@ function renderPalette() {
       state.draggedPatientId = null;
     });
 
-    // クリックによる直接選択・配置（クイック操作）
     card.addEventListener('click', () => {
       showToast(`${p.name || p.id.toUpperCase()} を選択しました。配置したいコマをクリックしてください。`, 'info');
     });
@@ -411,13 +386,79 @@ function renderPalette() {
   });
 }
 
-function initTimetableGrid() {
+/**
+ * スロット開始時刻と単位数から終了時刻および所要時間（分）を計算
+ * 例: "9:00", 3単位 -> "9:00〜10:00 (60分)"
+ */
+function getSlotDurationText(startTimeStr, units) {
+  const parts = startTimeStr.split(':');
+  if (parts.length < 2) return `${startTimeStr} (${units * 20}分)`;
+
+  const startH = parseInt(parts[0], 10);
+  const startM = parseInt(parts[1], 10);
+  const totalDurationMinutes = units * 20;
+
+  const totalEndMinutes = startH * 60 + startM + totalDurationMinutes;
+  const endH = Math.floor(totalEndMinutes / 60);
+  const endM = totalEndMinutes % 60;
+  const endMStr = String(endM).padStart(2, '0');
+
+  return `${startH}:${String(startM).padStart(2, '0')}～${endH}:${endMStr} (${totalDurationMinutes}分)`;
+}
+
+/**
+ * タイムテーブル全体のデータ描画
+ * 1単位(20分)・2単位(40分)・3単位(60分)の複数コマを縦に結合したブロックとして描画
+ */
+function renderTimetable() {
+  const dayLabel = document.getElementById('schedule-day-label');
+  if (dayLabel) {
+    const cur = new Date(state.selectedDate);
+    const days = ['日', '月', '火', '水', '木', '金', '土'];
+    dayLabel.textContent = `${cur.getFullYear()}年${cur.getMonth() + 1}月${cur.getDate()}日 (${days[cur.getDay()]})`;
+  }
+
   const container = document.getElementById('timetable-grid');
   if (!container) return;
 
   container.innerHTML = '';
 
-  TIME_SLOTS.forEach((slot) => {
+  const schedule = getDailySchedule(state.selectedDate);
+  const patientMap = {};
+  getAllPatients().forEach((p) => {
+    patientMap[normalizePatientId(p.id)] = p;
+  });
+
+  // セラピストごとの占有トラッカー（結合ブロックにより覆われた後続スロットを追跡）
+  const occupiedSlots = {
+    A: new Map(), // slotId -> { rootSlotId, rootSlotData }
+    B: new Map(),
+    C: new Map(),
+  };
+
+  ['A', 'B', 'C'].forEach((tCode) => {
+    const slots = schedule[tCode] || {};
+    TIME_SLOTS.forEach((slot, idx) => {
+      const slotData = slots[slot.id];
+      if (slotData && slotData.patientId && slotData.units > 0) {
+        const units = Math.max(1, Math.min(6, slotData.units));
+        // 後続のスロットを予約・占有
+        for (let i = 1; i < units; i++) {
+          const nextSlot = TIME_SLOTS[idx + i];
+          // 午前と午後の境界をまたがない安全ガード
+          if (nextSlot && nextSlot.period === slot.period) {
+            occupiedSlots[tCode].set(nextSlot.id, {
+              rootSlotId: slot.id,
+              rootSlotData: slotData,
+            });
+          }
+        }
+      }
+    });
+  });
+
+  // タイムテーブル各行を描画
+  TIME_SLOTS.forEach((slot, slotIndex) => {
     const row = document.createElement('div');
     row.className = 'slot-row';
     row.dataset.slotId = slot.id;
@@ -428,37 +469,91 @@ function initTimetableGrid() {
     timeCell.textContent = slot.time;
     row.appendChild(timeCell);
 
-    // セラピストA, B, C列
+    // セラピスト A, B, C 列
     ['A', 'B', 'C'].forEach((tCode) => {
       const cell = document.createElement('div');
       cell.className = 'slot-drop-cell';
       cell.dataset.therapist = tCode;
       cell.dataset.slotId = slot.id;
 
-      // ドラッグオーバー＆ドロップリスナー
-      cell.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'copy';
-        cell.classList.add('drag-hover');
-      });
+      const slotData = schedule[tCode]?.[slot.id];
+      const isOccupiedByPrior = occupiedSlots[tCode].has(slot.id);
 
-      cell.addEventListener('dragleave', () => {
-        cell.classList.remove('drag-hover');
-      });
+      if (slotData && slotData.patientId && slotData.units > 0) {
+        // [1] このスロットが結合ブロックの開始コマ
+        const units = Math.max(1, slotData.units);
+        const pInfo = patientMap[normalizePatientId(slotData.patientId)];
+        const pName = pInfo?.name || `患者${slotData.patientId.toUpperCase()}`;
+        const durationText = getSlotDurationText(slot.label, units);
 
-      cell.addEventListener('drop', (e) => {
-        e.preventDefault();
-        cell.classList.remove('drag-hover');
-        const pId = e.dataTransfer.getData('text/plain') || state.draggedPatientId;
-        if (pId) {
-          handleSlotDropped(state.selectedDate, tCode, slot.id, pId);
-        }
-      });
+        // 複数コマの縦結合カードを構築
+        const card = document.createElement('div');
+        card.className = `slot-pill-card multi-slot-block span-units-${units}`;
+        card.style.height = `calc(${units * 100}% + ${(units - 1) * 1}px)`;
+        card.style.minHeight = `${units * 48 - 4}px`;
+        card.style.zIndex = '10';
 
-      // セルクリックでモーダル編集
-      cell.addEventListener('click', () => {
-        openSlotEditModal(state.selectedDate, tCode, slot.id);
-      });
+        card.innerHTML = `
+          <div class="slot-patient-title" style="flex: 1;">
+            <div style="display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.15rem;">
+              <span class="slot-id-badge">${slotData.patientId.toUpperCase()}</span>
+              <span class="slot-name-label" style="font-weight: 700;">${pName}</span>
+            </div>
+            <div style="font-size: 0.725rem; color: var(--text-muted); font-weight: 600;">
+              🕒 ${durationText}
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.2rem;">
+            <span class="slot-unit-tag">${units}単位</span>
+            <span style="font-size: 0.65rem; color: var(--primary); font-weight: 700;">${units * 20}分</span>
+          </div>
+        `;
+
+        card.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openSlotEditModal(state.selectedDate, tCode, slot.id);
+        });
+
+        cell.appendChild(card);
+      } else if (isOccupiedByPrior) {
+        // [2] 前のコマ（2単位/3単位）の結合により占有されているコマ
+        const parentInfo = occupiedSlots[tCode].get(slot.id);
+        cell.classList.add('slot-covered-placeholder');
+        cell.title = `前のコマ（${parentInfo.rootSlotId}）により占有中`;
+        cell.addEventListener('click', () => {
+          openSlotEditModal(state.selectedDate, tCode, parentInfo.rootSlotId);
+        });
+      } else {
+        // [3] 空きコマ（ドロップ ＆ クリック追加可能）
+        const hint = document.createElement('span');
+        hint.className = 'slot-empty-hint';
+        hint.textContent = '＋ 追加';
+        cell.appendChild(hint);
+
+        // ドラッグ＆ドロップイベント
+        cell.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'copy';
+          cell.classList.add('drag-hover');
+        });
+
+        cell.addEventListener('dragleave', () => {
+          cell.classList.remove('drag-hover');
+        });
+
+        cell.addEventListener('drop', (e) => {
+          e.preventDefault();
+          cell.classList.remove('drag-hover');
+          const pId = e.dataTransfer.getData('text/plain') || state.draggedPatientId;
+          if (pId) {
+            handleSlotDropped(state.selectedDate, tCode, slot.id, pId);
+          }
+        });
+
+        cell.addEventListener('click', () => {
+          openSlotEditModal(state.selectedDate, tCode, slot.id);
+        });
+      }
 
       row.appendChild(cell);
     });
@@ -467,14 +562,11 @@ function initTimetableGrid() {
   });
 }
 
-/**
- * ドラッグ＆ドロップで患者がコマに配置されたときの処理
- */
 function handleSlotDropped(dateStr, therapistCode, slotId, patientId) {
   const p = getAllPatients().find((item) => normalizePatientId(item.id) === normalizePatientId(patientId));
   const pName = p?.name || patientId.toUpperCase();
 
-  // デフォルト2単位で自動登録
+  // デフォルト2単位 (40分) で登録
   setScheduleSlot(dateStr, therapistCode, slotId, {
     patientId: normalizePatientId(patientId),
     units: 2,
@@ -485,60 +577,9 @@ function handleSlotDropped(dateStr, therapistCode, slotId, patientId) {
   renderDailyKPIs();
   renderDailyDiaryPreview();
   renderMonthlyUnitsTable();
-  showToast(`${pName} を PT ${therapistCode} のコマに配置しました (2単位)`, 'success');
+  showToast(`${pName} を PT ${therapistCode} に配置しました (2単位 / 40分)`, 'success');
 }
 
-/**
- * タイムテーブル全体のデータ描画
- */
-function renderTimetable() {
-  const dayLabel = document.getElementById('schedule-day-label');
-  if (dayLabel) {
-    const cur = new Date(state.selectedDate);
-    const days = ['日', '月', '火', '水', '木', '金', '土'];
-    dayLabel.textContent = `${cur.getFullYear()}年${cur.getMonth() + 1}月${cur.getDate()}日 (${days[cur.getDay()]})`;
-  }
-
-  const schedule = getDailySchedule(state.selectedDate);
-  const patientMap = {};
-  getAllPatients().forEach((p) => {
-    patientMap[normalizePatientId(p.id)] = p;
-  });
-
-  const cells = document.querySelectorAll('.slot-drop-cell');
-  cells.forEach((cell) => {
-    const tCode = cell.dataset.therapist;
-    const slotId = cell.dataset.slotId;
-    const slotData = schedule[tCode]?.[slotId];
-
-    cell.innerHTML = '';
-
-    if (slotData && slotData.patientId && slotData.units > 0) {
-      const pInfo = patientMap[normalizePatientId(slotData.patientId)];
-      const pName = pInfo?.name || `患者${slotData.patientId.toUpperCase()}`;
-
-      const card = document.createElement('div');
-      card.className = 'slot-pill-card';
-      card.innerHTML = `
-        <div class="slot-patient-title">
-          <span class="slot-id-badge">${slotData.patientId.toUpperCase()}</span>
-          <span class="slot-name-label">${pName}</span>
-        </div>
-        <span class="slot-unit-tag">${slotData.units}単位</span>
-      `;
-      cell.appendChild(card);
-    } else {
-      const hint = document.createElement('span');
-      hint.className = 'slot-empty-hint';
-      hint.textContent = '＋ 追加';
-      cell.appendChild(hint);
-    }
-  });
-}
-
-/**
- * 本日KPIカウンターの集計と更新
- */
 function renderDailyKPIs() {
   const stats = getDailyStats(state.selectedDate);
 
@@ -578,25 +619,29 @@ function initSlotEditModal() {
   closeBtn?.addEventListener('click', closeModal);
   cancelBtn?.addEventListener('click', closeModal);
 
-  // プリセットボタン切り替え
+  // プリセットボタン切り替え時にリアルタイムで時間テキストを更新
   presetChips.forEach((chip) => {
     chip.addEventListener('click', () => {
       presetChips.forEach((c) => c.classList.remove('active'));
       chip.classList.add('active');
       if (customUnitInput) {
         customUnitInput.value = chip.dataset.unit;
+        updateModalDurationHint(parseInt(chip.dataset.unit, 10));
       }
     });
   });
 
-  // セレクトボックスからの自動入力
+  customUnitInput?.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value, 10) || 1;
+    updateModalDurationHint(val);
+  });
+
   patientSelect?.addEventListener('change', (e) => {
     if (e.target.value && patientInput) {
       patientInput.value = e.target.value;
     }
   });
 
-  // 保存処理
   saveBtn?.addEventListener('click', () => {
     if (!state.activeSlotModal) return;
     const { dateStr, therapistCode, slotId } = state.activeSlotModal;
@@ -619,10 +664,9 @@ function initSlotEditModal() {
     renderDailyKPIs();
     renderDailyDiaryPreview();
     renderMonthlyUnitsTable();
-    showToast('コマ情報を更新しました。', 'success');
+    showToast(`PT ${therapistCode} のコマを更新しました (${units}単位 / ${units * 20}分)`, 'success');
   });
 
-  // コマのクリア処理
   clearBtn?.addEventListener('click', () => {
     if (!state.activeSlotModal) return;
     const { dateStr, therapistCode, slotId } = state.activeSlotModal;
@@ -636,19 +680,24 @@ function initSlotEditModal() {
   });
 }
 
+function updateModalDurationHint(units) {
+  if (!state.activeSlotModal) return;
+  const slotInfo = TIME_SLOTS.find((s) => s.id === state.activeSlotModal.slotId);
+  if (!slotInfo) return;
+
+  const durationStr = getSlotDurationText(slotInfo.label, units);
+  const title = document.getElementById('slot-modal-title');
+  if (title) {
+    title.textContent = `PT ${state.activeSlotModal.therapistCode} | ${durationStr}`;
+  }
+}
+
 function openSlotEditModal(dateStr, therapistCode, slotId) {
   const modal = document.getElementById('slot-modal');
   if (!modal) return;
 
   state.activeSlotModal = { dateStr, therapistCode, slotId };
 
-  const slotInfo = TIME_SLOTS.find((s) => s.id === slotId);
-  const title = document.getElementById('slot-modal-title');
-  if (title) {
-    title.textContent = `PT ${therapistCode} | ${slotInfo?.time || ''}`;
-  }
-
-  // 患者セレクトの同期
   const select = document.getElementById('slot-modal-patient-select');
   if (select) {
     const list = getAllPatients();
@@ -661,7 +710,6 @@ function openSlotEditModal(dateStr, therapistCode, slotId) {
     });
   }
 
-  // 既存値の取得
   const schedule = getDailySchedule(dateStr);
   const curSlot = schedule[therapistCode]?.[slotId];
 
@@ -669,16 +717,16 @@ function openSlotEditModal(dateStr, therapistCode, slotId) {
   const uInput = document.getElementById('slot-modal-units');
   const nInput = document.getElementById('slot-modal-note');
 
+  const currentUnits = curSlot ? curSlot.units : 2;
   if (pInput) pInput.value = curSlot ? curSlot.patientId.toUpperCase() : '';
-  if (uInput) uInput.value = curSlot ? String(curSlot.units) : '2';
+  if (uInput) uInput.value = String(currentUnits);
   if (nInput) nInput.value = curSlot ? curSlot.note || '' : '';
 
-  // プリセットボタン
-  const activeVal = curSlot ? String(curSlot.units) : '2';
   document.querySelectorAll('.preset-chip').forEach((c) => {
-    c.classList.toggle('active', c.dataset.unit === activeVal);
+    c.classList.toggle('active', c.dataset.unit === String(currentUnits));
   });
 
+  updateModalDurationHint(currentUnits);
   modal.classList.add('show');
 }
 
@@ -710,9 +758,6 @@ function initMonthlyViews() {
   }
 }
 
-/**
- * 月間患者別累計および月13単位モニタリング表の描画
- */
 function renderMonthlyUnitsTable() {
   const tbody = document.getElementById('monthly-patient-units-tbody');
   if (!tbody) return;
@@ -742,7 +787,6 @@ function renderMonthlyUnitsTable() {
     const catLabel = isOut ? '外来' : '入院';
     const disLabel = REHA_RULES.LIMIT_DAYS[p.diseaseType]?.shortLabel || '運動器Ⅱ';
 
-    // 13単位管理チェック
     let statusBadge = `<span style="color: var(--success); font-weight: 700;">算定枠内 (${units}/13)</span>`;
     if (units > 13) {
       statusBadge = `<span style="color: var(--danger); font-weight: 800; background: var(--danger-light); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill);">⚠️ 13単位超過 (${units}単位)</span>`;
@@ -761,9 +805,6 @@ function renderMonthlyUnitsTable() {
   });
 }
 
-/**
- * 本日の業務日誌プレビュー（入院・外来・疾患別内訳）を描画
- */
 function renderDailyDiaryPreview() {
   const container = document.getElementById('daily-diary-preview-container');
   const badge = document.getElementById('diary-preview-date-badge');
@@ -856,7 +897,6 @@ function initPatientMasterModal() {
     const earlyBonusStartDate = document.getElementById('patient-modal-early-start')?.value;
     const onsetDate = document.getElementById('patient-modal-onset')?.value;
     const lastPlanDate = document.getElementById('patient-modal-last-plan')?.value;
-    const isLimitExempt = document.getElementById('patient-modal-exempt')?.checked;
     const notes = document.getElementById('patient-modal-notes')?.value?.trim();
 
     if (!id) {
@@ -873,7 +913,6 @@ function initPatientMasterModal() {
       earlyBonusStartDate,
       onsetDate,
       lastPlanDate,
-      isLimitExempt,
       notes,
     });
 
@@ -898,15 +937,11 @@ function openPatientMasterModal(existingId = null) {
   document.getElementById('patient-modal-early-start').value = p ? p.earlyBonusStartDate || '' : '';
   document.getElementById('patient-modal-onset').value = p ? p.onsetDate || '' : '';
   document.getElementById('patient-modal-last-plan').value = p ? p.lastPlanDate || '' : '';
-  document.getElementById('patient-modal-exempt').checked = p ? Boolean(p.isLimitExempt) : false;
   document.getElementById('patient-modal-notes').value = p ? p.notes || '' : '';
 
   modal.classList.add('show');
 }
 
-/**
- * 患者台帳・期限・早期加算管理テーブルの描画
- */
 function renderPatientDeadlines() {
   const tbody = document.getElementById('patient-deadlines-tbody');
   if (!tbody) return;
@@ -921,7 +956,6 @@ function renderPatientDeadlines() {
     const isOut = p.category && p.category.startsWith('outpatient');
     const catLabel = isOut ? '外来' : '入院';
 
-    // 早期加算バッジ
     let earlyBadge = '<span style="color: var(--text-dim);">-</span>';
     if (calc.earlyBonusStatus === 'PHASE_1_ACTIVE') {
       earlyBadge = '<span class="status-pill" style="background: #eff6ff; color: #1d4ed8; font-weight: 700;">第1期 (4日以内)</span>';
@@ -931,7 +965,6 @@ function renderPatientDeadlines() {
       earlyBadge = '<span style="color: var(--text-dim); font-size: 0.75rem;">加算終了</span>';
     }
 
-    // 計画書アラート
     let planBadge = calc.nextPlanLimitStr || '-';
     if (calc.planStatus === 'WARNING') {
       planBadge += ' <span style="color: var(--warning); font-weight: 700;">(間近)</span>';
@@ -1084,7 +1117,6 @@ function initExportActionButtons() {
         return;
       }
 
-      // テンプレートブックの作成（原本がない場合も即座に標準構造を自動生成）
       const wb = XLSX.utils.book_new();
       const wsInpatient = XLSX.utils.aoa_to_sheet([
         ['受付提出用 単位管理', '', '', '', ''],
@@ -1114,7 +1146,6 @@ function initExportActionButtons() {
         return;
       }
 
-      // 31日分シートを自動生成
       const wb = XLSX.utils.book_new();
       for (let d = 1; d <= 31; d++) {
         const ws = XLSX.utils.aoa_to_sheet([
