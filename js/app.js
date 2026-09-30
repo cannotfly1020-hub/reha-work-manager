@@ -2,6 +2,7 @@
  * @file app.js
  * @description リハビリ業務管理Webアプリ（reha-work-manager）メインコントローラー
  * 
+ * - アプリ起動時に「今日の日付」を自動取得して表示
  * - パターンC（ハイブリッド配色）：
  *   ・左端縦ライン：入院（ウォームアンバー）／外来（インディゴブルー）
  *   ・カード背景＆バッジ：1単位（ミントグリーン）／2単位（スカイブルー）／3単位（ラベンダーパープル）
@@ -397,7 +398,7 @@ const SEED_TEST_PATIENTS = [
   { id: 'p31', name: '内藤 美穂', kana: 'ないとう みほ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-01' },
   { id: 'p32', name: '永井 孝一', kana: 'ながい こういち', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-02' },
   { id: 'p33', name: '西田 秀雄', kana: 'にしだ ひでお', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-02' },
-  { id: 'p34', name: '野口 サエ', kana: 'のぐち さえ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-02' },
+  { id: 'p34', name: '野口 サエ', kana: '野口 さえ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-02' },
   { id: 'p35', name: '長谷川 徹', kana: 'はせがわ とおる', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-03' },
   { id: 'p36', name: '馬場 春男', kana: 'ばば はるお', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-03' },
   { id: 'p37', name: '平野 ハナ', kana: 'ひらの はな', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-03' },
@@ -416,11 +417,15 @@ const SEED_TEST_PATIENTS = [
   { id: 'p50', name: '若林 芳江', kana: 'わかばやし よしえ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-07' },
 ];
 
+// 起動時の今日の日付を動的に取得
+const initialToday = new Date();
+const initialTodayStr = formatDate(initialToday);
+
 const state = {
   currentTab: 'view-daily-schedule',
-  selectedDate: '2026-07-01',
-  targetYear: 2026,
-  targetMonth: 7,
+  selectedDate: initialTodayStr, // 今日の日付で自動起動
+  targetYear: initialToday.getFullYear(),
+  targetMonth: initialToday.getMonth() + 1,
   paletteFilter: 'ALL',
   paletteSearchTerm: '',
   paletteKanaFilter: 'ALL',
@@ -438,6 +443,9 @@ document.addEventListener('DOMContentLoaded', () => {
   initLoanModal();
   initMonthlyViews();
   initExportActionButtons();
+
+  // 初期日付と年月ピッカーを確実に今日の日付へ同期
+  updateYearMonthFromSelectedDate();
 
   renderAll();
 });
