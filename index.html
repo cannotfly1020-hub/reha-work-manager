@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>リハビリ業務管理システム | reha-work-manager</title>
+  <link rel="stylesheet" href="css/style.css">
+  <!-- SheetJS (Excel読み書きライブラリ: 完全ローカル動作) -->
+  <script src="lib/xlsx.full.min.js"></script>
+  <script>
+    // ローカルにxlsx.full.min.jsがない場合のフォールバック（初回セットアップ用）
+    if (typeof XLSX === 'undefined') {
+      document.write('<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"><\/script>');
+    }
+  </script>
+</head>
+<body>
+  <div class="app-container">
+    <!-- メインヘッダー -->
+    <header class="app-header">
+      <div class="header-content">
+        <div class="header-title-group">
+          <h1>
+            <span>🏥</span> リハビリ業務管理システム
+          </h1>
+          <p class="header-subtitle">reha-work-manager | リハ記録集計・受付提出・業務日誌・期限＆物品管理</p>
+        </div>
+        <div class="security-badge" title="インターネットへのデータ送信は一切行いません">
+          <span class="dot"></span>
+          完全ローカル動作 / 外部通信ゼロ（安全設計）
+        </div>
+      </div>
+    </header>
+
+    <!-- ナビゲーションタブ -->
+    <nav class="tab-navigation">
+      <div class="tab-nav-container">
+        <button class="nav-tab-btn active" data-target="reha-aggregate">
+          📊 リハ記録集計・Excel出力
+        </button>
+        <button class="nav-tab-btn" data-target="patient-deadlines">
+          ⏳ 患者期限・加算管理
+        </button>
+        <button class="nav-tab-btn" data-target="equipment-loans">
+          📦 物品貸出管理（業者又貸し対応）
+        </button>
+      </div>
+    </nav>
+
+    <!-- メインコンテンツ領域 -->
+    <main class="main-content">
+      <!-- ======================================================== -->
+      <!-- タブ1: リハ記録集計・Excel出力 -->
+      <!-- ======================================================== -->
+      <section id="reha-aggregate" class="tab-panel active">
+        <!-- 操作コントロールバー -->
+        <div class="control-bar">
+          <div class="date-selector-group">
+            <label for="target-year">対象年:</label>
+            <select id="target-year"></select>
+            <label for="target-month">対象月:</label>
+            <select id="target-month">
+              <option value="1">1月</option>
+              <option value="2">2月</option>
+              <option value="3">3月</option>
+              <option value="4">4月</option>
+              <option value="5">5月</option>
+              <option value="6">6月</option>
+              <option value="7" selected>7月</option>
+              <option value="8">8月</option>
+              <option value="9">9月</option>
+              <option value="10">10月</option>
+              <option value="11">11月</option>
+              <option value="12">12月</option>
+            </select>
+          </div>
+          <div>
+            <span class="text-sm text-muted">※全角・半角スペースや大文字小文字の揺れは自動で吸収されます</span>
+          </div>
+        </div>
+
+        <!-- ファイルドロップエリア -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">📁 必要ファイルの読み込み（ドラッグ＆ドロップまたはクリック）</h2>
+          </div>
+          <div class="upload-grid">
+            <!-- リハ記録A -->
+            <div class="drop-zone" id="drop-zone-rehaA">
+              <div class="drop-zone-icon">📄</div>
+              <div class="drop-zone-title">リハ記録 (A)</div>
+              <div class="drop-zone-desc">R8 ﾘﾊ記録 (A).xlsx</div>
+              <span class="status-badge waiting" id="badge-rehaA">未選択</span>
+              <input type="file" id="file-input-rehaA" class="file-hidden-input" accept=".xlsx,.xlsm,.xls">
+            </div>
+
+            <!-- リハ記録B -->
+            <div class="drop-zone" id="drop-zone-rehaB">
+              <div class="drop-zone-icon">📄</div>
+              <div class="drop-zone-title">リハ記録 (B)</div>
+              <div class="drop-zone-desc">R8 ﾘﾊ記録 (B).xlsx</div>
+              <span class="status-badge waiting" id="badge-rehaB">未選択</span>
+              <input type="file" id="file-input-rehaB" class="file-hidden-input" accept=".xlsx,.xlsm,.xls">
+            </div>
+
+            <!-- リハ記録C -->
+            <div class="drop-zone" id="drop-zone-rehaC">
+              <div class="drop-zone-icon">📄</div>
+              <div class="drop-zone-title">リハ記録 (C)</div>
+              <div class="drop-zone-desc">R8 ﾘﾊ記録 (C).xlsx</div>
+              <span class="status-badge waiting" id="badge-rehaC">未選択</span>
+              <input type="file" id="file-input-rehaC" class="file-hidden-input" accept=".xlsx,.xlsm,.xls">
+            </div>
+
+            <!-- 受付提出原本 -->
+            <div class="drop-zone" id="drop-zone-uketsuke">
+              <div class="drop-zone-icon">📑</div>
+              <div class="drop-zone-title">受付提出用 原本</div>
+              <div class="drop-zone-desc">受付提出_単位管理.xlsm</div>
+              <span class="status-badge waiting" id="badge-uketsuke">未選択</span>
+              <input type="file" id="file-input-uketsuke" class="file-hidden-input" accept=".xlsx,.xlsm,.xls">
+            </div>
+
+            <!-- 業務日誌原本 -->
+            <div class="drop-zone" id="drop-zone-diary">
+              <div class="drop-zone-icon">📒</div>
+              <div class="drop-zone-title">業務日誌 原本</div>
+              <div class="drop-zone-desc">業務日誌 原本.xlsx</div>
+              <span class="status-badge waiting" id="badge-diary">未選択</span>
+              <input type="file" id="file-input-diary" class="file-hidden-input" accept=".xlsx,.xlsm,.xls">
+            </div>
+          </div>
+
+          <!-- アクションボタン -->
+          <div class="actions-row">
+            <button id="btn-run-aggregate" class="btn btn-primary" disabled>
+              ⚡ リハ記録を集計する
+            </button>
+            <button id="btn-export-uketsuke" class="btn btn-success" disabled>
+              📥 受付提出用Excelを出力
+            </button>
+            <button id="btn-export-diary" class="btn btn-success" disabled>
+              📥 業務日誌Excelを出力
+            </button>
+          </div>
+        </div>
+
+        <!-- 集計プレビューカード -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">🔍 集計プレビュー（日別単位マトリクス）</h2>
+          </div>
+          <div id="aggregate-preview-container">
+            <p class="text-muted text-center" style="padding: 2rem;">
+              リハ記録ファイルを読み込み、「リハ記録を集計する」ボタンを押すとここに結果が表示されます。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================================================== -->
+      <!-- タブ2: 患者期限・加算管理 -->
+      <!-- ======================================================== -->
+      <section id="patient-deadlines" class="tab-panel">
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">⏳ 患者期限・早期加算・計画書管理</h2>
+            <button id="btn-add-patient" class="btn btn-primary btn-sm">＋ 新規患者追加</button>
+          </div>
+          <div class="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>患者記号</th>
+                  <th>氏名</th>
+                  <th>疾患区分</th>
+                  <th>当院入院日</th>
+                  <th>早期加算起算日</th>
+                  <th>発症日/起算日</th>
+                  <th>早期加算状況</th>
+                  <th>次回計画書期限</th>
+                  <th>算定上限日</th>
+                  <th>状態</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="patient-deadlines-tbody">
+                <!-- JavaScriptで動的生成 -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================================================== -->
+      <!-- タブ3: 物品貸出管理 -->
+      <!-- ======================================================== -->
+      <section id="equipment-loans" class="tab-panel">
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">📦 リハビリ物品・機器貸出管理（当院備品 ＆ 外部業者又貸し）</h2>
+            <button id="btn-add-loan" class="btn btn-primary btn-sm">＋ 貸出を登録</button>
+          </div>
+          <div class="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>物品名</th>
+                  <th>貸出先患者</th>
+                  <th>所有区分</th>
+                  <th>貸出日</th>
+                  <th>返却予定日</th>
+                  <th>ステータス</th>
+                  <th>備考</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="loans-tbody">
+                <!-- JavaScriptで動的生成 -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- 患者編集モーダル -->
+  <!-- ======================================================== -->
+  <div id="patient-modal" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">患者情報の編集</h3>
+        <button id="modal-close-patient" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="form-group">
+        <label for="patient-modal-id">患者識別記号 (半角アルファベット: a, b, c...)</label>
+        <input type="text" id="patient-modal-id" placeholder="例: a">
+      </div>
+      <div class="form-group">
+        <label for="patient-modal-name">患者氏名（表示用）</label>
+        <input type="text" id="patient-modal-name" placeholder="例: 山田 太郎">
+      </div>
+      <div class="form-group">
+        <label for="patient-modal-disease">疾患区分</label>
+        <select id="patient-modal-disease">
+          <option value="LOCOMOTIVE">運動器リハビリテーション (Ⅱ: 150日)</option>
+          <option value="CEREBROVASCULAR">脳血管疾患等リハビリテーション (Ⅲ: 180日)</option>
+          <option value="DISUSE">廃用症候群リハビリテーション (Ⅲ: 120日)</option>
+          <option value="ANALGESIA">消炎鎮痛処置 (日数上限なし)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="patient-modal-category">受付シート区分</label>
+        <select id="patient-modal-category">
+          <option value="inpatient_1">実施ﾘｽﾄ 入院</option>
+          <option value="inpatient_2">入院(2)</option>
+          <option value="inpatient_maintenance">入院 （維持期介護)</option>
+          <option value="outpatient_1">外来</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="patient-modal-admission">当院入院日</label>
+        <input type="date" id="patient-modal-admission">
+      </div>
+      <div class="form-group">
+        <label for="patient-modal-early-start">
+          早期加算起算日（転院患者は前医入院日 / 直接入院は当院入院日）
+        </label>
+        <input type="date" id="patient-modal-early-start">
+      </div>
+      <div class="form-group">
+        <label for="patient-modal-onset">発症日 / 手術日（疾患別算定上限の起算日）</label>
+        <input type="date" id="patient-modal-onset">
+      </div>
+      <div class="form-group">
+        <label for="patient-modal-last-plan">前回 総合実施計画書算定日</label>
+        <input type="date" id="patient-modal-last-plan">
+      </div>
+      <div class="form-group-checkbox">
+        <input type="checkbox" id="patient-modal-exempt">
+        <label for="patient-modal-exempt" style="margin-bottom: 0; cursor: pointer;">
+          算定上限除外フラグ（継続改善等の理由で月13単位制限の対象外とする）
+        </label>
+      </div>
+      <div class="form-group">
+        <label for="patient-modal-notes">備考メモ</label>
+        <textarea id="patient-modal-notes" rows="2" placeholder="注意事項や経過など"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-cancel-patient" class="btn btn-outline">キャンセル</button>
+        <button id="btn-save-patient" class="btn btn-primary">保存する</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- 物品貸出登録モーダル -->
+  <!-- ======================================================== -->
+  <div id="loan-modal" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">物品貸出の登録</h3>
+        <button id="modal-close-loan" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="form-group">
+        <label for="loan-item-name">物品名・型番 (必須)</label>
+        <input type="text" id="loan-item-name" placeholder="例: 四輪歩行器、チルト車椅子、ロフストランド杖">
+      </div>
+      <div class="form-group">
+        <label for="loan-patient-id">貸出先患者記号または氏名</label>
+        <input type="text" id="loan-patient-id" placeholder="例: a または 山田">
+      </div>
+      <div class="form-group">
+        <label for="loan-owner-type">所有区分</label>
+        <select id="loan-owner-type">
+          <option value="HOSPITAL">当院備品</option>
+          <option value="VENDOR">外部業者からの借用品（又貸し）</option>
+        </select>
+      </div>
+      <div class="form-group" id="vendor-name-group" style="display: none;">
+        <label for="loan-vendor-name">借用先業者名</label>
+        <input type="text" id="loan-vendor-name" placeholder="例: ○○メディカル、△△義肢">
+      </div>
+      <div class="form-group">
+        <label for="loan-date">貸出日</label>
+        <input type="date" id="loan-date">
+      </div>
+      <div class="form-group">
+        <label for="loan-due-date">返却予定日 (現在は任意・空欄可)</label>
+        <input type="date" id="loan-due-date">
+      </div>
+      <div class="form-group">
+        <label for="loan-notes">用途・備考</label>
+        <textarea id="loan-notes" rows="2" placeholder="例: 自宅一時外泊で使用、デモ機試用など"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-cancel-loan" class="btn btn-outline">キャンセル</button>
+        <button id="btn-save-loan" class="btn btn-primary">登録する</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- トースト通知コンテナ -->
+  <div id="toast-container"></div>
+
+  <!-- メインJavaScriptコントローラー (ES Modules) -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
