@@ -1,6 +1,5 @@
-/* STREAMING_CHUNK:Configuring clean color palette, elevated typography and CSS custom properties... /
+/* GoogleカレンダーおよびモダンSaaSライクな洗練パレット */
 :root {
-/ GoogleカレンダーおよびモダンSaaSライクな洗練パレット */
 --font-sans: 'Inter', 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 
 --bg-app: #f8fafc;
@@ -57,7 +56,6 @@
 --transition-normal: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* STREAMING_CHUNK:Resetting core elements and app layout foundation... */
 *, *::before, *::after {
 box-sizing: border-box;
 margin: 0;
@@ -80,7 +78,9 @@ display: flex;
 flex-direction: column;
 }
 
-/* STREAMING_CHUNK:Styling top modern navigation bar and pill-shaped tabs... */
+/* ========================================================
+ナビゲーションバー（最上部）
+======================================================== */
 .navbar {
 display: flex;
 align-items: center;
@@ -133,7 +133,6 @@ font-weight: 600;
 color: var(--text-muted);
 }
 
-/* Googleカレンダー風 ピル型ナビゲーションタブ */
 .nav-tabs {
 display: flex;
 align-items: center;
@@ -175,7 +174,6 @@ box-shadow: var(--shadow-sm);
 font-size: 0.95rem;
 }
 
-/* 院内安全バッジ */
 .system-security-badge {
 display: flex;
 align-items: center;
@@ -205,7 +203,6 @@ animation: pulseAnimation 2s infinite;
 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
 }
 
-/* STREAMING_CHUNK:Styling main content area and view panels transitions... */
 .content-body {
 flex: 1;
 padding: 1.25rem 1.75rem 2rem 1.75rem;
@@ -228,7 +225,9 @@ from { opacity: 0; transform: translateY(4px); }
 to { opacity: 1; transform: translateY(0); }
 }
 
-/* STREAMING_CHUNK:Styling schedule header strip, calendar navigation and KPI counters... */
+/* ========================================================
+スケジュール操作ストリップ ＆ KPIカウンター（2段目）
+======================================================== */
 .schedule-header-strip {
 display: flex;
 flex-wrap: wrap;
@@ -322,7 +321,6 @@ color: var(--text-main);
 letter-spacing: -0.01em;
 }
 
-/* 本日単位 KPI メーターバー（視認性を高めたカードデザイン） */
 .daily-kpi-bar {
 display: flex;
 gap: 0.75rem;
@@ -385,7 +383,9 @@ color: var(--text-muted);
 font-weight: 600;
 }
 
-/* STREAMING_CHUNK:Designing 2-column layout for patient palette and timetable canvas... */
+/* ========================================================
+2カラムキャンバス（パレット ＆ タイムテーブル）
+======================================================== */
 .schedule-canvas-layout {
 display: grid;
 grid-template-columns: 310px 1fr;
@@ -393,7 +393,7 @@ gap: 1.25rem;
 align-items: start;
 }
 
-/* 左側：患者パレットパネル（洗練されたモダンカード調） */
+/* 左側：患者パレット */
 .palette-panel {
 background-color: var(--bg-surface);
 border: 1px solid var(--border-light);
@@ -432,7 +432,6 @@ font-weight: 600;
 color: var(--text-muted);
 }
 
-/* 入院・外来・全員 セグメント切り替え */
 .segmented-control {
 display: flex;
 background-color: var(--bg-surface-subtle);
@@ -478,7 +477,6 @@ color: var(--primary);
 font-weight: 800;
 }
 
-/* リアルタイム検索バー */
 .search-input-wrapper {
 position: relative;
 display: flex;
@@ -520,7 +518,6 @@ cursor: pointer;
 line-height: 1;
 }
 
-/* 五十音クイックバー（外来50名対応） */
 .alphabet-index-bar {
 display: flex;
 flex-wrap: wrap;
@@ -557,7 +554,6 @@ color: #ffffff;
 border-color: var(--primary);
 }
 
-/* 患者カードスクロール領域 */
 .palette-scroll-area {
 padding: 0.85rem;
 overflow-y: auto;
@@ -615,7 +611,6 @@ padding: 0.1rem 0.4rem;
 border-radius: var(--radius-xs);
 }
 
-/* 入院・外来の洗練された配色（高い視認性） */
 .tag-inpatient {
 background-color: #fef3c7;
 color: #92400e;
@@ -659,7 +654,9 @@ background-color: var(--bg-surface-hover);
 color: var(--text-main);
 }
 
-/* STREAMING_CHUNK:Styling Google-Calendar-style timetable card, headers and precise grid slots... */
+/* ========================================================
+タイムテーブル（グリッド ＆ 複数コマ結合ブロック）
+======================================================== */
 .timetable-main-panel {
 display: flex;
 flex-direction: column;
@@ -721,7 +718,6 @@ font-weight: 800;
 color: var(--text-main);
 }
 
-/* タイムスロット本体 */
 .timetable-slots-body {
 display: flex;
 flex-direction: column;
@@ -730,10 +726,10 @@ flex-direction: column;
 .slot-row {
 display: grid;
 grid-template-columns: 105px repeat(3, 1fr);
-height: 52px; /* 安定した均一な高さ */
+height: 52px;
 min-height: 52px;
+max-height: 52px;
 border-bottom: 1px solid var(--border-light);
-transition: background-color var(--transition-fast);
 position: relative;
 }
 
@@ -751,6 +747,7 @@ color: var(--text-secondary);
 background-color: #f8fafc;
 border-right: 1px solid var(--border-light);
 letter-spacing: -0.01em;
+user-select: none;
 }
 
 .slot-drop-cell {
@@ -762,6 +759,7 @@ cursor: pointer;
 position: relative;
 background-color: #ffffff;
 transition: background-color var(--transition-fast);
+overflow: visible; /* 複数コマ結合カードを縦にきれいに表示 */
 }
 
 .slot-drop-cell:last-child {
@@ -772,28 +770,25 @@ border-right: none;
 background-color: #f8fafc;
 }
 
-/* ドラッグオーバー時の吸着エフェクト */
 .slot-drop-cell.drag-hover {
 background-color: var(--primary-light) !important;
 outline: 2px dashed var(--primary);
 outline-offset: -2px;
 }
 
-/* 占有スロット（前コマの結合によりカバーされているコマ） /
 .slot-covered-placeholder {
-background-color: transparent !important;
-pointer-events: none; / 下のコマのクリック干渉を防止 */
+background-color: rgba(248, 250, 252, 0.4) !important;
+cursor: pointer;
 }
 
-/* 複数コマ結合ブロックカード（Googleカレンダーライクな洗練スタイル） */
+/* ========================================================
+★ パターンC（ハイブリッド方式）：時間割カード配色 ＆ 境界線フィット
+======================================================== */
 .slot-pill-card {
 position: absolute;
 top: 2px;
 left: 4px;
 right: 4px;
-background: linear-gradient(135deg, #ffffff, #eff6ff);
-border: 1px solid var(--primary-border);
-border-left: 5px solid var(--primary);
 border-radius: var(--radius-sm);
 padding: 0.4rem 0.65rem;
 display: flex;
@@ -803,29 +798,98 @@ box-shadow: var(--shadow-sm);
 transition: all var(--transition-fast);
 overflow: hidden;
 box-sizing: border-box;
+z-index: 10;
+cursor: pointer;
 }
 
 .slot-pill-card:hover {
 box-shadow: var(--shadow-md);
-border-color: var(--primary);
 transform: translateY(-1px);
+z-index: 15;
 }
 
-/* 単位ごとの高さ定義（マスの境界線ピッタリに収まる計算） */
+/* ① 左端縦ライン（アクセントバー）：入院／外来 の識別 /
+.patient-type-inpatient {
+border-left: 6px solid #d97706 !important; / 入院：力強いウォームアンバー */
+}
+
+.patient-type-outpatient {
+border-left: 6px solid #2563eb !important; /* 外来：知的なインディゴブルー */
+}
+
+/* ② 全体背景 ＆ バッジ：単位数（時間）ごとのテーマ色 */
+
+/* 1単位 (20分)：爽やかなミントグリーン */
+.unit-theme-1 {
+background: linear-gradient(135deg, #ffffff 30%, #ecfdf5 100%) !important;
+border: 1px solid #a7f3d0;
+}
+.unit-theme-1 .slot-unit-tag {
+background: linear-gradient(135deg, #059669, #047857) !important;
+color: #ffffff !important;
+box-shadow: 0 1px 2px rgba(5, 150, 105, 0.25);
+}
+.unit-theme-1 .slot-time-sub {
+color: #047857 !important;
+}
+
+/* 2単位 (40分)：洗練されたスカイブルー */
+.unit-theme-2 {
+background: linear-gradient(135deg, #ffffff 30%, #eff6ff 100%) !important;
+border: 1px solid #bfdbfe;
+}
+.unit-theme-2 .slot-unit-tag {
+background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+color: #ffffff !important;
+box-shadow: 0 1px 2px rgba(37, 99, 235, 0.25);
+}
+.unit-theme-2 .slot-time-sub {
+color: #1d4ed8 !important;
+}
+
+/* 3単位 (60分)：存在感のあるラベンダーパープル */
+.unit-theme-3 {
+background: linear-gradient(135deg, #ffffff 30%, #f5f3ff 100%) !important;
+border: 1px solid #ddd6fe;
+}
+.unit-theme-3 .slot-unit-tag {
+background: linear-gradient(135deg, #7c3aed, #6d28d9) !important;
+color: #ffffff !important;
+box-shadow: 0 1px 2px rgba(124, 58, 237, 0.25);
+}
+.unit-theme-3 .slot-time-sub {
+color: #6d28d9 !important;
+}
+
+/* 4単位以上：鮮明なローズコーラル */
+.unit-theme-4 {
+background: linear-gradient(135deg, #ffffff 30%, #fff1f2 100%) !important;
+border: 1px solid #fecdd3;
+}
+.unit-theme-4 .slot-unit-tag {
+background: linear-gradient(135deg, #e11d48, #be123c) !important;
+color: #ffffff !important;
+box-shadow: 0 1px 2px rgba(225, 29, 72, 0.25);
+}
+.unit-theme-4 .slot-time-sub {
+color: #be123c !important;
+}
+
+/* 高さの正確な定義（52px行の境界線にミリ単位でピッタリ収まる計算：はみ出し防止） */
 .span-units-1 {
-height: calc(52px - 4px) !important;
+height: 48px !important;
 }
 
 .span-units-2 {
-height: calc(104px - 4px) !important;
+height: 100px !important; /* 52px * 2 - 4px */
 }
 
 .span-units-3 {
-height: calc(156px - 4px) !important;
+height: 152px !important; /* 52px * 3 - 4px */
 }
 
 .span-units-4 {
-height: calc(208px - 4px) !important;
+height: 204px !important; /* 52px * 4 - 4px */
 }
 
 .slot-patient-title {
@@ -836,7 +900,7 @@ flex-direction: column;
 .slot-id-badge {
 font-size: 0.85rem;
 font-weight: 800;
-color: var(--primary-dark);
+color: var(--text-main);
 }
 
 .slot-name-label {
@@ -845,14 +909,17 @@ font-weight: 700;
 color: var(--text-main);
 }
 
+.slot-time-sub {
+font-size: 0.725rem;
+font-weight: 700;
+letter-spacing: -0.01em;
+}
+
 .slot-unit-tag {
-background-color: var(--primary);
-color: #ffffff;
 font-size: 0.725rem;
 font-weight: 800;
 padding: 0.15rem 0.55rem;
 border-radius: var(--radius-pill);
-box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2);
 }
 
 .slot-empty-hint {
@@ -870,7 +937,9 @@ opacity: 1;
 color: var(--primary);
 }
 
-/* STREAMING_CHUNK:Styling dashboard cards, tables, and monthly monitoring views... */
+/* ========================================================
+ダッシュボード・テーブル・月間管理
+======================================================== */
 .panel-header-strip {
 display: flex;
 align-items: center;
@@ -949,7 +1018,6 @@ padding: 0.25rem 0.65rem;
 border-radius: var(--radius-pill);
 }
 
-/* モダンテーブルスタイル */
 .table-container {
 overflow-x: auto;
 border-radius: var(--radius-sm);
@@ -987,7 +1055,9 @@ background-color: #f8fafc;
 border-bottom: none;
 }
 
-/* STREAMING_CHUNK:Styling action cards for Excel export dashboard... */
+/* ========================================================
+Excel出力アクションカード
+======================================================== */
 .export-dashboard-grid {
 display: grid;
 grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
@@ -1077,7 +1147,9 @@ border-radius: var(--radius-pill);
 width: fit-content;
 }
 
-/* STREAMING_CHUNK:Styling modal dialogs, backdrop blurs and form elements... */
+/* ========================================================
+モーダルダイアログ
+======================================================== */
 .modal-overlay {
 position: fixed;
 inset: 0;
@@ -1198,7 +1270,6 @@ border-color: var(--primary);
 box-shadow: 0 0 0 3px var(--primary-focus);
 }
 
-/* プリセット単位セレクター */
 .unit-preset-selector {
 display: flex;
 align-items: center;
@@ -1306,7 +1377,9 @@ cursor: pointer;
 text-decoration: underline;
 }
 
-/* STREAMING_CHUNK:Styling toast notifications container and popups... */
+/* ========================================================
+トースト通知
+======================================================== */
 #toast-container {
 position: fixed;
 bottom: 1.5rem;
