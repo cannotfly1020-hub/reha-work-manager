@@ -1,191 +1,258 @@
 /**
- * @file loanStore.js
- * @description リハビリ物品・機器の貸出管理ストア（当院備品 ＆ 外部業者からの借用・又貸し対応）
+ * @file scheduleStore.js
+ * @description セラピスト別当日時間割（午前・午後コマ）および単位入力のローカル保存ストア
  * 
- * - 完全オフライン（LocalStorage）で管理。
- * - 現行運用に合わせて「返却期限なし」でシンプルに運用可能。
- * - 将来「返却期限」「期限超過アラート」を追加できるよう拡張フィールドを完備。
+ * - 各セラピスト（A, B, C）の当日のタイムスケジュール（9:00〜12:20、14:00〜17:20）を直接管理
+ * - 入力された患者・単位数・コマデータをブラウザのLocalStorageに完全ローカル蓄積
+ * - Excelファイルに毎日手入力することなく、本アプリ内の蓄積データから月末の受付提出・業務日誌を即座に自動集計可能
  */
 
 import { normalizePatientId, normalizeString } from '../core/dataNormalizer.js';
+import { formatDate } from '../core/deadlineCalc.js';
 
-const STORAGE_KEY_LOANS = 'reha_manager_loans_v1';
+const STORAGE_KEY_SCHEDULES = 'reha_manager_schedules_v1';
+
+// リハ記録のコマ定義（原本と完全一致）
+export const TIME_SLOTS = [
+  // 午前（10コマ）
+  { id: 'am_1', period: 'am', time: '9:00～9:20', label: '9:00' },
+  { id: 'am_2', period: 'am', time: '9:20～9:40', label: '9:20' },
+  { id: 'am_3', period: 'am', time: '9:40～10:00', label: '9:40' },
+  { id: 'am_4', period: 'am', time: '10:00～10:20', label: '10:00' },
+  { id: 'am_5', period: 'am', time: '10:20～10:40', label: '10:20' },
+  { id: 'am_6', period: 'am', time: '10:40～11:00', label: '10:40' },
+  { id: 'am_7', period: 'am', time: '11:00～11:20', label: '11:00' },
+  { id: 'am_8', period: 'am', time: '11:20～11:40', label: '11:20' },
+  { id: 'am_9', period: 'am', time: '11:40～12:00', label: '11:40' },
+  { id: 'am_10', period: 'am', time: '12:00～12:20', label: '12:00' },
+  // 午後（10コマ）
+  { id: 'pm_1', period: 'pm', time: '14:00～14:20', label: '14:00' },
+  { id: 'pm_2', period: 'pm', time: '14:20～14:40', label: '14:20' },
+  { id: 'pm_3', period: 'pm', time: '14:40～15:00', label: '14:40' },
+  { id: 'pm_4', period: 'pm', time: '15:00～15:20', label: '15:00' },
+  { id: 'pm_5', period: 'pm', time: '15:20～15:40', label: '15:20' },
+  { id: 'pm_6', period: 'pm', time: '15:40～16:00', label: '15:40' },
+  { id: 'pm_7', period: 'pm', time: '16:00～16:20', label: '16:00' },
+  { id: 'pm_8', period: 'pm', time: '16:20～16:40', label: '16:20' },
+  { id: 'pm_9', period: 'pm', time: '16:40～17:00', label: '16:40' },
+  { id: 'pm_10', period: 'pm', time: '17:00～17:20', label: '17:00' },
+];
 
 /**
- * 所有区分マスター
+ * 全日程のスケジュール辞書を取得
+ * 構造: { [dateStr: 'YYYY-MM-DD']: { [therapistCode: 'A'|'B'|'C']: { [slotId]: { patientId, units, note } } } }
  */
-export const LOAN_OWNER_TYPES = {
-  HOSPITAL: { id: 'HOSPITAL', label: '当院備品' },
-  VENDOR: { id: 'VENDOR', label: '外部業者借用品（又貸し）' },
-};
-
-/**
- * 貸出ステータスマスター
- */
-export const LOAN_STATUS = {
-  LOANED: { id: 'LOANED', label: '貸出中', color: 'orange' },
-  RETURNED: { id: 'RETURNED', label: '返却完了', color: 'green' },
-  VENDOR_RETURNED: { id: 'VENDOR_RETURNED', label: '業者返却完了', color: 'gray' },
-};
-
-
-/**
- * 登録されているすべての貸出レコードを取得
- * @returns {Array<Object>} 貸出レコード一覧
- */
-export function getAllLoans() {
+export function getAllSchedules() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_LOANS);
-    if (!raw) return [];
+    const raw = localStorage.getItem(STORAGE_KEY_SCHEDULES);
+    if (!raw) return {};
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return typeof parsed === 'object' && parsed !== null ? parsed : {};
   } catch (error) {
-    console.error('[loanStore] 貸出データの読み込みに失敗しました:', error);
-    return [];
+    console.error('[scheduleStore] スケジュール読み込みエラー:', error);
+    return {};
   }
 }
 
 /**
- * 貸出レコードを一括保存
- * @param {Array<Object>} loans 
+ * 全日程のスケジュール辞書を保存
  */
-export function saveAllLoans(loans) {
+export function saveAllSchedules(schedules) {
   try {
-    localStorage.setItem(STORAGE_KEY_LOANS, JSON.stringify(loans));
+    localStorage.setItem(STORAGE_KEY_SCHEDULES, JSON.stringify(schedules));
   } catch (error) {
-    console.error('[loanStore] 貸出データの保存に失敗しました:', error);
+    console.error('[scheduleStore] スケジュール保存エラー:', error);
   }
 }
 
+/**
+ * 特定日付のスケジュールを取得
+ */
+export function getDailySchedule(dateStr) {
+  const all = getAllSchedules();
+  return all[dateStr] || { A: {}, B: {}, C: {} };
+}
 
 /**
- * 物品の貸出を新規登録
- * @param {Object} loanData - 入力データ
- * @param {string} loanData.itemName - 物品名（例: 歩行器、車椅子、ロフストランド杖）
- * @param {string} loanData.patientId - 貸出先患者ID（記号: 'a' 等）または氏名
- * @param {'HOSPITAL'|'VENDOR'} [loanData.ownerType='HOSPITAL'] - 所有区分
- * @param {string} [loanData.vendorName=''] - 業者名（外部業者借用の場合）
- * @param {string} [loanData.loanDate] - 貸出日 (YYYY-MM-DD)。省略時は今日
- * @param {string} [loanData.dueDate=''] - （将来用）返却予定日
- * @param {string} [loanData.notes=''] - 用途・備考メモ（一時帰宅用、デモ機試用等）
- * @returns {Object} 作成された貸出レコード
+ * 1つのコマ（スロット）に患者・単位を設定
+ * 
+ * @param {string} dateStr - 'YYYY-MM-DD'
+ * @param {string} therapistCode - 'A'|'B'|'C'
+ * @param {string} slotId - 例: 'am_1'
+ * @param {Object} slotData - { patientId: 'a', units: 3, note?: string }
  */
-export function registerLoan(loanData) {
-  if (!loanData.itemName || !loanData.itemName.trim()) {
-    throw new Error('物品名は必須です。');
+export function setScheduleSlot(dateStr, therapistCode, slotId, slotData) {
+  const all = getAllSchedules();
+  if (!all[dateStr]) all[dateStr] = {};
+  if (!all[dateStr][therapistCode]) all[dateStr][therapistCode] = {};
+
+  const normPatientId = normalizePatientId(slotData.patientId);
+  const units = parseInt(slotData.units, 10) || 0;
+
+  if (!normPatientId || units <= 0) {
+    // データが空ならコマをクリア
+    delete all[dateStr][therapistCode][slotId];
+  } else {
+    all[dateStr][therapistCode][slotId] = {
+      patientId: normPatientId,
+      units,
+      note: normalizeString(slotData.note || ''),
+      updatedAt: new Date().toISOString(),
+    };
   }
 
-  const loans = getAllLoans();
-  const now = new Date();
-  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  saveAllSchedules(all);
+  return all[dateStr];
+}
 
-  const newLoan = {
-    id: `loan_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-    itemName: normalizeString(loanData.itemName),
-    patientId: normalizePatientId(loanData.patientId) || normalizeString(loanData.patientId),
-    ownerType: loanData.ownerType || 'HOSPITAL',
-    vendorName: loanData.ownerType === 'VENDOR' ? normalizeString(loanData.vendorName) : '',
-    loanDate: loanData.loanDate || todayStr,
-    dueDate: loanData.dueDate || '', // 現在は空欄可能
-    status: 'LOANED',                // 初期状態は「貸出中」
-    returnDate: '',                  // 返却日
-    notes: normalizeString(loanData.notes || ''),
-    createdAt: now.toISOString(),
-    updatedAt: now.toISOString(),
+/**
+ * コマを削除（クリア）
+ */
+export function clearScheduleSlot(dateStr, therapistCode, slotId) {
+  const all = getAllSchedules();
+  if (all[dateStr] && all[dateStr][therapistCode]) {
+    delete all[dateStr][therapistCode][slotId];
+    saveAllSchedules(all);
+  }
+}
+
+/**
+ * 指定日のセラピスト別および全体の集計値（総単位、実人数）を取得
+ */
+export function getDailyStats(dateStr) {
+  const daySchedule = getDailySchedule(dateStr);
+  const therapistStats = {
+    A: { totalUnits: 0, patients: new Set() },
+    B: { totalUnits: 0, patients: new Set() },
+    C: { totalUnits: 0, patients: new Set() },
   };
 
-  loans.unshift(newLoan); // 新しいものを先頭に追加
-  saveAllLoans(loans);
-  return newLoan;
-}
+  const allPatientsToday = new Set();
+  let grandTotalUnits = 0;
 
-/**
- * 物品の返却を記録
- * @param {string} loanId - 貸出ID
- * @param {string} [returnDate] - 返却完了日 (YYYY-MM-DD)。省略時は今日
- * @param {boolean} [returnToVendor=false] - 業者にも返却済みとするか
- * @returns {Object|null} 更新されたレコード
- */
-export function markAsReturned(loanId, returnDate = '', returnToVendor = false) {
-  const loans = getAllLoans();
-  const index = loans.findIndex((l) => l.id === loanId);
-  if (index === -1) return null;
+  ['A', 'B', 'C'].forEach((tCode) => {
+    const slots = daySchedule[tCode] || {};
+    for (const slot of Object.values(slots)) {
+      if (slot && slot.units > 0 && slot.patientId) {
+        therapistStats[tCode].totalUnits += slot.units;
+        therapistStats[tCode].patients.add(slot.patientId);
+        allPatientsToday.add(slot.patientId);
+        grandTotalUnits += slot.units;
+      }
+    }
+  });
 
-  const now = new Date();
-  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-
-  loans[index].status = returnToVendor ? 'VENDOR_RETURNED' : 'RETURNED';
-  loans[index].returnDate = returnDate || todayStr;
-  loans[index].updatedAt = now.toISOString();
-
-  saveAllLoans(loans);
-  return loans[index];
-}
-
-/**
- * 貸出レコードを更新（備考編集やステータス変更など）
- * @param {string} loanId 
- * @param {Partial<Object>} updates 
- * @returns {Object|null}
- */
-export function updateLoan(loanId, updates = {}) {
-  const loans = getAllLoans();
-  const index = loans.findIndex((l) => l.id === loanId);
-  if (index === -1) return null;
-
-  loans[index] = {
-    ...loans[index],
-    ...updates,
-    updatedAt: new Date().toISOString(),
+  return {
+    therapistStats: {
+      A: { totalUnits: therapistStats.A.totalUnits, patientCount: therapistStats.A.patients.size },
+      B: { totalUnits: therapistStats.B.totalUnits, patientCount: therapistStats.B.patients.size },
+      C: { totalUnits: therapistStats.C.totalUnits, patientCount: therapistStats.C.patients.size },
+    },
+    grandTotalUnits,
+    grandPatientCount: allPatientsToday.size,
   };
-
-  saveAllLoans(loans);
-  return loans[index];
 }
 
 /**
- * 貸出レコードを削除
- * @param {string} loanId 
- * @returns {boolean} 成功可否
+ * アプリ内に蓄積された時間割データから、指定年月の集計オブジェクトを生成
+ * （uketsukeWriter / diaryWriter が直接利用できる完全互換構造）
+ * 
+ * @param {number} targetYear 
+ * @param {number} targetMonth 
+ * @returns {Object} aggregated オブジェクト
  */
-export function deleteLoan(loanId) {
-  const loans = getAllLoans();
-  const filtered = loans.filter((l) => l.id !== loanId);
-  if (filtered.length === loans.length) return false;
+export function aggregateFromAppSchedule(targetYear, targetMonth) {
+  const all = getAllSchedules();
+  const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
 
-  saveAllLoans(filtered);
-  return true;
-}
+  const byPatientAndDate = {};
+  const byDateAndPatient = {};
+  const patientTotals = {};
+  const dailySummary = {};
+  let rawRecordsCount = 0;
 
+  // 各日を初期化
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateObj = new Date(targetYear, targetMonth - 1, d);
+    const dateStr = formatDate(dateObj);
+    byDateAndPatient[dateStr] = {};
+    dailySummary[dateStr] = {
+      date: dateObj,
+      dateStr,
+      day: d,
+      totalUnits: 0,
+      uniquePatients: new Set(),
+      therapistUnits: { A: 0, B: 0, C: 0 },
+    };
+  }
 
-/**
- * 現在「貸出中」の物品一覧を取得（業者又貸し含む）
- * @returns {Array<Object>}
- */
-export function getActiveLoans() {
-  return getAllLoans().filter((l) => l.status === 'LOANED');
-}
+  // 該当月の日付を走査
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateObj = new Date(targetYear, targetMonth - 1, d);
+    const dateStr = formatDate(dateObj);
+    const dayData = all[dateStr] || {};
 
-/**
- * 業者からの借用品（又貸し）のみを取得
- * @param {boolean} [activeOnly=false] - 貸出中のみ絞り込み
- * @returns {Array<Object>}
- */
-export function getVendorLoans(activeOnly = false) {
-  return getAllLoans().filter((l) => {
-    const isVendor = l.ownerType === 'VENDOR';
-    return activeOnly ? (isVendor && l.status === 'LOANED') : isVendor;
-  });
-}
+    ['A', 'B', 'C'].forEach((tCode) => {
+      const slots = dayData[tCode] || {};
+      for (const [slotId, slot] of Object.entries(slots)) {
+        if (!slot || !slot.patientId || slot.units <= 0) continue;
 
-/**
- * 特定の患者に現在貸し出している物品一覧を取得
- * @param {string} patientId - 患者記号またはID
- * @returns {Array<Object>}
- */
-export function getLoansByPatient(patientId) {
-  const normId = normalizePatientId(patientId);
-  return getAllLoans().filter((l) => {
-    return l.status === 'LOANED' && normalizePatientId(l.patientId) === normId;
-  });
+        const pId = normalizePatientId(slot.patientId);
+        const units = slot.units;
+        rawRecordsCount += 1;
+
+        // byPatientAndDate 初期化
+        if (!byPatientAndDate[pId]) {
+          byPatientAndDate[pId] = {};
+          patientTotals[pId] = {
+            patientId: pId,
+            totalUnits: 0,
+            dates: new Set(),
+          };
+        }
+        if (!byPatientAndDate[pId][dateStr]) {
+          byPatientAndDate[pId][dateStr] = { PT: 0, OT: 0, total: 0, records: [] };
+        }
+
+        // byDateAndPatient 初期化
+        if (!byDateAndPatient[dateStr][pId]) {
+          byDateAndPatient[dateStr][pId] = { PT: 0, OT: 0, total: 0 };
+        }
+
+        // 加算（現在は全員PT）
+        byPatientAndDate[pId][dateStr].PT += units;
+        byPatientAndDate[pId][dateStr].total += units;
+        byPatientAndDate[pId][dateStr].records.push({
+          date: dateObj,
+          dateStr,
+          therapistCode: tCode,
+          slotId,
+          patientId: pId,
+          units,
+        });
+
+        byDateAndPatient[dateStr][pId].PT += units;
+        byDateAndPatient[dateStr][pId].total += units;
+
+        patientTotals[pId].totalUnits += units;
+        patientTotals[pId].dates.add(dateStr);
+
+        dailySummary[dateStr].totalUnits += units;
+        dailySummary[dateStr].uniquePatients.add(pId);
+        dailySummary[dateStr].therapistUnits[tCode] += units;
+      }
+    });
+  }
+
+  return {
+    targetYear,
+    targetMonth,
+    daysInMonth,
+    rawRecordsCount,
+    byPatientAndDate,
+    byDateAndPatient,
+    patientTotals,
+    dailySummary,
+    activePatientIds: Object.keys(patientTotals).sort(),
+  };
 }
