@@ -4,26 +4,25 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>リハビリ業務管理システム | reha-work-manager</title>
-  <!-- Google Fonts: Inter -->
+  
+  <!-- Google Fonts: Inter & Noto Sans JP -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css">
-  <!-- SheetJS (Excel生成ライブラリ: 完全ローカル動作) -->
-  <script src="lib/xlsx.full.min.js"></script>
-  <script>
-    if (typeof XLSX === 'undefined') {
-      document.write('<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"><\/script>');
-    }
-  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@400;500;700;800&display=swap" rel="stylesheet">
+  
+  <!-- SheetJS (Excel入出力ライブラリ: 完全ローカル動作) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  
+  <!-- アプリCSS -->
+  <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
   <div class="app-layout">
-    <!-- 洗練されたトップナビゲーションバー -->
+    <!-- 第1段: 最上部グローバルナビゲーション -->
     <header class="navbar">
       <div class="navbar-brand">
         <div class="brand-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
           </svg>
         </div>
@@ -33,117 +32,116 @@
         </div>
       </div>
 
-      <!-- メインナビゲーションタブ（洗練されたピル型タブ） -->
       <nav class="nav-tabs">
-        <button class="nav-tab active" data-target="view-daily-schedule">
+        <button type="button" class="nav-tab active" data-target="view-daily-schedule">
           <span class="tab-icon">🕒</span>
-          <span class="tab-label">当日時間割・単位</span>
+          <span>当日時間割・単位</span>
         </button>
-        <button class="nav-tab" data-target="view-monthly-units">
+        <button type="button" class="nav-tab" data-target="view-monthly-units">
           <span class="tab-icon">📊</span>
-          <span class="tab-label">月間単位・日誌管理</span>
+          <span>月間単位・日誌管理</span>
         </button>
-        <button class="nav-tab" data-target="view-patients">
+        <button type="button" class="nav-tab" data-target="view-patients">
           <span class="tab-icon">👥</span>
-          <span class="tab-label">患者・期限管理</span>
+          <span>患者・期限管理</span>
         </button>
-        <button class="nav-tab" data-target="view-equipment">
+        <button type="button" class="nav-tab" data-target="view-equipment">
           <span class="tab-icon">📦</span>
-          <span class="tab-label">物品貸出管理</span>
+          <span>物品貸出管理</span>
         </button>
-        <button class="nav-tab" data-target="view-export">
+        <button type="button" class="nav-tab" data-target="view-export">
           <span class="tab-icon">📥</span>
-          <span class="tab-label">月末Excel出力</span>
+          <span>月末Excel出力</span>
         </button>
       </nav>
 
-      <!-- 完全ローカル安全インジケーター -->
       <div class="system-security-badge" title="患者データはブラウザ内のみで保持され、外部ネットワークには一切送信されません">
         <span class="pulse-indicator"></span>
-        <span class="badge-text">完全ローカル動作 (院内保護)</span>
+        <span>完全ローカル保護</span>
       </div>
     </header>
 
     <main class="content-body">
-      <!-- ======================================================== -->
-      <!-- VIEW 1: 日々の時間管理・単位管理（メイン画面） -->
-      <!-- ======================================================== -->
+      <!-- VIEW 1: 当日時間割・単位（メイン画面） -->
       <section id="view-daily-schedule" class="view-panel active">
-        <!-- 上部コントロール ＆ 日計KPIサマリーバー -->
+        <!-- 第2段: 日付ナビゲーター ＆ 本日単位カウンター -->
         <div class="schedule-header-strip">
           <div class="calendar-navigator">
             <div class="date-controls">
-              <button id="btn-prev-day" class="btn-icon" title="前日">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
-              </button>
+              <button type="button" id="btn-prev-day" class="btn-icon" title="前日">◀</button>
               <input type="date" id="schedule-target-date" class="date-input-picker">
-              <button id="btn-next-day" class="btn-icon" title="翌日">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
-              </button>
-              <button id="btn-today" class="btn-pill-today">今日</button>
+              <button type="button" id="btn-next-day" class="btn-icon" title="翌日">▶</button>
+              <button type="button" id="btn-today" class="btn-pill-today">今日</button>
             </div>
             <div class="date-display-badge">
               <span id="schedule-day-label" class="current-date-text">----年--月--日 (-)</span>
             </div>
           </div>
 
-          <!-- 一目でわかる本日単位メーター -->
+          <!-- 本日単位メーター (PT別 ＆ 全体) -->
           <div class="daily-kpi-bar">
             <div class="kpi-box">
               <span class="kpi-label">PT A</span>
               <div class="kpi-metric">
-                <span id="kpi-therapist-A" class="kpi-number">0</span><span class="kpi-unit">単位</span>
+                <span id="kpi-therapist-A" class="kpi-number">0</span>
+                <span class="kpi-unit">単位</span>
               </div>
               <span id="kpi-patients-A" class="kpi-sub">0名</span>
             </div>
+
             <div class="kpi-box">
               <span class="kpi-label">PT B</span>
               <div class="kpi-metric">
-                <span id="kpi-therapist-B" class="kpi-number">0</span><span class="kpi-unit">単位</span>
+                <span id="kpi-therapist-B" class="kpi-number">0</span>
+                <span class="kpi-unit">単位</span>
               </div>
               <span id="kpi-patients-B" class="kpi-sub">0名</span>
             </div>
+
             <div class="kpi-box">
               <span class="kpi-label">PT C</span>
               <div class="kpi-metric">
-                <span id="kpi-therapist-C" class="kpi-number">0</span><span class="kpi-unit">単位</span>
+                <span id="kpi-therapist-C" class="kpi-number">0</span>
+                <span class="kpi-unit">単位</span>
               </div>
               <span id="kpi-patients-C" class="kpi-sub">0名</span>
             </div>
+
             <div class="kpi-box highlight">
               <span class="kpi-label">本日 全体合計</span>
               <div class="kpi-metric">
-                <span id="kpi-clinic-total" class="kpi-number text-accent">0</span><span class="kpi-unit text-accent">単位</span>
+                <span id="kpi-clinic-total" class="kpi-number text-accent">0</span>
+                <span class="kpi-unit text-accent">単位</span>
               </div>
-              <span id="kpi-clinic-patients" class="kpi-sub font-semibold">実人数 0名</span>
+              <span id="kpi-clinic-patients" class="kpi-sub">実人数 0名</span>
             </div>
           </div>
         </div>
 
-        <!-- ワークスペース（左: 患者パレット 70名対応 / 右: タイムテーブル） -->
         <div class="schedule-canvas-layout">
+          <!-- 左側: 患者パレット（外来50名・入院19名対応） -->
           <aside class="palette-panel">
             <div class="palette-panel-header">
               <div class="palette-caption">
                 <h3 class="palette-heading">👥 患者パレット</h3>
-                <span class="palette-hint">ドラッグまたはタップで配置</span>
+                <span class="palette-hint">ドラッグまたはタップ</span>
               </div>
 
-              <!-- 入院・外来・全員クイックフィルター -->
+              <!-- 全員 / 入院 / 外来 切替 -->
               <div class="segmented-control">
-                <button type="button" class="segment-btn active" data-filter="ALL">全員 <span id="badge-count-all" class="count-pill">69</span></button>
-                <button type="button" class="segment-btn" data-filter="INPATIENT">入院 <span id="badge-count-inpatient" class="count-pill">19</span></button>
-                <button type="button" class="segment-btn" data-filter="OUTPATIENT">外来 <span id="badge-count-outpatient" class="count-pill">50</span></button>
+                <button type="button" class="segment-btn active" data-filter="ALL">全員 <span id="badge-count-all" class="count-pill">0</span></button>
+                <button type="button" class="segment-btn" data-filter="INPATIENT">入院 <span id="badge-count-inpatient" class="count-pill">0</span></button>
+                <button type="button" class="segment-btn" data-filter="OUTPATIENT">外来 <span id="badge-count-outpatient" class="count-pill">0</span></button>
               </div>
 
               <!-- リアルタイムあいまい検索 -->
               <div class="search-input-wrapper">
-                <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <span class="search-icon">🔍</span>
                 <input type="text" id="patient-palette-search" placeholder="名前・記号・かなで検索..." autocomplete="off">
                 <button type="button" id="btn-clear-palette-search" class="clear-search-btn" title="検索クリア">&times;</button>
               </div>
 
-              <!-- 五十音クイックバー（外来50名対応） -->
+              <!-- 五十音クイックバー -->
               <div class="alphabet-index-bar">
                 <button type="button" class="kana-chip active" data-kana="ALL">全</button>
                 <button type="button" class="kana-chip" data-kana="ア">あ</button>
@@ -160,9 +158,7 @@
             </div>
 
             <!-- 患者カード一覧スクロール領域 -->
-            <div class="palette-scroll-area" id="patient-palette-list">
-              <!-- JSで動的生成されるドラッグ可能な患者チップ -->
-            </div>
+            <div class="palette-scroll-area" id="patient-palette-list"></div>
 
             <div class="palette-panel-footer">
               <button type="button" id="btn-quick-add-patient" class="btn-secondary-compact w-full">
@@ -171,23 +167,25 @@
             </div>
           </aside>
 
+          <!-- 右側: タイムテーブル本体 -->
           <div class="timetable-main-panel">
             <div class="timetable-container-card">
+              <!-- セラピストヘッダー行 -->
               <div class="timetable-header-row">
-                <div class="col-header time-col-header">時間帯</div>
-                <div class="col-header therapist-col-header">
+                <div class="col-header time-col-title">時間帯</div>
+                <div class="col-header">
                   <div class="therapist-title-pill">
                     <span class="role-badge">PT</span>
                     <span class="therapist-name">セラピスト A</span>
                   </div>
                 </div>
-                <div class="col-header therapist-col-header">
+                <div class="col-header">
                   <div class="therapist-title-pill">
                     <span class="role-badge">PT</span>
                     <span class="therapist-name">セラピスト B</span>
                   </div>
                 </div>
-                <div class="col-header therapist-col-header">
+                <div class="col-header">
                   <div class="therapist-title-pill">
                     <span class="role-badge">PT</span>
                     <span class="therapist-name">セラピスト C</span>
@@ -195,23 +193,19 @@
                 </div>
               </div>
 
-              <!-- タイムスロット描画コンテナ -->
-              <div class="timetable-slots-body" id="timetable-grid">
-                <!-- JSで午前（10コマ）・午後（10コマ）を動的生成 -->
-              </div>
+              <!-- スロット本体（JSにより動的生成） -->
+              <div class="timetable-slots-body" id="timetable-grid"></div>
             </div>
           </div>
         </div>
       </section>
 
-      <!-- ======================================================== -->
-      <!-- VIEW 2: 月間単位・日々の業務日誌管理 -->
-      <!-- ======================================================== -->
+      <!-- VIEW 2: 月間単位・日誌管理 -->
       <section id="view-monthly-units" class="view-panel">
         <div class="panel-header-strip">
-          <div class="header-titles">
+          <div>
             <h2 class="view-title">📊 月間単位モニタリング ＆ 業務日誌管理</h2>
-            <p class="view-subtitle">各患者の当月累計単位・月13単位制限の監視および日別の業務日誌（疾患別・早期加算内訳）をリアルタイム確認</p>
+            <p class="view-subtitle">患者別累計単位・月13単位制限の追跡および日別業務日誌のリアルタイムプレビュー</p>
           </div>
           <div class="month-selector-group">
             <select id="monthly-target-year" class="form-select-sm"></select>
@@ -224,13 +218,10 @@
           </div>
         </div>
 
-        <!-- 2分割ビュー（左: 月13単位・患者別累計 / 右: 日々の業務日誌集計プレビュー） -->
         <div class="monthly-workspace-grid">
-          <!-- 左側: 月間患者別累計＆13単位制限アラート -->
           <div class="dashboard-card">
             <div class="card-heading-row">
-              <h3 class="card-headline">🎯 患者別 今月の累計単位（月13単位超過チェック）</h3>
-              <span class="badge-info-pill">上限超え患者を自動追跡</span>
+              <h3 class="card-headline">🎯 患者別 今月の累計単位（月13単位管理）</h3>
             </div>
             <div class="table-container">
               <table class="modern-table">
@@ -243,43 +234,34 @@
                     <th>算定状況 / 13単位管理</th>
                   </tr>
                 </thead>
-                <tbody id="monthly-patient-units-tbody">
-                  <!-- JSで動的生成 -->
-                </tbody>
+                <tbody id="monthly-patient-units-tbody"></tbody>
               </table>
             </div>
           </div>
 
-          <!-- 右側: 本日・選択日の業務日誌プレビュー（疾患別・加算別内訳） -->
           <div class="dashboard-card">
             <div class="card-heading-row">
               <h3 class="card-headline">📒 本日の業務日誌 集計プレビュー</h3>
               <span id="diary-preview-date-badge" class="date-tag-badge">今日</span>
             </div>
-            <div class="diary-stats-summary" id="daily-diary-preview-container">
-              <!-- JSで動的生成（入院・外来の脳血管・廃用・運動器・早期加算実人数） -->
-            </div>
+            <div id="daily-diary-preview-container"></div>
           </div>
         </div>
       </section>
 
-      <!-- ======================================================== -->
-      <!-- VIEW 3: 患者・期限管理（早期加算・発症日・計画書） -->
-      <!-- ======================================================== -->
+      <!-- VIEW 3: 患者台帳・期限管理 -->
       <section id="view-patients" class="view-panel">
         <div class="panel-header-strip">
-          <div class="header-titles">
+          <div>
             <h2 class="view-title">👥 患者台帳・期限・早期加算管理</h2>
-            <p class="view-subtitle">入院日、転院前の前医入院日（早期加算起算日）、発症日、総合実施計画書の期限アラートを一括管理</p>
+            <p class="view-subtitle">入院日、転院前の前医入院日（早期加算起算日）、発症日、計画書期限を一括管理</p>
           </div>
-          <button id="btn-add-patient-master" class="btn-primary-action">
-            ＋ 新規患者を追加
-          </button>
+          <button type="button" id="btn-add-patient-master" class="btn-primary-action">＋ 新規患者を追加</button>
         </div>
 
         <div class="dashboard-card full-width">
           <div class="table-container">
-            <table class="modern-table patient-table">
+            <table class="modern-table">
               <thead>
                 <tr>
                   <th>患者記号</th>
@@ -287,7 +269,7 @@
                   <th>区分</th>
                   <th>疾患区分</th>
                   <th>当院入院日</th>
-                  <th>早期加算起算日 (前医)</th>
+                  <th>早期加算起算日</th>
                   <th>発症日 / 起算日</th>
                   <th>早期加算判定</th>
                   <th>算定上限日</th>
@@ -295,26 +277,20 @@
                   <th>操作</th>
                 </tr>
               </thead>
-              <tbody id="patient-deadlines-tbody">
-                <!-- JSで動的生成 -->
-              </tbody>
+              <tbody id="patient-deadlines-tbody"></tbody>
             </table>
           </div>
         </div>
       </section>
 
-      <!-- ======================================================== -->
-      <!-- VIEW 4: 物品貸出管理（当院備品 ＆ 業者又貸し） -->
-      <!-- ======================================================== -->
+      <!-- VIEW 4: 物品貸出管理 -->
       <section id="view-equipment" class="view-panel">
         <div class="panel-header-strip">
-          <div class="header-titles">
+          <div>
             <h2 class="view-title">📦 リハビリ物品・機器貸出管理</h2>
-            <p class="view-subtitle">当院備品および外部業者からの借用（又貸し）を管理。返却期限なし運用に対応</p>
+            <p class="view-subtitle">当院備品および外部業者からの借用（又貸し）を管理</p>
           </div>
-          <button id="btn-add-loan" class="btn-primary-action">
-            ＋ 貸出を登録
-          </button>
+          <button type="button" id="btn-add-loan" class="btn-primary-action">＋ 貸出を登録</button>
         </div>
 
         <div class="dashboard-card full-width">
@@ -332,85 +308,91 @@
                   <th>操作</th>
                 </tr>
               </thead>
-              <tbody id="loans-tbody">
-                <!-- JSで動的生成 -->
-              </tbody>
+              <tbody id="loans-tbody"></tbody>
             </table>
           </div>
         </div>
       </section>
 
-      <!-- ======================================================== -->
-      <!-- VIEW 5: 月末Excel出力（ワンクリックダウンロード） -->
-      <!-- ======================================================== -->
+      <!-- VIEW 5: 月末Excel出力 -->
       <section id="view-export" class="view-panel">
         <div class="panel-header-strip">
-          <div class="header-titles">
+          <div>
             <h2 class="view-title">📥 提出用Excelのワンクリック出力</h2>
-            <p class="view-subtitle">アプリ内に蓄積されたデータから、受付提出用Excelおよび日別業務日誌Excelを自動生成して保存します</p>
+            <p class="view-subtitle">アプリ内に蓄積された時間割データから、原本フォーマットの完成版Excelを自動生成</p>
           </div>
         </div>
 
         <div class="export-dashboard-grid">
-          <!-- 受付提出用Excelカード -->
           <div class="export-action-card">
             <div class="export-icon-container">📑</div>
-            <div class="export-details">
+            <div>
               <h3 class="export-title">受付提出用 Excel（単位管理）</h3>
-              <p class="export-desc">各患者の1日〜31日のPT実施単位数、令和8年改定の早期加算（4日/14日）、レセプト合計シートへ自動集計された完成ファイルを出力します。</p>
+              <p class="export-desc">各患者の1日〜31日のPT実施単位数、令和8年改定の早期加算（4日/14日）、レセプト合計を自動集計して出力します。</p>
             </div>
-            <div class="export-footer-action">
-              <button id="btn-export-uketsuke" class="btn-success-action w-full">
-                📥 受付提出用Excelをダウンロード
-              </button>
-            </div>
+            <button type="button" id="btn-export-uketsuke" class="btn-success-action w-full">📥 受付提出用Excelをダウンロード</button>
           </div>
 
-          <!-- 業務日誌Excelカード -->
           <div class="export-action-card">
             <div class="export-icon-container">📒</div>
-            <div class="export-details">
+            <div>
               <h3 class="export-title">業務日誌 Excel（日別完成版）</h3>
-              <p class="export-desc">1日〜31日の日別シート（X列・24列目）に、入院/外来・脳血管・廃用・運動器・消炎鎮痛・維持期介護の実人数と単位数を流し込んだ原本ファイルを出力します。</p>
+              <p class="export-desc">1日〜31日の日別シート（24列目）に入院/外来・脳血管・廃用・運動器・消炎鎮痛の実人数と単位数を書き出します。</p>
             </div>
-            <div class="export-footer-action">
-              <button id="btn-export-diary" class="btn-success-action w-full">
-                📥 業務日誌Excelをダウンロード
-              </button>
-            </div>
+            <button type="button" id="btn-export-diary" class="btn-success-action w-full">📥 業務日誌Excelをダウンロード</button>
           </div>
         </div>
-
-        <!-- 原本テンプレートの更新（初回またはレイアウト変更時のみ利用） -->
-        <details class="advanced-settings-box">
-          <summary class="advanced-settings-summary">
-            ⚙️ 提出原本テンプレートの変更・差し替えを行う場合はこちら（通常は不要です）
-          </summary>
-          <div class="template-replace-grid">
-            <div class="template-upload-item">
-              <label class="font-medium text-sm">受付提出用原本 (.xlsm / .xlsx)</label>
-              <input type="file" id="file-input-uketsuke" class="file-picker" accept=".xlsx,.xlsm,.xls">
-              <span id="badge-uketsuke" class="status-pill waiting">内蔵標準テンプレート</span>
-            </div>
-            <div class="template-upload-item">
-              <label class="font-medium text-sm">業務日誌原本 (.xlsx)</label>
-              <input type="file" id="file-input-diary" class="file-picker" accept=".xlsx,.xlsm,.xls">
-              <span id="badge-diary" class="status-pill waiting">内蔵標準テンプレート</span>
-            </div>
-          </div>
-        </details>
       </section>
     </main>
   </div>
 
-  <!-- ======================================================== -->
+  <!-- コマ編集モーダル -->
+  <div id="slot-modal" class="modal-overlay">
+    <div class="modal-card modal-card-sm">
+      <div class="modal-header">
+        <h3 class="modal-headline" id="slot-modal-title">コマの編集</h3>
+        <button type="button" id="modal-close-slot" class="btn-close-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="slot-modal-patient">患者記号または氏名 <span class="text-danger">*</span></label>
+          <div style="display: flex; gap: 0.5rem;">
+            <input type="text" id="slot-modal-patient" placeholder="例: a" class="form-input">
+            <select id="slot-modal-patient-select" class="form-select" style="max-width: 150px;">
+              <option value="">患者選択</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>実施単位数（時間）</label>
+          <div class="unit-preset-selector">
+            <button type="button" class="preset-chip" data-unit="1">1単位 (20分)</button>
+            <button type="button" class="preset-chip active" data-unit="2">2単位 (40分)</button>
+            <button type="button" class="preset-chip" data-unit="3">3単位 (60分)</button>
+            <input type="number" id="slot-modal-units" min="1" max="9" value="2" class="unit-custom-input">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="slot-modal-note">備考メモ (任意)</label>
+          <input type="text" id="slot-modal-note" placeholder="例: 歩行訓練、評価" class="form-input">
+        </div>
+      </div>
+      <div class="modal-footer justify-between">
+        <button type="button" id="btn-clear-slot" class="btn-text-danger">このコマを空にする</button>
+        <div class="button-group-row">
+          <button type="button" id="btn-cancel-slot" class="btn-modal-secondary">キャンセル</button>
+          <button type="button" id="btn-save-slot" class="btn-modal-primary">設定する</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- 患者編集モーダル -->
-  <!-- ======================================================== -->
   <div id="patient-modal" class="modal-overlay">
     <div class="modal-card">
       <div class="modal-header">
         <h3 class="modal-headline">患者情報の編集</h3>
-        <button id="modal-close-patient" class="btn-close-modal">&times;</button>
+        <button type="button" id="modal-close-patient" class="btn-close-modal">&times;</button>
       </div>
       <div class="modal-body-scroll">
         <div class="form-row">
@@ -419,7 +401,7 @@
             <input type="text" id="patient-modal-id" placeholder="例: a" class="form-input">
           </div>
           <div class="form-group flex-2">
-            <label for="patient-modal-name">氏名（表示用）</label>
+            <label for="patient-modal-name">氏名</label>
             <input type="text" id="patient-modal-name" placeholder="例: 山田 太郎" class="form-input">
           </div>
         </div>
@@ -429,7 +411,7 @@
             <select id="patient-modal-category" class="form-select">
               <option value="inpatient_1">実施ﾘｽﾄ 入院</option>
               <option value="inpatient_2">入院(2)</option>
-              <option value="inpatient_maintenance">入院 （維持期介護)</option>
+              <option value="inpatient_maintenance">入院 (維持期介護)</option>
               <option value="outpatient_1">外来</option>
             </select>
           </div>
@@ -449,13 +431,13 @@
             <input type="date" id="patient-modal-admission" class="form-input">
           </div>
           <div class="form-group flex-1">
-            <label for="patient-modal-early-start">早期加算起算日 (転院前医入院日)</label>
+            <label for="patient-modal-early-start">早期加算起算日 (前医入院日)</label>
             <input type="date" id="patient-modal-early-start" class="form-input">
           </div>
         </div>
         <div class="form-row">
           <div class="form-group flex-1">
-            <label for="patient-modal-onset">発症日 / 手術日 (起算日)</label>
+            <label for="patient-modal-onset">発症日 / 手術日</label>
             <input type="date" id="patient-modal-onset" class="form-input">
           </div>
           <div class="form-group flex-1">
@@ -463,51 +445,45 @@
             <input type="date" id="patient-modal-last-plan" class="form-input">
           </div>
         </div>
-        <div class="form-group-checkbox">
-          <input type="checkbox" id="patient-modal-exempt">
-          <label for="patient-modal-exempt">算定上限除外フラグ（継続改善等の理由で月13単位制限の対象外とする）</label>
-        </div>
         <div class="form-group">
-          <label for="patient-modal-notes">備考メモ</label>
-          <textarea id="patient-modal-notes" rows="2" class="form-textarea" placeholder="訓練方針、車椅子自操など"></textarea>
+          <label for="patient-modal-notes">特記事項・メモ</label>
+          <textarea id="patient-modal-notes" rows="2" class="form-textarea" placeholder="特記事項があれば入力"></textarea>
         </div>
       </div>
       <div class="modal-footer">
-        <button id="btn-cancel-patient" class="btn-modal-secondary">キャンセル</button>
-        <button id="btn-save-patient" class="btn-modal-primary">保存する</button>
+        <button type="button" id="btn-cancel-patient" class="btn-modal-secondary">キャンセル</button>
+        <button type="button" id="btn-save-patient" class="btn-modal-primary">保存する</button>
       </div>
     </div>
   </div>
 
-  <!-- ======================================================== -->
-  <!-- 物品貸出登録モーダル -->
-  <!-- ======================================================== -->
+  <!-- 物品貸出モーダル -->
   <div id="loan-modal" class="modal-overlay">
     <div class="modal-card">
       <div class="modal-header">
         <h3 class="modal-headline">物品貸出の登録</h3>
-        <button id="modal-close-loan" class="btn-close-modal">&times;</button>
+        <button type="button" id="modal-close-loan" class="btn-close-modal">&times;</button>
       </div>
       <div class="modal-body-scroll">
         <div class="form-group">
           <label for="loan-item-name">物品名・型番 <span class="text-danger">*</span></label>
-          <input type="text" id="loan-item-name" placeholder="例: 四輪歩行器、チルト車椅子" class="form-input">
+          <input type="text" id="loan-item-name" placeholder="例: 四輪歩行器、標準車椅子" class="form-input">
         </div>
         <div class="form-row">
           <div class="form-group flex-1">
-            <label for="loan-patient-id">貸出先患者</label>
-            <input type="text" id="loan-patient-id" placeholder="例: a または 山田" class="form-input">
+            <label for="loan-patient-id">貸出先患者記号/氏名</label>
+            <input type="text" id="loan-patient-id" placeholder="例: a" class="form-input">
           </div>
           <div class="form-group flex-1">
             <label for="loan-owner-type">所有区分</label>
             <select id="loan-owner-type" class="form-select">
               <option value="HOSPITAL">当院備品</option>
-              <option value="VENDOR">外部業者からの借用（又貸し）</option>
+              <option value="VENDOR">外部業者借用（又貸し）</option>
             </select>
           </div>
         </div>
         <div class="form-group" id="vendor-name-group" style="display: none;">
-          <label for="loan-vendor-name">借用先業者名</label>
+          <label for="loan-vendor-name">借用元業者名</label>
           <input type="text" id="loan-vendor-name" placeholder="例: ○○メディカル" class="form-input">
         </div>
         <div class="form-row">
@@ -516,62 +492,18 @@
             <input type="date" id="loan-date" class="form-input">
           </div>
           <div class="form-group flex-1">
-            <label for="loan-due-date">返却予定日 (任意・空欄可)</label>
+            <label for="loan-due-date">返却予定日 (任意)</label>
             <input type="date" id="loan-due-date" class="form-input">
           </div>
         </div>
         <div class="form-group">
-          <label for="loan-notes">用途・備考</label>
-          <textarea id="loan-notes" rows="2" class="form-textarea" placeholder="自宅一時外泊で使用など"></textarea>
+          <label for="loan-notes">備考メモ</label>
+          <input type="text" id="loan-notes" placeholder="用途や注意事項" class="form-input">
         </div>
       </div>
       <div class="modal-footer">
-        <button id="btn-cancel-loan" class="btn-modal-secondary">キャンセル</button>
-        <button id="btn-save-loan" class="btn-modal-primary">登録する</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ======================================================== -->
-  <!-- コマ編集モーダル（スロットクリック時） -->
-  <!-- ======================================================== -->
-  <div id="slot-modal" class="modal-overlay">
-    <div class="modal-card modal-card-sm">
-      <div class="modal-header">
-        <h3 class="modal-headline" id="slot-modal-title">コマの編集</h3>
-        <button id="modal-close-slot" class="btn-close-modal">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label for="slot-modal-patient">患者記号または氏名 <span class="text-danger">*</span></label>
-          <div class="inline-select-group">
-            <input type="text" id="slot-modal-patient" placeholder="例: a" class="form-input" autofocus>
-            <select id="slot-modal-patient-select" class="form-select-inline">
-              <option value="">登録患者から選択</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-group">
-          <label>実施単位数</label>
-          <div class="unit-preset-selector">
-            <button type="button" class="preset-chip" data-unit="1">1単位</button>
-            <button type="button" class="preset-chip active" data-unit="2">2単位</button>
-            <button type="button" class="preset-chip" data-unit="3">3単位</button>
-            <button type="button" class="preset-chip" data-unit="4">4単位</button>
-            <input type="number" id="slot-modal-units" min="1" max="9" value="2" class="unit-custom-input">
-          </div>
-        </div>
-        <div class="form-group">
-          <label for="slot-modal-note">備考メモ (任意)</label>
-          <input type="text" id="slot-modal-note" placeholder="例: 歩行訓練、評価" class="form-input">
-        </div>
-      </div>
-      <div class="modal-footer justify-between">
-        <button id="btn-clear-slot" class="btn-text-danger">このコマを空にする</button>
-        <div class="button-group-row">
-          <button id="btn-cancel-slot" class="btn-modal-secondary">キャンセル</button>
-          <button id="btn-save-slot" class="btn-modal-primary">設定する</button>
-        </div>
+        <button type="button" id="btn-cancel-loan" class="btn-modal-secondary">キャンセル</button>
+        <button type="button" id="btn-save-loan" class="btn-modal-primary">登録する</button>
       </div>
     </div>
   </div>
@@ -579,7 +511,7 @@
   <!-- トースト通知コンテナ -->
   <div id="toast-container"></div>
 
-  <!-- メインJavaScriptコントローラー (ES Modules) -->
-  <script type="module" src="js/app.js"></script>
+  <!-- メインコントローラー（ES Module） -->
+  <script type="module" src="./js/app.js"></script>
 </body>
 </html>
