@@ -1,262 +1,204 @@
-/**
- * @file scheduleStore.js
- * @description セラピスト別当日時間割（午前・午後コマ）および単位入力のローカル保存ストア
- * 
- * - 各セラピスト（A, B, C）の当日のタイムスケジュール（午前9:00〜12:20、午後14:00〜18:00）を直接管理
- * - 17:20～17:40、17:40～18:00 の夕方リハビリ枠を完備
- * - 入力された患者・単位数・コマデータをブラウザのLocalStorageに完全ローカル蓄積
- * - Excelファイルに毎日手入力することなく、本アプリ内の蓄積データから月末の受付提出・業務日誌を即座に自動集計可能
- */
+// js/store/scheduleStore.js
+// 時間割コマCRUD・LocalStorage永続化・月間集計マトリクス層
 
-import { normalizePatientId, normalizeString } from '../core/dataNormalizer.js';
-import { formatDate } from '../core/deadlineCalc.js';
+import { normalizeDateString, safeParseInt } from '../core/dataNormalizer.js';
+import { getPatientById } from './patientStore.js';
+import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
 
-const STORAGE_KEY_SCHEDULES = 'reha_manager_schedules_v1';
-
-// リハビリ記録のコマ枠定義（午前10コマ、午後12コマ: 18:00まで対応）
-export const TIME_SLOTS = [
-  // 午前セッション（10コマ）
-  { id: 'am_1', period: 'am', time: '9:00～9:20', label: '9:00' },
-  { id: 'am_2', period: 'am', time: '9:20～9:40', label: '9:20' },
-  { id: 'am_3', period: 'am', time: '9:40～10:00', label: '9:40' },
-  { id: 'am_4', period: 'am', time: '10:00～10:20', label: '10:00' },
-  { id: 'am_5', period: 'am', time: '10:20～10:40', label: '10:20' },
-  { id: 'am_6', period: 'am', time: '10:40～11:00', label: '10:40' },
-  { id: 'am_7', period: 'am', time: '11:00～11:20', label: '11:00' },
-  { id: 'am_8', period: 'am', time: '11:20～11:40', label: '11:20' },
-  { id: 'am_9', period: 'am', time: '11:40～12:00', label: '11:40' },
-  { id: 'am_10', period: 'am', time: '12:00～12:20', label: '12:00' },
-
-  // 午後セッション（12コマ: 14:00～18:00）
-  { id: 'pm_1', period: 'pm', time: '14:00～14:20', label: '14:00' },
-  { id: 'pm_2', period: 'pm', time: '14:20～14:40', label: '14:20' },
-  { id: 'pm_3', period: 'pm', time: '14:40～15:00', label: '14:40' },
-  { id: 'pm_4', period: 'pm', time: '15:00～15:20', label: '15:00' },
-  { id: 'pm_5', period: 'pm', time: '15:20～15:40', label: '15:20' },
-  { id: 'pm_6', period: 'pm', time: '15:40～16:00', label: '15:40' },
-  { id: 'pm_7', period: 'pm', time: '16:00～16:20', label: '16:00' },
-  { id: 'pm_8', period: 'pm', time: '16:20～16:40', label: '16:20' },
-  { id: 'pm_9', period: 'pm', time: '16:40～17:00', label: '16:40' },
-  { id: 'pm_10', period: 'pm', time: '17:00～17:20', label: '17:00' },
-  { id: 'pm_11', period: 'pm', time: '17:20～17:40', label: '17:20' },
-  { id: 'pm_12', period: 'pm', time: '17:40～18:00', label: '17:40' },
-];
+const STORAGE_PREFIX = 'reha_schedule_';
 
 /**
- * 全日程のスケジュール辞書を取得
- * 構造: { [dateStr: 'YYYY-MM-DD']: { [therapistCode: 'A'|'B'|'C']: { [slotId]: { patientId, units, note } } } }
+ * 指定日のスケジュール保存キーを取得
+ * @param {string} dateStr YYYY-MM-DD
+ * @returns {string}
  */
-export function getAllSchedules() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_SCHEDULES);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return typeof parsed === 'object' && parsed !== null ? parsed : {};
-  } catch (error) {
-    console.error('[scheduleStore] スケジュール読み込みエラー:', error);
-    return {};
-  }
+function getStorageKey(dateStr) {
+  return `${STORAGE_PREFIX}${normalizeDateString(dateStr)}`;
 }
 
 /**
- * 全日程のスケジュール辞書を保存
- */
-export function saveAllSchedules(schedules) {
-  try {
-    localStorage.setItem(STORAGE_KEY_SCHEDULES, JSON.stringify(schedules));
-  } catch (error) {
-    console.error('[scheduleStore] スケジュール保存エラー:', error);
-  }
-}
-
-/**
- * 特定日付のスケジュールを取得
+ * 指定日の時間割オブジェクトを取得する
+ * @param {string} dateStr YYYY-MM-DD
+ * @returns {Object} { A: {}, B: {}, C: {} }
  */
 export function getDailySchedule(dateStr) {
-  const all = getAllSchedules();
-  return all[dateStr] || { A: {}, B: {}, C: {} };
-}
+  const defaultSchedule = { A: {}, B: {}, C: {} };
+  const cleanDate = normalizeDateString(dateStr);
+  if (!cleanDate) return defaultSchedule;
 
-/**
- * 1つのコマ（スロット）に患者・単位を設定
- * 
- * @param {string} dateStr - 'YYYY-MM-DD'
- * @param {string} therapistCode - 'A'|'B'|'C'
- * @param {string} slotId - 例: 'am_1', 'pm_11'
- * @param {Object} slotData - { patientId: 'a', units: 2, note?: string }
- */
-export function setScheduleSlot(dateStr, therapistCode, slotId, slotData) {
-  const all = getAllSchedules();
-  if (!all[dateStr]) all[dateStr] = {};
-  if (!all[dateStr][therapistCode]) all[dateStr][therapistCode] = {};
-
-  const normPatientId = normalizePatientId(slotData.patientId);
-  const units = parseInt(slotData.units, 10) || 0;
-
-  if (!normPatientId || units <= 0) {
-    // データが空または0単位ならコマをクリア
-    delete all[dateStr][therapistCode][slotId];
-  } else {
-    all[dateStr][therapistCode][slotId] = {
-      patientId: normPatientId,
-      units,
-      note: normalizeString(slotData.note || ''),
-      updatedAt: new Date().toISOString(),
+  try {
+    const raw = localStorage.getItem(getStorageKey(cleanDate));
+    if (!raw) return defaultSchedule;
+    const parsed = JSON.parse(raw);
+    return {
+      A: parsed.A || {},
+      B: parsed.B || {},
+      C: parsed.C || {}
     };
+  } catch (error) {
+    console.error('getDailySchedule parse error:', error);
+    return defaultSchedule;
   }
-
-  saveAllSchedules(all);
-  return all[dateStr];
 }
 
 /**
- * コマを削除（クリア）
+ * 指定日の時間割全体をLocalStorageに保存する
+ * @param {string} dateStr YYYY-MM-DD
+ * @param {Object} scheduleData 
+ * @returns {boolean}
  */
-export function clearScheduleSlot(dateStr, therapistCode, slotId) {
-  const all = getAllSchedules();
-  if (all[dateStr] && all[dateStr][therapistCode]) {
-    delete all[dateStr][therapistCode][slotId];
-    saveAllSchedules(all);
+export function saveDailySchedule(dateStr, scheduleData) {
+  const cleanDate = normalizeDateString(dateStr);
+  if (!cleanDate || !scheduleData) return false;
+
+  try {
+    localStorage.setItem(getStorageKey(cleanDate), JSON.stringify(scheduleData));
+    return true;
+  } catch (error) {
+    console.error('saveDailySchedule error:', error);
+    return false;
   }
 }
 
 /**
- * 指定日のセラピスト別および全体の集計値（総単位、実人数）を取得
+ * 時間割スロットに患者・単位・計画書算定情報を配置・更新する
+ * @param {string} dateStr YYYY-MM-DD
+ * @param {string} therapistId 'A' | 'B' | 'C'
+ * @param {string} slotId 'am_1' 〜 'pm_12'
+ * @param {Object} slotData { patientId, units, note, billingPlan }
+ * @returns {boolean}
+ */
+export function setScheduleSlot(dateStr, therapistId, slotId, slotData) {
+  const current = getDailySchedule(dateStr);
+  if (!current[therapistId]) {
+    current[therapistId] = {};
+  }
+
+  current[therapistId][slotId] = {
+    patientId: slotData.patientId,
+    units: Math.max(1, safeParseInt(slotData.units, 1)),
+    note: slotData.note ? String(slotData.note).trim() : '',
+    billingPlan: Boolean(slotData.billingPlan),
+    updatedAt: new Date().toISOString()
+  };
+
+  return saveDailySchedule(dateStr, current);
+}
+
+/**
+ * 指定時間割スロットの配置を解除する
+ * @param {string} dateStr YYYY-MM-DD
+ * @param {string} therapistId 'A' | 'B' | 'C'
+ * @param {string} slotId 'am_1' 〜 'pm_12'
+ * @returns {boolean}
+ */
+export function clearScheduleSlot(dateStr, therapistId, slotId) {
+  const current = getDailySchedule(dateStr);
+  if (current[therapistId] && current[therapistId][slotId]) {
+    delete current[therapistId][slotId];
+    return saveDailySchedule(dateStr, current);
+  }
+  return true;
+}
+
+/**
+ * 指定日のセラピスト別および全体の集計値（単位数・人数・計画書件数）を算出する
+ * @param {string} dateStr YYYY-MM-DD
+ * @returns {Object}
  */
 export function getDailyStats(dateStr) {
-  const daySchedule = getDailySchedule(dateStr);
-  const therapistStats = {
-    A: { totalUnits: 0, patients: new Set() },
-    B: { totalUnits: 0, patients: new Set() },
-    C: { totalUnits: 0, patients: new Set() },
+  const schedule = getDailySchedule(dateStr);
+  const stats = {
+    totalUnits: 0,
+    totalPatients: 0,
+    planCount: 0,
+    therapists: {
+      A: { units: 0, patients: 0 },
+      B: { units: 0, patients: 0 },
+      C: { units: 0, patients: 0 }
+    }
   };
 
-  const allPatientsToday = new Set();
-  let grandTotalUnits = 0;
+  const uniquePatientsDaily = new Set();
 
-  ['A', 'B', 'C'].forEach((tCode) => {
-    const slots = daySchedule[tCode] || {};
-    for (const slot of Object.values(slots)) {
-      if (slot && slot.units > 0 && slot.patientId) {
-        therapistStats[tCode].totalUnits += slot.units;
-        therapistStats[tCode].patients.add(slot.patientId);
-        allPatientsToday.add(slot.patientId);
-        grandTotalUnits += slot.units;
+  ['A', 'B', 'C'].forEach((tId) => {
+    const tSlots = schedule[tId] || {};
+    const tPatientSet = new Set();
+
+    Object.values(tSlots).forEach((item) => {
+      if (item && item.patientId) {
+        const u = safeParseInt(item.units, 1);
+        stats.therapists[tId].units += u;
+        stats.totalUnits += u;
+        tPatientSet.add(item.patientId);
+        uniquePatientsDaily.add(item.patientId);
+        if (item.billingPlan) stats.planCount += 1;
       }
-    }
+    });
+
+    stats.therapists[tId].patients = tPatientSet.size;
   });
 
-  return {
-    therapistStats: {
-      A: { totalUnits: therapistStats.A.totalUnits, patientCount: therapistStats.A.patients.size },
-      B: { totalUnits: therapistStats.B.totalUnits, patientCount: therapistStats.B.patients.size },
-      C: { totalUnits: therapistStats.C.totalUnits, patientCount: therapistStats.C.patients.size },
-    },
-    grandTotalUnits,
-    grandPatientCount: allPatientsToday.size,
-  };
+  stats.totalPatients = uniquePatientsDaily.size;
+  return stats;
 }
 
 /**
- * アプリ内に蓄積された時間割データから、指定年月の集計オブジェクトを生成
- * （uketsukeWriter / diaryWriter が直接利用できる完全互換構造）
- * 
- * @param {number} targetYear 
- * @param {number} targetMonth 
- * @returns {Object} aggregated オブジェクト
+ * 指定年月の全時間割データを走査し、月間集計マトリクスを生成する（月間表示・Excel出力の共通基盤）
+ * @param {number} year 
+ * @param {number} month 1〜12
+ * @returns {Object} 月間集計オブジェクト
  */
-export function aggregateFromAppSchedule(targetYear, targetMonth) {
-  const all = getAllSchedules();
-  const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
+export function aggregateFromAppSchedule(year, month) {
+  const y = safeParseInt(year);
+  const m = safeParseInt(month);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const patientMap = {};
+  const dailyBreakdown = {};
 
-  const byPatientAndDate = {};
-  const byDateAndPatient = {};
-  const patientTotals = {};
-  const dailySummary = {};
-  let rawRecordsCount = 0;
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dayStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const schedule = getDailySchedule(dayStr);
+    dailyBreakdown[day] = { totalUnits: 0, inpatients: 0, outpatients: 0, planCount: 0 };
 
-  // 各日を初期化
-  for (let d = 1; d <= daysInMonth; d++) {
-    const dateObj = new Date(targetYear, targetMonth - 1, d);
-    const dateStr = formatDate(dateObj);
-    byDateAndPatient[dateStr] = {};
-    dailySummary[dateStr] = {
-      date: dateObj,
-      dateStr,
-      day: d,
-      totalUnits: 0,
-      uniquePatients: new Set(),
-      therapistUnits: { A: 0, B: 0, C: 0 },
-    };
-  }
+    ['A', 'B', 'C'].forEach((tId) => {
+      const tSlots = schedule[tId] || {};
+      Object.entries(tSlots).forEach(([slotId, item]) => {
+        if (!item || !item.patientId) return;
+        const pId = item.patientId;
+        const u = safeParseInt(item.units, 1);
+        const patient = getPatientById(pId) || { id: pId, name: '未登録患者', category: 'OUTPATIENT', diseaseType: 'LOCOMOTIVE' };
 
-  // 該当月の日付を走査
-  for (let d = 1; d <= daysInMonth; d++) {
-    const dateObj = new Date(targetYear, targetMonth - 1, d);
-    const dateStr = formatDate(dateObj);
-    const dayData = all[dateStr] || {};
-
-    ['A', 'B', 'C'].forEach((tCode) => {
-      const slots = dayData[tCode] || {};
-      for (const [slotId, slot] of Object.entries(slots)) {
-        if (!slot || !slot.patientId || slot.units <= 0) continue;
-
-        const pId = normalizePatientId(slot.patientId);
-        const units = slot.units;
-        rawRecordsCount += 1;
-
-        // byPatientAndDate 初期化
-        if (!byPatientAndDate[pId]) {
-          byPatientAndDate[pId] = {};
-          patientTotals[pId] = {
-            patientId: pId,
+        if (!patientMap[pId]) {
+          patientMap[pId] = {
+            patient,
             totalUnits: 0,
-            dates: new Set(),
+            planCount: 0,
+            earlyBonusCount: 0,
+            dailyUnits: Array(daysInMonth + 1).fill(0),
+            slots: []
           };
         }
-        if (!byPatientAndDate[pId][dateStr]) {
-          byPatientAndDate[pId][dateStr] = { PT: 0, OT: 0, total: 0, records: [] };
+
+        patientMap[pId].totalUnits += u;
+        patientMap[pId].dailyUnits[day] += u;
+        if (item.billingPlan) {
+          patientMap[pId].planCount += 1;
+          dailyBreakdown[day].planCount += 1;
         }
 
-        // byDateAndPatient 初期化
-        if (!byDateAndPatient[dateStr][pId]) {
-          byDateAndPatient[dateStr][pId] = { PT: 0, OT: 0, total: 0 };
+        const deadlineInfo = calculatePatientDeadlines(patient, dayStr);
+        if (deadlineInfo.earlyBonus && deadlineInfo.earlyBonus.points > 0) {
+          patientMap[pId].earlyBonusCount += 1;
         }
 
-        // 加算（現在は全員PT）
-        byPatientAndDate[pId][dateStr].PT += units;
-        byPatientAndDate[pId][dateStr].total += units;
-        byPatientAndDate[pId][dateStr].records.push({
-          date: dateObj,
-          dateStr,
-          therapistCode: tCode,
-          slotId,
-          patientId: pId,
-          units,
-        });
-
-        byDateAndPatient[dateStr][pId].PT += units;
-        byDateAndPatient[dateStr][pId].total += units;
-
-        patientTotals[pId].totalUnits += units;
-        patientTotals[pId].dates.add(dateStr);
-
-        dailySummary[dateStr].totalUnits += units;
-        dailySummary[dateStr].uniquePatients.add(pId);
-        dailySummary[dateStr].therapistUnits[tCode] += units;
-      }
+        patientMap[pId].slots.push({ date: dayStr, therapist: tId, slotId, units: u, billingPlan: item.billingPlan });
+        dailyBreakdown[day].totalUnits += u;
+        if (patient.category === 'INPATIENT') dailyBreakdown[day].inpatients += u;
+        else dailyBreakdown[day].outpatients += u;
+      });
     });
   }
 
-  return {
-    targetYear,
-    targetMonth,
-    daysInMonth,
-    rawRecordsCount,
-    byPatientAndDate,
-    byDateAndPatient,
-    patientTotals,
-    dailySummary,
-    activePatientIds: Object.keys(patientTotals).sort(),
-  };
+  return { year: y, month: m, daysInMonth, patientMap, dailyBreakdown };
 }
