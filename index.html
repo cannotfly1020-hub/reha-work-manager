@@ -287,7 +287,7 @@
         <div class="panel-header-strip">
           <div>
             <h2 class="view-title">👥 患者台帳・期限・早期加算管理</h2>
-            <p class="view-subtitle">入院日、転院前の前医入院日（早期加算起算日）、発症日、計画書期限を一括管理</p>
+            <p class="view-subtitle">入院日、転院前の前医入院日（早期加算起算日）、発症日、要介護者の計画書料2移行日を一括管理</p>
           </div>
           <button type="button" id="btn-add-patient-master" class="btn-primary-action">＋ 新規患者を追加</button>
         </div>
@@ -301,12 +301,13 @@
                   <th>氏名</th>
                   <th>区分</th>
                   <th>疾患区分</th>
+                  <th>介護保険認定</th>
                   <th>当院入院日</th>
                   <th>早期加算起算日</th>
                   <th>発症日 / 起算日</th>
                   <th>早期加算判定</th>
                   <th>算定上限日</th>
-                  <th>次回計画書期限</th>
+                  <th>計画書料2 移行日 (3分の1)</th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -477,21 +478,25 @@
           <div class="form-group flex-1">
             <label for="patient-modal-disease">疾患区分</label>
             <select id="patient-modal-disease" class="form-select">
-              <option value="LOCOMOTIVE">運動器 (Ⅱ: 150日)</option>
-              <option value="CEREBROVASCULAR">脳血管 (Ⅲ: 180日)</option>
-              <option value="DISUSE">廃用症候群 (Ⅲ: 120日)</option>
+              <option value="LOCOMOTIVE">運動器 (Ⅱ: 150日 / 3分の1: 50日)</option>
+              <option value="CEREBROVASCULAR">脳血管 (Ⅲ: 180日 / 3分の1: 60日)</option>
+              <option value="DISUSE">廃用症候群 (Ⅲ: 120日 / 3分の1: 40日)</option>
               <option value="ANALGESIA">消炎鎮痛 (上限なし)</option>
             </select>
           </div>
         </div>
 
-        <!-- ★ 新設: 要介護認定（介護保険）の有無 -->
+        <!-- 介護保険・要介護認定区分（3択に明確化） -->
         <div class="form-group">
-          <label for="patient-modal-care-insurance">介護保険・要介護認定（計画書2および10%減算の判定基準）</label>
+          <label for="patient-modal-care-insurance">介護保険・認定区分</label>
           <select id="patient-modal-care-insurance" class="form-select">
-            <option value="NONE">要介護認定なし（医療保険のみ：常に計画書料1対象）</option>
-            <option value="CERTIFIED">要介護認定あり（要支援・要介護：3分の1経過で計画書料2へ移行）</option>
+            <option value="NONE">なし（医療保険のみ：常に計画書料1対象）</option>
+            <option value="SUPPORT">要支援認定（疾患別リハ減算・13単位対象 / 計画書料1）</option>
+            <option value="CARE">要介護認定（3分の1経過で計画書料2へ移行）</option>
           </select>
+          <div id="patient-modal-care-hint" style="font-size: 0.775rem; color: var(--primary); margin-top: 0.35rem; font-weight: 700; display: none;">
+            <!-- JSで発症日から計算した「計画書料2 移行予定日」を動的に案内 -->
+          </div>
         </div>
 
         <div class="form-row">
@@ -508,10 +513,6 @@
           <div class="form-group flex-1">
             <label for="patient-modal-onset">発症日 / 手術日 / 起算日</label>
             <input type="date" id="patient-modal-onset" class="form-input">
-          </div>
-          <div class="form-group flex-1">
-            <label for="patient-modal-last-plan">前回 総合計画書算定日</label>
-            <input type="date" id="patient-modal-last-plan" class="form-input">
           </div>
         </div>
         <div class="form-group">
