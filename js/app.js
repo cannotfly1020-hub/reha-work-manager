@@ -2,12 +2,11 @@
  * @file app.js
  * @description リハビリ業務管理Webアプリ（reha-work-manager）メインコントローラー
  * 
- * - 編集ボタンのイベント登録を堅牢化（クラッシュ原因を完全解消）
- * - 要介護者の「総合実施計画書料2 移行日（3分の1経過日）」自動計算・プレビュー連動
+ * - コマ保存・時間割再描画（renderTimetable）の安全性を徹底強化（画面反映ストップを完全解消）
+ * - 疾患名（diseaseName）および介護保険区分（careInsuranceType）の画面即時反映
+ * - 要介護者の「総合実施計画書料2 移行日（3分の1経過日）」自動計算
  * - 本日の収益 ＆ 当月累計収益リアルタイムダッシュボード（1点＝10円）
- * - 同時間帯の重複（ダブルブッキング）防止
- * - 患者の1日算定上限（6単位/9単位）＆ セラピスト週108単位監視
- * - 月13単位制限（期限切れ患者・要介護・要支援）自動ブロック
+ * - 同時間帯重複防止・患者1日上限・月13単位制限ガード
  */
 
 import { REHA_RULES } from './config/rules.js';
@@ -91,7 +90,7 @@ function getPatientUnitsOnDate(dateStr, patientId, excludeTherapist = null, excl
         continue;
       }
       if (normalizePatientId(slot.patientId) === normId) {
-        total += slot.units;
+        total += Number(slot.units) || 0;
       }
     }
   }
@@ -105,7 +104,7 @@ function getPatientUnitsOnDate(dateStr, patientId, excludeTherapist = null, excl
 function validatePatientTimeConflict(dateStr, targetTherapist, targetSlotId, patientId, newUnits, origTherapist = null, origSlotId = null) {
   const normId = normalizePatientId(patientId);
   const patient = getAllPatients().find((p) => normalizePatientId(p.id) === normId);
-  const pName = patient?.name || patientId.toUpperCase();
+  const pName = patient?.name || String(patientId).toUpperCase();
 
   const targetIdx = TIME_SLOTS.findIndex((s) => s.id === targetSlotId);
   if (targetIdx === -1) return true;
@@ -133,7 +132,7 @@ function validatePatientTimeConflict(dateStr, targetTherapist, targetSlotId, pat
       }
 
       if (normalizePatientId(slotData.patientId) === normId) {
-        const occupiedCount = Math.max(1, slotData.units);
+        const occupiedCount = Math.max(1, Number(slotData.units) || 1);
         for (let u = 0; u < occupiedCount; u++) {
           const occSlot = TIME_SLOTS[idx + u];
           if (occSlot && occSlot.period === slot.period && targetCoveredSlotIds.has(occSlot.id)) {
@@ -158,7 +157,7 @@ function validatePatientTimeConflict(dateStr, targetTherapist, targetSlotId, pat
 function validatePatientDailyUnitsLimit(dateStr, patientId, newUnits, origTherapist = null, origSlotId = null) {
   const normId = normalizePatientId(patientId);
   const patient = getAllPatients().find((p) => normalizePatientId(p.id) === normId);
-  const pName = patient?.name || patientId.toUpperCase();
+  const pName = patient?.name || String(patientId).toUpperCase();
   const dateObj = new Date(dateStr);
 
   const maxAllowed = getPatientDailyMaxUnits(patient, dateObj);
@@ -200,15 +199,15 @@ function validateMonthly13UnitsLimit(dateStr, therapistCode, slotId, patientId, 
     const schedule = getDailySchedule(dateStr);
     const existingSlot = schedule[therapistCode]?.[slotId];
     if (existingSlot && normalizePatientId(existingSlot.patientId) === normId) {
-      currentMonthUnits -= (existingSlot.units || 0);
+      currentMonthUnits -= (Number(existingSlot.units) || 0);
     }
   }
 
   const projectedTotal = currentMonthUnits + newUnits;
   if (projectedTotal > 13) {
-    const pName = patient.name || patientId.toUpperCase();
+    const pName = patient.name || String(patientId).toUpperCase();
     showToast(
-      `⚠️️【13単位制限エラー】${pName} 様は月13単位上限の対象です。当月現在 ${currentMonthUnits}単位のため、${newUnits}単位を追加すると13単位を超過 (${projectedTotal}単位) します。配置できません。`,
+      `⚠【13単位制限エラー】${pName} 様は月13単位上限の対象です。当月現在 ${currentMonthUnits}単位のため、${newUnits}単位を追加すると13単位を超過 (${projectedTotal}単位) します。配置できません。`,
       'error'
     );
     return false;
@@ -238,7 +237,7 @@ function getTherapistWeeklyUnits(dateStr, therapistCode) {
 
     for (const slot of Object.values(daySchedule)) {
       if (slot && slot.units > 0 && slot.patientId) {
-        weeklyTotal += slot.units;
+        weeklyTotal += Number(slot.units) || 0;
       }
     }
   }
@@ -256,7 +255,7 @@ function validateTherapistWorkloadLimit(dateStr, therapistCode, newUnits, origTh
   if (origTherapist === therapistCode && origSlotId) {
     const schedule = getDailySchedule(dateStr);
     const origSlot = schedule[origTherapist]?.[origSlotId];
-    if (origSlot) currentDaily -= (origSlot.units || 0);
+    if (origSlot) currentDaily -= (Number(origSlot.units) || 0);
   }
 
   const projectedDaily = currentDaily + newUnits;
@@ -288,7 +287,7 @@ function validateTherapistWorkloadLimit(dateStr, therapistCode, newUnits, origTh
   return true;
 }
 
-// 起動時の初期日付（動的今日）
+// 起動時の初期日付
 const initialToday = new Date();
 const initialTodayStr = formatDate(initialToday);
 
@@ -513,7 +512,7 @@ function renderPalette() {
 
     if (state.paletteSearchTerm) {
       const term = state.paletteSearchTerm;
-      const targetStr = `${p.id} ${p.name || ''} ${p.kana || ''}`.toLowerCase();
+      const targetStr = `${p.id} ${p.name || ''} ${p.kana || ''} ${p.diseaseName || ''}`.toLowerCase();
       if (!targetStr.includes(term)) return false;
     }
 
@@ -536,13 +535,14 @@ function renderPalette() {
     const isOut = p.category && p.category.startsWith('outpatient');
     const tagClass = isOut ? 'tag-outpatient' : 'tag-inpatient';
     const tagLabel = isOut ? '外来' : '入院';
+    const displayPId = String(p.id).toUpperCase();
 
     card.innerHTML = `
       <div class="palette-card-top">
-        <span class="palette-patient-badge">${p.id.toUpperCase()}</span>
+        <span class="palette-patient-badge">${displayPId}</span>
         <span class="palette-category-tag ${tagClass}">${tagLabel}</span>
       </div>
-      <div class="palette-patient-name" title="${p.name || p.id}">${p.name || `患者${p.id.toUpperCase()}`}</div>
+      <div class="palette-patient-name" title="${p.name || p.id}">${p.name || `患者${displayPId}`}</div>
     `;
 
     card.addEventListener('dragstart', (e) => {
@@ -558,7 +558,7 @@ function renderPalette() {
     });
 
     card.addEventListener('click', () => {
-      showToast(`${p.name || p.id.toUpperCase()} を選択中。配置したいコマをクリックしてください。`, 'info');
+      showToast(`${p.name || displayPId} を選択中。配置したいコマをクリックしてください。`, 'info');
     });
 
     container.appendChild(card);
@@ -566,7 +566,8 @@ function renderPalette() {
 }
 
 function getSlotDurationText(startTimeStr, units) {
-  const parts = startTimeStr.split(':');
+  if (!startTimeStr) return `${units * 20}分`;
+  const parts = String(startTimeStr).split(':');
   if (parts.length < 2) return `${startTimeStr} (${units * 20}分)`;
 
   const startH = parseInt(parts[0], 10);
@@ -607,7 +608,7 @@ function renderTimetable() {
     TIME_SLOTS.forEach((slot, idx) => {
       const slotData = slots[slot.id];
       if (slotData && slotData.patientId && slotData.units > 0) {
-        const units = Math.max(1, Math.min(6, slotData.units));
+        const units = Math.max(1, Math.min(6, Number(slotData.units) || 1));
         for (let i = 1; i < units; i++) {
           const nextSlot = TIME_SLOTS[idx + i];
           if (nextSlot && nextSlot.period === slot.period) {
@@ -640,10 +641,12 @@ function renderTimetable() {
       const slotData = schedule[tCode]?.[slot.id];
       const isOccupiedByPrior = occupiedSlots[tCode].has(slot.id);
 
-      if (slotData && slotData.patientId && slotData.units > 0) {
-        const units = Math.max(1, slotData.units);
-        const pInfo = patientMap[normalizePatientId(slotData.patientId)];
-        const pName = pInfo?.name || `患者${slotData.patientId.toUpperCase()}`;
+      if (slotData && slotData.patientId && Number(slotData.units) > 0) {
+        const units = Math.max(1, Number(slotData.units) || 1);
+        const pNormId = normalizePatientId(slotData.patientId);
+        const pInfo = patientMap[pNormId];
+        const displayPId = String(slotData.patientId).toUpperCase();
+        const pName = pInfo?.name || `患者${displayPId}`;
         const isOutpatient = pInfo?.category && pInfo.category.startsWith('outpatient');
         const durationText = getSlotDurationText(slot.label, units);
 
@@ -661,7 +664,7 @@ function renderTimetable() {
         card.innerHTML = `
           <div class="slot-patient-title" style="flex: 1; min-width: 0;">
             <div style="display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.1rem;">
-              <span class="slot-id-badge">${slotData.patientId.toUpperCase()}</span>
+              <span class="slot-id-badge">${displayPId}</span>
               <span class="slot-name-label" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${pName}</span>
               ${planBadgeHtml}
             </div>
@@ -682,8 +685,9 @@ function renderTimetable() {
         cell.appendChild(card);
       } else if (isOccupiedByPrior) {
         const parentInfo = occupiedSlots[tCode].get(slot.id);
+        const parentPId = String(parentInfo.rootSlotData.patientId).toUpperCase();
         cell.classList.add('slot-covered-placeholder');
-        cell.title = `前のコマ（${parentInfo.rootSlotId}）により ${parentInfo.rootSlotData.patientId.toUpperCase()} さんが実施中`;
+        cell.title = `前のコマ（${parentInfo.rootSlotId}）により ${parentPId} さんが実施中`;
         cell.addEventListener('click', () => {
           openSlotEditModal(state.selectedDate, tCode, parentInfo.rootSlotId);
         });
@@ -725,21 +729,22 @@ function renderTimetable() {
 }
 
 function handleSlotDropped(dateStr, therapistCode, slotId, patientId) {
-  const p = getAllPatients().find((item) => normalizePatientId(item.id) === normalizePatientId(patientId));
-  const pName = p?.name || patientId.toUpperCase();
+  const normId = normalizePatientId(patientId);
+  const p = getAllPatients().find((item) => normalizePatientId(item.id) === normId);
+  const pName = p?.name || String(patientId).toUpperCase();
   const defaultUnits = 2;
 
-  // 1. 同時間帯の重複（ダブルブッキング）防止
+  // 1. 同時間帯の重複防止
   if (!validatePatientTimeConflict(dateStr, therapistCode, slotId, patientId, defaultUnits)) {
     return;
   }
 
-  // 2. 患者の1日上限（6単位/9単位）検証
+  // 2. 患者の1日上限検証
   if (!validatePatientDailyUnitsLimit(dateStr, patientId, defaultUnits)) {
     return;
   }
 
-  // 3. セラピストの法令上限（日24単位/特例・週108単位）検証
+  // 3. セラピスト上限検証
   if (!validateTherapistWorkloadLimit(dateStr, therapistCode, defaultUnits)) {
     return;
   }
@@ -750,17 +755,13 @@ function handleSlotDropped(dateStr, therapistCode, slotId, patientId) {
   }
 
   setScheduleSlot(dateStr, therapistCode, slotId, {
-    patientId: normalizePatientId(patientId),
+    patientId: normId,
     units: defaultUnits,
     note: '',
     billingPlan: false,
   });
 
-  renderTimetable();
-  renderDailyKPIs();
-  renderDailyDiaryPreview();
-  renderMonthlyUnitsTable();
-  renderRevenueDashboard();
+  renderAll();
   showToast(`${pName} を PT ${therapistCode} に配置しました (2単位 / 40分)`, 'success');
 }
 
@@ -852,77 +853,79 @@ function initSlotEditModal() {
   });
 
   saveBtn?.addEventListener('click', () => {
-    if (!state.activeSlotModal) return;
-    const { dateStr, therapistCode: origTherapist, slotId: origSlotId } = state.activeSlotModal;
-    const targetSlotId = timeSelect?.value || origSlotId;
-    const targetTherapist = therapistSelect?.value || origTherapist;
+    try {
+      if (!state.activeSlotModal) return;
+      const { dateStr, therapistCode: origTherapist, slotId: origSlotId } = state.activeSlotModal;
+      const targetSlotId = timeSelect?.value || origSlotId;
+      const targetTherapist = therapistSelect?.value || origTherapist;
 
-    const patientId = patientInput?.value?.trim();
-    const units = parseInt(customUnitInput?.value, 10) || 0;
-    const note = document.getElementById('slot-modal-note')?.value?.trim() || '';
-    const billingPlan = Boolean(billingPlanCheckbox?.checked);
+      const patientId = patientInput?.value?.trim();
+      const units = parseInt(customUnitInput?.value, 10) || 0;
+      const note = document.getElementById('slot-modal-note')?.value?.trim() || '';
+      const billingPlan = Boolean(billingPlanCheckbox?.checked);
 
-    if (!patientId) {
-      showToast('患者記号または氏名を入力してください。', 'warning');
-      return;
+      if (!patientId) {
+        showToast('患者記号または氏名を入力してください。', 'warning');
+        return;
+      }
+      if (units <= 0) {
+        showToast('有効な単位数を指定してください。', 'warning');
+        return;
+      }
+
+      // 1. 同時間帯重複防止
+      if (!validatePatientTimeConflict(dateStr, targetTherapist, targetSlotId, patientId, units, origTherapist, origSlotId)) {
+        return;
+      }
+
+      // 2. 1日上限チェック
+      if (!validatePatientDailyUnitsLimit(dateStr, patientId, units, origTherapist, origSlotId)) {
+        return;
+      }
+
+      // 3. セラピスト上限チェック
+      if (!validateTherapistWorkloadLimit(dateStr, targetTherapist, units, origTherapist, origSlotId)) {
+        return;
+      }
+
+      // 4. 月13単位制限チェック
+      const isSameSlot = (targetSlotId === origSlotId && targetTherapist === origTherapist);
+      if (!validateMonthly13UnitsLimit(dateStr, origTherapist, origSlotId, patientId, units, isSameSlot)) {
+        return;
+      }
+
+      if (targetSlotId !== origSlotId || targetTherapist !== origTherapist) {
+        clearScheduleSlot(dateStr, origTherapist, origSlotId);
+      }
+
+      setScheduleSlot(dateStr, targetTherapist, targetSlotId, {
+        patientId,
+        units,
+        note,
+        billingPlan,
+      });
+
+      closeModal();
+      renderAll();
+      showToast(`PT ${targetTherapist} のコマを設定しました (${units}単位 / ${units * 20}分)`, 'success');
+    } catch (err) {
+      console.error('[saveBtn error]', err);
+      showToast(`設定エラー: ${err.message}`, 'error');
     }
-    if (units <= 0) {
-      showToast('有効な単位数を指定してください。', 'warning');
-      return;
-    }
-
-    // 1. 同時間帯重複防止
-    if (!validatePatientTimeConflict(dateStr, targetTherapist, targetSlotId, patientId, units, origTherapist, origSlotId)) {
-      return;
-    }
-
-    // 2. 1日上限チェック
-    if (!validatePatientDailyUnitsLimit(dateStr, patientId, units, origTherapist, origSlotId)) {
-      return;
-    }
-
-    // 3. セラピスト上限チェック
-    if (!validateTherapistWorkloadLimit(dateStr, targetTherapist, units, origTherapist, origSlotId)) {
-      return;
-    }
-
-    // 4. 月13単位制限チェック
-    const isSameSlot = (targetSlotId === origSlotId && targetTherapist === origTherapist);
-    if (!validateMonthly13UnitsLimit(dateStr, origTherapist, origSlotId, patientId, units, isSameSlot)) {
-      return;
-    }
-
-    if (targetSlotId !== origSlotId || targetTherapist !== origTherapist) {
-      clearScheduleSlot(dateStr, origTherapist, origSlotId);
-    }
-
-    setScheduleSlot(dateStr, targetTherapist, targetSlotId, {
-      patientId,
-      units,
-      note,
-      billingPlan,
-    });
-
-    closeModal();
-    renderTimetable();
-    renderDailyKPIs();
-    renderDailyDiaryPreview();
-    renderMonthlyUnitsTable();
-    renderRevenueDashboard();
-    showToast(`PT ${targetTherapist} のコマを設定しました (${units}単位 / ${units * 20}分)`, 'success');
   });
 
   clearBtn?.addEventListener('click', () => {
-    if (!state.activeSlotModal) return;
-    const { dateStr, therapistCode, slotId } = state.activeSlotModal;
-    clearScheduleSlot(dateStr, therapistCode, slotId);
-    closeModal();
-    renderTimetable();
-    renderDailyKPIs();
-    renderDailyDiaryPreview();
-    renderMonthlyUnitsTable();
-    renderRevenueDashboard();
-    showToast('コマを空にしました。', 'info');
+    try {
+      if (!state.activeSlotModal) return;
+      const { dateStr, therapistCode, slotId } = state.activeSlotModal;
+      clearScheduleSlot(dateStr, therapistCode, slotId);
+      closeModal();
+      renderAll();
+      showToast('コマを空にしました。', 'info');
+    } catch (err) {
+      console.error('[clearBtn error]', err);
+      showToast(`解除エラー: ${err.message}`, 'error');
+    }
   });
 }
 
@@ -950,7 +953,7 @@ function updatePlanEvaluationHint(patientId) {
 
   if (deadlines.isCarePatient && deadlines.isPlan2Active) {
     planTypeLabel = '総合実施計画書料 2';
-    points = 240; // 初回扱い (2回目以降は196点)
+    points = 240;
     explanation = `要介護認定者（起算日から3分の1経過: ${deadlines.plan2TransitionDateStr}〜）のため【料2】対象です。`;
   } else if (deadlines.isCarePatient) {
     explanation = `要介護認定者ですが、3分の1（${deadlines.plan2TransitionDateStr}）到達前のため【料1】を算定します。`;
@@ -1013,7 +1016,7 @@ function openSlotEditModal(dateStr, therapistCode, slotId) {
     list.forEach((p) => {
       const opt = document.createElement('option');
       opt.value = p.id;
-      opt.textContent = `${p.id.toUpperCase()}: ${p.name || ''}`;
+      opt.textContent = `${String(p.id).toUpperCase()}: ${p.name || ''}`;
       select.appendChild(opt);
     });
   }
@@ -1026,8 +1029,8 @@ function openSlotEditModal(dateStr, therapistCode, slotId) {
   const nInput = document.getElementById('slot-modal-note');
   const planCheck = document.getElementById('slot-modal-billing-plan');
 
-  const currentUnits = curSlot ? curSlot.units : 2;
-  const currentPatientId = curSlot ? curSlot.patientId.toUpperCase() : '';
+  const currentUnits = curSlot ? (Number(curSlot.units) || 2) : 2;
+  const currentPatientId = curSlot ? String(curSlot.patientId).toUpperCase() : '';
 
   if (pInput) pInput.value = currentPatientId;
   if (uInput) uInput.value = String(currentUnits);
@@ -1094,7 +1097,7 @@ function renderMonthlyUnitsTable() {
 
   activeIds.forEach((pId) => {
     const totals = aggregated.patientTotals[pId];
-    const p = patientMap[pId] || { id: pId, name: `患者${pId.toUpperCase()}`, category: 'inpatient_1', diseaseType: 'LOCOMOTIVE' };
+    const p = patientMap[pId] || { id: pId, name: `患者${String(pId).toUpperCase()}`, category: 'inpatient_1', diseaseType: 'LOCOMOTIVE' };
     const units = totals.totalUnits;
     const isRestricted = isPatientRestrictedTo13Units(p, new Date(state.selectedDate));
 
@@ -1117,7 +1120,7 @@ function renderMonthlyUnitsTable() {
     }
 
     tr.innerHTML = `
-      <td><strong>${p.id.toUpperCase()}</strong>: ${p.name || ''}</td>
+      <td><strong>${String(p.id).toUpperCase()}</strong>: ${p.name || ''}</td>
       <td><span class="palette-category-tag ${isOut ? 'tag-outpatient' : 'tag-inpatient'}">${catLabel}</span></td>
       <td>${disLabel}</td>
       <td><strong style="font-size: 1.05rem; color: var(--primary);">${units}</strong> 単位</td>
@@ -1143,23 +1146,21 @@ function renderRevenueDashboard() {
   ['A', 'B', 'C'].forEach((tCode) => {
     const slots = todaySchedule[tCode] || {};
     for (const slot of Object.values(slots)) {
-      if (!slot || !slot.patientId || slot.units <= 0) continue;
+      if (!slot || !slot.patientId || Number(slot.units) <= 0) continue;
       const p = patientMap[normalizePatientId(slot.patientId)];
       if (!p) continue;
 
       const deadlines = calculatePatientDeadlines(p, todayDateObj);
       const isMaintDiscount = (p.careInsuranceType === 'CARE' || p.careInsuranceType === 'SUPPORT') && deadlines.isOverLimit;
 
-      // リハビリ基本料（維持期要介護等の算定超過時は 100分の60）
       let unitPoints = REHA_RULES.LIMIT_DAYS[p.diseaseType]?.defaultPoints || 170;
       if (isMaintDiscount) {
         if (p.diseaseType === 'LOCOMOTIVE') unitPoints = 102;
         else if (p.diseaseType === 'CEREBROVASCULAR') unitPoints = 60;
         else if (p.diseaseType === 'DISUSE') unitPoints = 46;
       }
-      todayRehaPoints += (unitPoints * slot.units);
+      todayRehaPoints += (unitPoints * Number(slot.units));
 
-      // 早期加算判定
       const earlyStart = p.earlyBonusStartDate || p.admissionDate;
       if (earlyStart && p.category && !p.category.startsWith('outpatient')) {
         const elapsed = getDiffDays(normalizeDate(earlyStart), todayDateObj) + 1;
@@ -1167,12 +1168,11 @@ function renderRevenueDashboard() {
         else if (elapsed <= 14) todayEarlyPoints += 25;
       }
 
-      // 総合実施計画書料
       if (slot.billingPlan) {
         if (deadlines.isCarePatient && deadlines.isPlan2Active) {
-          todayPlanPoints += 240; // 計画書料2
+          todayPlanPoints += 240;
         } else {
-          todayPlanPoints += 240; // 計画書料1
+          todayPlanPoints += 240;
         }
       }
     }
@@ -1211,11 +1211,11 @@ function renderRevenueDashboard() {
     ['A', 'B', 'C'].forEach((tCode) => {
       const slots = daySchedule[tCode] || {};
       for (const slot of Object.values(slots)) {
-        if (!slot || !slot.patientId || slot.units <= 0) continue;
+        if (!slot || !slot.patientId || Number(slot.units) <= 0) continue;
         const p = patientMap[normalizePatientId(slot.patientId)];
         if (!p) continue;
 
-        monthTotalUnits += slot.units;
+        monthTotalUnits += Number(slot.units);
         const deadlines = calculatePatientDeadlines(p, curDate);
         const isMaintDiscount = (p.careInsuranceType === 'CARE' || p.careInsuranceType === 'SUPPORT') && deadlines.isOverLimit;
 
@@ -1225,7 +1225,7 @@ function renderRevenueDashboard() {
           else if (p.diseaseType === 'CEREBROVASCULAR') unitPoints = 60;
           else if (p.diseaseType === 'DISUSE') unitPoints = 46;
         }
-        monthRehaPoints += (unitPoints * slot.units);
+        monthRehaPoints += (unitPoints * Number(slot.units));
 
         const earlyStart = p.earlyBonusStartDate || p.admissionDate;
         if (earlyStart && p.category && !p.category.startsWith('outpatient')) {
@@ -1286,19 +1286,20 @@ function renderDailyDiaryPreview() {
   ['A', 'B', 'C'].forEach((tCode) => {
     const slots = schedule[tCode] || {};
     for (const s of Object.values(slots)) {
-      if (s && s.patientId && s.units > 0) {
+      if (s && s.patientId && Number(s.units) > 0) {
         const p = patientMap[normalizePatientId(s.patientId)];
         const isOut = p?.category && p.category.startsWith('outpatient');
         const target = isOut ? diary.outpatient : diary.inpatient;
         const dType = p?.diseaseType || 'LOCOMOTIVE';
+        const units = Number(s.units);
 
         target.patients.add(s.patientId);
-        target.totalUnits += s.units;
+        target.totalUnits += units;
 
-        if (dType === 'LOCOMOTIVE') target.loco += s.units;
-        else if (dType === 'CEREBROVASCULAR') target.cerebro += s.units;
-        else if (dType === 'DISUSE') target.disuse += s.units;
-        else if (dType === 'ANALGESIA') target.pain += s.units;
+        if (dType === 'LOCOMOTIVE') target.loco += units;
+        else if (dType === 'CEREBROVASCULAR') target.cerebro += units;
+        else if (dType === 'DISUSE') target.disuse += units;
+        else if (dType === 'ANALGESIA') target.pain += units;
       }
     }
   });
@@ -1377,6 +1378,7 @@ function initPatientMasterModal() {
   saveBtn?.addEventListener('click', () => {
     const id = document.getElementById('patient-modal-id')?.value?.trim();
     const name = document.getElementById('patient-modal-name')?.value?.trim();
+    const diseaseName = document.getElementById('patient-modal-disease-name')?.value?.trim() || '';
     const category = document.getElementById('patient-modal-category')?.value;
     const diseaseType = document.getElementById('patient-modal-disease')?.value;
     const careInsuranceType = careSelect?.value || 'NONE';
@@ -1393,6 +1395,7 @@ function initPatientMasterModal() {
     upsertPatient({
       id,
       name,
+      diseaseName,
       category,
       diseaseType,
       careInsuranceType,
@@ -1403,9 +1406,8 @@ function initPatientMasterModal() {
     });
 
     closeModal();
-    renderPalette();
-    renderPatientDeadlines();
-    showToast(`患者 ${id.toUpperCase()} を保存しました。`, 'success');
+    renderAll();
+    showToast(`患者 ${String(id).toUpperCase()} を保存しました。`, 'success');
   });
 }
 
@@ -1417,6 +1419,7 @@ function openPatientMasterModal(existingId = null) {
 
   const idInput = document.getElementById('patient-modal-id');
   const nameInput = document.getElementById('patient-modal-name');
+  const disNameInput = document.getElementById('patient-modal-disease-name');
   const catInput = document.getElementById('patient-modal-category');
   const disInput = document.getElementById('patient-modal-disease');
   const careInput = document.getElementById('patient-modal-care-insurance');
@@ -1427,6 +1430,7 @@ function openPatientMasterModal(existingId = null) {
 
   if (idInput) idInput.value = p ? p.id : '';
   if (nameInput) nameInput.value = p ? p.name || '' : '';
+  if (disNameInput) disNameInput.value = p ? p.diseaseName || '' : '';
   if (catInput) catInput.value = p ? p.category || 'inpatient_1' : 'inpatient_1';
   if (disInput) disInput.value = p ? p.diseaseType || 'LOCOMOTIVE' : 'LOCOMOTIVE';
   if (careInput) careInput.value = p ? p.careInsuranceType || (p.category?.includes('maintenance') ? 'CARE' : 'NONE') : 'NONE';
@@ -1435,7 +1439,6 @@ function openPatientMasterModal(existingId = null) {
   if (onsetInput) onsetInput.value = p ? p.onsetDate || '' : '';
   if (noteInput) noteInput.value = p ? p.notes || '' : '';
 
-  // 介護保険ヒントの更新
   const hintEl = document.getElementById('patient-modal-care-hint');
   if (hintEl) {
     if (careInput?.value === 'CARE' && onsetInput?.value) {
@@ -1466,8 +1469,8 @@ function renderPatientDeadlines() {
 
     const isOut = p.category && p.category.startsWith('outpatient');
     const catLabel = isOut ? '外来' : '入院';
+    const displayPId = String(p.id).toUpperCase();
 
-    // 早期加算ステータス
     let earlyBadge = '<span style="color: var(--text-dim);">-</span>';
     if (calc.earlyBonusStatus === 'PHASE_1_ACTIVE') {
       earlyBadge = '<span class="status-pill" style="background: #eff6ff; color: #1d4ed8; font-weight: 700;">第1期 (4日以内)</span>';
@@ -1477,7 +1480,6 @@ function renderPatientDeadlines() {
       earlyBadge = '<span style="color: var(--text-dim); font-size: 0.75rem;">加算終了</span>';
     }
 
-    // 介護保険表示
     let careBadge = '<span style="color: var(--text-muted); font-size: 0.8rem;">なし (医療)</span>';
     if (calc.careType === 'CARE') {
       careBadge = '<span class="status-pill" style="background: #fef3c7; color: #92400e; font-weight: 800;">要介護</span>';
@@ -1485,7 +1487,6 @@ function renderPatientDeadlines() {
       careBadge = '<span class="status-pill" style="background: #e0e7ff; color: #3730a3; font-weight: 800;">要支援</span>';
     }
 
-    // 計画書料2移行日表示
     let plan2Badge = '<span style="color: var(--text-dim); font-size: 0.8rem;">対象外(料1)</span>';
     if (calc.isCarePatient) {
       if (calc.isPlan2Active) {
@@ -1496,8 +1497,9 @@ function renderPatientDeadlines() {
     }
 
     tr.innerHTML = `
-      <td><strong>${p.id.toUpperCase()}</strong></td>
+      <td><strong>${displayPId}</strong></td>
       <td>${p.name || ''}</td>
+      <td style="color: var(--primary); font-weight: 700;">${p.diseaseName || '-'}</td>
       <td><span class="palette-category-tag ${isOut ? 'tag-outpatient' : 'tag-inpatient'}">${catLabel}</span></td>
       <td>${calc.diseaseLabel || '運動器Ⅱ'}</td>
       <td>${careBadge}</td>
@@ -1514,7 +1516,6 @@ function renderPatientDeadlines() {
     tbody.appendChild(tr);
   });
 
-  // 編集ボタンへの確実なイベント登録
   tbody.querySelectorAll('.btn-edit-patient').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
@@ -1608,7 +1609,7 @@ function renderLoansTable() {
 
     tr.innerHTML = `
       <td><strong>${l.itemName}</strong></td>
-      <td>${l.patientId ? l.patientId.toUpperCase() : '-'}</td>
+      <td>${l.patientId ? String(l.patientId).toUpperCase() : '-'}</td>
       <td>${ownerBadge}</td>
       <td>${l.loanDate || '-'}</td>
       <td>${l.dueDate || '-'}</td>
