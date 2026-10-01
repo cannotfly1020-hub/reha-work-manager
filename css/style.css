@@ -1,1 +1,250 @@
+/* STREAMING_CHUNK:Configuring CSS variables and base tokens... */
+:root {
+--font-base: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+--color-bg: #f8fafc;
+--color-surface: #ffffff;
+--color-border: #e2e8f0;
+--color-text-main: #0f172a;
+--color-text-muted: #64748b;
+--color-primary: #0284c7;
+--color-primary-hover: #0369a1;
+--color-inpatient: #d97706;
+--color-outpatient: #2563eb;
+--shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+--shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+--shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+--radius-sm: 6px;
+--radius-md: 10px;
+}
 
+/* STREAMING_CHUNK:Resetting elements and defining base layout... */
+
+{ box-sizing: border-box; margin: 0; padding: 0; }
+body {
+font-family: var(--font-base);
+background-color: var(--color-bg);
+color: var(--color-text-main);
+line-height: 1.5;
+-webkit-font-smoothing: antialiased;
+}
+.app-header {
+background: var(--color-surface);
+border-bottom: 1px solid var(--color-border);
+padding: 12px 24px;
+display: flex;
+justify-content: space-between;
+align-items: center;
+position: sticky;
+top: 0;
+z-index: 40;
+}
+.nav-tab-group { display: flex; gap: 8px; }
+.nav-tab {
+padding: 8px 16px;
+border-radius: var(--radius-sm);
+border: 1px solid transparent;
+background: transparent;
+font-weight: 600;
+color: var(--color-text-muted);
+cursor: pointer;
+transition: all 0.2s ease;
+}
+.nav-tab:hover { background: #f1f5f9; color: var(--color-text-main); }
+.nav-tab.active { background: #e0f2fe; color: #0369a1; border-color: #bae6fd; }
+.view-panel { display: none; padding: 20px 24px; }
+.view-panel.active { display: block; }
+
+/* STREAMING_CHUNK:Styling time table grid and slot dimensions... */
+.timetable-container {
+display: grid;
+grid-template-columns: 120px repeat(3, 1fr);
+background: var(--color-surface);
+border: 1px solid var(--color-border);
+border-radius: var(--radius-md);
+overflow: hidden;
+box-shadow: var(--shadow-sm);
+}
+.timetable-header {
+background: #f8fafc;
+font-weight: 700;
+padding: 10px;
+text-align: center;
+border-bottom: 2px solid var(--color-border);
+border-right: 1px solid var(--color-border);
+}
+.time-slot-row {
+height: 52px;
+min-height: 52px;
+max-height: 52px;
+display: contents;
+}
+.time-col {
+border-bottom: 1px solid var(--color-border);
+border-right: 1px solid var(--color-border);
+padding: 4px 8px;
+display: flex;
+align-items: center;
+justify-content: center;
+font-size: 0.78rem;
+font-weight: 600;
+color: var(--color-text-muted);
+background: #fafafa;
+}
+.cell-slot {
+height: 52px;
+min-height: 52px;
+max-height: 52px;
+border-bottom: 1px solid var(--color-border);
+border-right: 1px solid var(--color-border);
+position: relative;
+padding: 2px 4px;
+}
+.empty-slot-btn {
+width: 100%;
+height: 100%;
+border: 1px dashed transparent;
+background: transparent;
+border-radius: 4px;
+cursor: pointer;
+opacity: 0;
+transition: opacity 0.15s ease;
+font-size: 0.75rem;
+color: var(--color-primary);
+}
+.cell-slot:hover .empty-slot-btn { opacity: 1; border-color: #cbd5e1; background: #f8fafc; }
+
+/* STREAMING_CHUNK:Implementing Pattern C hybrid coloring for schedule cards... */
+.reha-slot-card {
+position: absolute;
+top: 2px;
+left: 4px;
+right: 4px;
+border-radius: var(--radius-sm);
+padding: 4px 8px;
+box-shadow: var(--shadow-sm);
+z-index: 10;
+cursor: pointer;
+overflow: hidden;
+transition: transform 0.1s ease, box-shadow 0.1s ease;
+display: flex;
+flex-direction: column;
+justify-content: space-between;
+}
+.reha-slot-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); z-index: 20; }
+.card-inpatient { border-left: 6px solid var(--color-inpatient); }
+.card-outpatient { border-left: 6px solid var(--color-outpatient); }
+.card-unit-1 { height: 48px; background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); }
+.card-unit-2 { height: 100px; background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); }
+.card-unit-3 { height: 152px; background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%); }
+.card-unit-4 { height: 204px; background: linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%); }
+.slot-covered-placeholder {
+pointer-events: none;
+background: rgba(241, 245, 249, 0.4);
+}
+.badge-unit {
+font-size: 0.7rem;
+font-weight: 700;
+padding: 2px 6px;
+border-radius: 9999px;
+color: #fff;
+display: inline-block;
+}
+.badge-unit-1 { background-color: #059669; }
+.badge-unit-2 { background-color: #2563eb; }
+.badge-unit-3 { background-color: #7c3aed; }
+.badge-unit-4 { background-color: #e11d48; }
+.badge-plan {
+background: #fef08a;
+color: #854d0e;
+border: 1px solid #fde047;
+font-size: 0.68rem;
+font-weight: 700;
+padding: 1px 5px;
+border-radius: 4px;
+margin-left: 4px;
+}
+
+/* STREAMING_CHUNK:Styling sticky tables and data containers... */
+.table-container {
+width: 100%;
+overflow-x: auto;
+min-width: 1280px;
+background: var(--color-surface);
+border-radius: var(--radius-md);
+border: 1px solid var(--color-border);
+box-shadow: var(--shadow-sm);
+}
+.modern-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.85rem; }
+.modern-table th, .modern-table td {
+padding: 10px 14px;
+border-bottom: 1px solid var(--color-border);
+white-space: nowrap;
+}
+.modern-table th { background: #f8fafc; font-weight: 700; color: var(--color-text-muted); }
+.modern-table tbody tr:hover { background-color: #f1f5f9; }
+.modern-table th:last-child,
+.modern-table td:last-child {
+position: sticky;
+right: 0;
+background-color: #ffffff;
+box-shadow: -4px 0 8px -2px rgba(15, 23, 42, 0.08);
+z-index: 5;
+text-align: center;
+min-width: 95px;
+}
+.modern-table tbody tr:hover td:last-child { background-color: #f1f5f9; }
+
+/* STREAMING_CHUNK:Building modal overlays and interactive cards... */
+.modal-overlay {
+position: fixed;
+inset: 0;
+background: rgba(15, 23, 42, 0.6);
+display: flex;
+align-items: center;
+justify-content: center;
+z-index: 100;
+opacity: 0;
+pointer-events: none;
+transition: opacity 0.2s ease;
+}
+.modal-overlay.active { opacity: 1; pointer-events: auto; }
+.modal-card {
+background: var(--color-surface);
+border-radius: var(--radius-md);
+width: 100%;
+max-width: 560px;
+max-height: 90vh;
+overflow-y: auto;
+padding: 24px;
+box-shadow: var(--shadow-lg);
+transform: translateY(12px);
+transition: transform 0.2s ease;
+}
+.modal-overlay.active .modal-card { transform: translateY(0); }
+
+/* STREAMING_CHUNK:Configuring toast notifications... */
+.toast-container {
+position: fixed;
+bottom: 24px;
+right: 24px;
+display: flex;
+flex-direction: column;
+gap: 8px;
+z-index: 120;
+}
+.toast-item {
+padding: 12px 18px;
+border-radius: var(--radius-sm);
+background: #1e293b;
+color: #fff;
+font-size: 0.85rem;
+box-shadow: var(--shadow-md);
+animation: slideIn 0.25s ease forwards;
+}
+.toast-item.error { background: #e11d48; }
+.toast-item.warn { background: #d97706; }
+.toast-item.success { background: #059669; }
+@keyframes slideIn {
+from { transform: translateX(100%); opacity: 0; }
+to { transform: translateX(0); opacity: 1; }
+}
