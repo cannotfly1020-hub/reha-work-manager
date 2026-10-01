@@ -1,4 +1,4 @@
-/* GoogleカレンダーおよびモダンSaaSライクな洗練パレット */
+/* STREAMING_CHUNK:Configuring CSS variables and base tokens */
 :root {
 --font-sans: 'Inter', 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 
@@ -11,19 +11,16 @@
 --primary-dark: #1d4ed8;
 --primary-light: #eff6ff;
 --primary-border: #bfdbfe;
---primary-focus: rgba(37, 99, 235, 0.15);
-
---accent: #0284c7;
---accent-light: #e0f2fe;
+--primary-focus: rgba(37, 99, 235, 0.2);
 
 --success: #10b981;
---success-light: #ecfdf5;
---success-border: #a7f3d0;
---success-text: #065f46;
+--success-light: #f0fdf4;
+--success-border: #bbf7d0;
+--success-text: #166534;
 
 --warning: #f59e0b;
 --warning-light: #fffbeb;
---warning-border: #fde68a;
+--warning-border: #fef3c7;
 --warning-text: #92400e;
 
 --danger: #ef4444;
@@ -31,11 +28,10 @@
 --danger-border: #fecaca;
 --danger-text: #991b1b;
 
-/* 高いコントラスト比を保つ文字色 /
---text-main: #0f172a;       / 濃いダークスレート（視認性最優先） /
---text-secondary: #334155;  / 読みやすいサブテキスト /
---text-muted: #64748b;      / 補助情報 /
---text-dim: #94a3b8;        / プレースホルダー */
+--text-main: #0f172a;
+--text-secondary: #334155;
+--text-muted: #64748b;
+--text-dim: #94a3b8;
 
 --border-light: #e2e8f0;
 --border-subtle: #cbd5e1;
@@ -72,15 +68,13 @@ line-height: 1.5;
 -moz-osx-font-smoothing: grayscale;
 }
 
+/* STREAMING_CHUNK:Styling layout containers and header navigation */
 .app-layout {
 min-height: 100vh;
 display: flex;
 flex-direction: column;
 }
 
-/* ========================================================
-ナビゲーションバー（最上部）
-======================================================== */
 .navbar {
 display: flex;
 align-items: center;
@@ -133,6 +127,7 @@ font-weight: 600;
 color: var(--text-muted);
 }
 
+/* STREAMING_CHUNK:Styling navigation tab pills and status indicators */
 .nav-tabs {
 display: flex;
 align-items: center;
@@ -225,9 +220,7 @@ from { opacity: 0; transform: translateY(4px); }
 to { opacity: 1; transform: translateY(0); }
 }
 
-/* ========================================================
-スケジュール操作ストリップ ＆ KPIカウンター（2段目）
-======================================================== */
+/* STREAMING_CHUNK:Styling schedule header controls and metric boxes */
 .schedule-header-strip {
 display: flex;
 flex-wrap: wrap;
@@ -383,9 +376,7 @@ color: var(--text-muted);
 font-weight: 600;
 }
 
-/* ========================================================
-2カラムキャンバス（パレット ＆ タイムテーブル）
-======================================================== */
+/* STREAMING_CHUNK:Styling patient palette sidebar and card elements */
 .schedule-canvas-layout {
 display: grid;
 grid-template-columns: 310px 1fr;
@@ -393,7 +384,6 @@ gap: 1.25rem;
 align-items: start;
 }
 
-/* 左側：患者パレット */
 .palette-panel {
 background-color: var(--bg-surface);
 border: 1px solid var(--border-light);
@@ -609,6 +599,7 @@ font-size: 0.675rem;
 font-weight: 700;
 padding: 0.1rem 0.4rem;
 border-radius: var(--radius-xs);
+white-space: nowrap;
 }
 
 .tag-inpatient {
@@ -647,16 +638,19 @@ font-weight: 700;
 color: var(--text-secondary);
 cursor: pointer;
 transition: all var(--transition-fast);
+white-space: nowrap;
+display: inline-flex;
+align-items: center;
+justify-content: center;
 }
 
 .btn-secondary-compact:hover {
 background-color: var(--bg-surface-hover);
 color: var(--text-main);
+border-color: var(--border-subtle);
 }
 
-/* ========================================================
-タイムテーブル（グリッド ＆ 複数コマ結合ブロック）
-======================================================== */
+/* STREAMING_CHUNK:Styling timetable layout structure and grid cells */
 .timetable-main-panel {
 display: flex;
 flex-direction: column;
@@ -759,7 +753,7 @@ cursor: pointer;
 position: relative;
 background-color: #ffffff;
 transition: background-color var(--transition-fast);
-overflow: visible; /* 複数コマ結合カードを縦にきれいに表示 */
+overflow: visible;
 }
 
 .slot-drop-cell:last-child {
@@ -781,9 +775,7 @@ background-color: rgba(248, 250, 252, 0.4) !important;
 cursor: pointer;
 }
 
-/* ========================================================
-★ パターンC（ハイブリッド方式）：時間割カード配色 ＆ 境界線フィット
-======================================================== */
+/* STREAMING_CHUNK:Styling time-slot blocks and duration badges */
 .slot-pill-card {
 position: absolute;
 top: 2px;
@@ -808,18 +800,14 @@ transform: translateY(-1px);
 z-index: 15;
 }
 
-/* ① 左端縦ライン（アクセントバー）：入院／外来 の識別 /
 .patient-type-inpatient {
-border-left: 6px solid #d97706 !important; / 入院：力強いウォームアンバー */
+border-left: 6px solid #d97706 !important;
 }
 
 .patient-type-outpatient {
-border-left: 6px solid #2563eb !important; /* 外来：知的なインディゴブルー */
+border-left: 6px solid #2563eb !important;
 }
 
-/* ② 全体背景 ＆ バッジ：単位数（時間）ごとのテーマ色 */
-
-/* 1単位 (20分)：爽やかなミントグリーン */
 .unit-theme-1 {
 background: linear-gradient(135deg, #ffffff 30%, #ecfdf5 100%) !important;
 border: 1px solid #a7f3d0;
@@ -833,7 +821,6 @@ box-shadow: 0 1px 2px rgba(5, 150, 105, 0.25);
 color: #047857 !important;
 }
 
-/* 2単位 (40分)：洗練されたスカイブルー */
 .unit-theme-2 {
 background: linear-gradient(135deg, #ffffff 30%, #eff6ff 100%) !important;
 border: 1px solid #bfdbfe;
@@ -847,7 +834,6 @@ box-shadow: 0 1px 2px rgba(37, 99, 235, 0.25);
 color: #1d4ed8 !important;
 }
 
-/* 3単位 (60分)：存在感のあるラベンダーパープル */
 .unit-theme-3 {
 background: linear-gradient(135deg, #ffffff 30%, #f5f3ff 100%) !important;
 border: 1px solid #ddd6fe;
@@ -861,7 +847,6 @@ box-shadow: 0 1px 2px rgba(124, 58, 237, 0.25);
 color: #6d28d9 !important;
 }
 
-/* 4単位以上：鮮明なローズコーラル */
 .unit-theme-4 {
 background: linear-gradient(135deg, #ffffff 30%, #fff1f2 100%) !important;
 border: 1px solid #fecdd3;
@@ -875,22 +860,10 @@ box-shadow: 0 1px 2px rgba(225, 29, 72, 0.25);
 color: #be123c !important;
 }
 
-/* 高さの正確な定義（52px行の境界線にミリ単位でピッタリ収まる計算：はみ出し防止） */
-.span-units-1 {
-height: 48px !important;
-}
-
-.span-units-2 {
-height: 100px !important; /* 52px * 2 - 4px */
-}
-
-.span-units-3 {
-height: 152px !important; /* 52px * 3 - 4px */
-}
-
-.span-units-4 {
-height: 204px !important; /* 52px * 4 - 4px */
-}
+.span-units-1 { height: 48px !important; }
+.span-units-2 { height: 100px !important; }
+.span-units-3 { height: 152px !important; }
+.span-units-4 { height: 204px !important; }
 
 .slot-patient-title {
 display: flex;
@@ -937,9 +910,7 @@ opacity: 1;
 color: var(--primary);
 }
 
-/* ========================================================
-ダッシュボード・テーブル・月間管理
-======================================================== */
+/* STREAMING_CHUNK:Configuring table scrolling and sticky action column */
 .panel-header-strip {
 display: flex;
 align-items: center;
@@ -1018,46 +989,71 @@ padding: 0.25rem 0.65rem;
 border-radius: var(--radius-pill);
 }
 
+/* ★ テーブルコンテナ：横スクロールを確実に発生させ、右端の見切れを防止 /
 .table-container {
 overflow-x: auto;
 border-radius: var(--radius-sm);
 border: 1px solid var(--border-light);
+background-color: #ffffff;
+max-width: 100%;
+position: relative;
+/ スムーズスクロール */
+-webkit-overflow-scrolling: touch;
 }
 
 .modern-table {
 width: 100%;
-border-collapse: collapse;
+border-collapse: separate;
+border-spacing: 0;
 text-align: left;
-font-size: 0.875rem;
+font-size: 0.85rem;
+min-width: 1280px; /* 12項目をゆったり収める十分な最小幅 */
 }
 
 .modern-table th {
 background-color: #f8fafc;
 color: var(--text-secondary);
 font-weight: 800;
-padding: 0.85rem 1rem;
+padding: 0.75rem 0.85rem;
 border-bottom: 2px solid var(--border-light);
 white-space: nowrap;
 }
 
 .modern-table td {
-padding: 0.85rem 1rem;
+padding: 0.75rem 0.85rem;
 border-bottom: 1px solid var(--border-light);
 color: var(--text-main);
 font-weight: 600;
+white-space: nowrap;
 }
 
-.modern-table tbody tr:hover {
+.modern-table tbody tr:hover td {
 background-color: #f8fafc;
 }
 
-.modern-table tbody tr:last-child td {
-border-bottom: none;
+/* ★ 右端の「操作（編集ボタン）」列を画面右端に sticky 固定（絶対に隠れない） */
+.modern-table th:last-child,
+.modern-table td:last-child {
+position: sticky;
+right: 0;
+background-color: #ffffff;
+box-shadow: -4px 0 8px -2px rgba(15, 23, 42, 0.08);
+z-index: 5;
+text-align: center;
+padding: 0.5rem 0.85rem;
+min-width: 95px;
 }
 
-/* ========================================================
-Excel出力アクションカード
-======================================================== */
+.modern-table th:last-child {
+background-color: #f8fafc;
+z-index: 6;
+}
+
+.modern-table tbody tr:hover td:last-child {
+background-color: #f1f5f9;
+}
+
+/* STREAMING_CHUNK:Styling action buttons and export cards */
 .export-dashboard-grid {
 display: grid;
 grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
@@ -1132,6 +1128,7 @@ font-weight: 800;
 cursor: pointer;
 box-shadow: 0 2px 4px rgba(37, 99, 235, 0.25);
 transition: all var(--transition-fast);
+white-space: nowrap;
 }
 
 .btn-primary-action:hover {
@@ -1145,11 +1142,10 @@ font-weight: 700;
 padding: 0.2rem 0.55rem;
 border-radius: var(--radius-pill);
 width: fit-content;
+white-space: nowrap;
 }
 
-/* ========================================================
-モーダルダイアログ
-======================================================== */
+/* STREAMING_CHUNK:Styling modal windows and form controls */
 .modal-overlay {
 position: fixed;
 inset: 0;
@@ -1165,7 +1161,7 @@ transition: opacity var(--transition-fast);
 }
 
 .modal-overlay.show {
-display: flex;
+display: flex !important;
 opacity: 1;
 }
 
@@ -1250,7 +1246,9 @@ font-weight: 800;
 color: var(--text-secondary);
 }
 
-.text-danger { color: var(--danger); }
+.text-danger {
+color: var(--danger);
+}
 
 .form-input, .form-select, .form-textarea {
 width: 100%;
@@ -1377,9 +1375,7 @@ cursor: pointer;
 text-decoration: underline;
 }
 
-/* ========================================================
-トースト通知
-======================================================== */
+/* STREAMING_CHUNK:Styling toast message notification popups */
 #toast-container {
 position: fixed;
 bottom: 1.5rem;
@@ -1413,16 +1409,4 @@ transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 .toast-item.show {
 opacity: 1;
 transform: translateY(0) scale(1);
-}
-
-.toast-success {
-background: linear-gradient(135deg, #065f46, #047857);
-}
-
-.toast-warning {
-background: linear-gradient(135deg, #92400e, #b45309);
-}
-
-.toast-error {
-background: linear-gradient(135deg, #991b1b, #b91c1c);
 }
