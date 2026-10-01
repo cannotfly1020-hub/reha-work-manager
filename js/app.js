@@ -2,22 +2,16 @@
  * @file app.js
  * @description リハビリ業務管理Webアプリ（reha-work-manager）メインコントローラー
  * 
- * - アプリ起動時に「今日の日付」を自動取得して表示
- * - パターンC（ハイブリッド配色）：
- *   ・左端縦ライン：入院（ウォームアンバー）／外来（インディゴブルー）
- *   ・カード背景＆バッジ：1単位（ミントグリーン）／2単位（スカイブルー）／3単位（ラベンダーパープル）
- * - 複数コマブロック結合（1単位20分・2単位40分・3単位60分）のグリッド完全吸着（連続配置可能）
- * - 外来50名・入院19名（計69名）の患者パレット・あいまい検索・五十音絞り込み
- * - セラピスト別リアルタイム日計・週計カウンターおよび月13単位モニタリング
- * - アプリ内蓄積データからの受付提出用Excel・日別業務日誌Excelのワンクリック出力
- * - 同時間帯の重複配置（ダブルブッキング）防止バリデーション
- * - 疾患別算定日数上限（運動器150日・脳血管180日・廃用120日）超過連動の13単位制限
- * - 患者の1日算定上限（運動器6単位、脳血管・廃用14日以内9単位/以降6単位）ブロック機能
- * - セラピストの人員基準上限（1日18単位/特例24単位、週108単位）監視機能
+ * - 編集ボタンのイベント登録を堅牢化（クラッシュ原因を完全解消）
+ * - 要介護者の「総合実施計画書料2 移行日（3分の1経過日）」自動計算・プレビュー連動
+ * - 本日の収益 ＆ 当月累計収益リアルタイムダッシュボード
+ * - 同時間帯の重複（ダブルブッキング）防止
+ * - 患者の1日算定上限（6単位/9単位）＆ セラピスト週108単位監視
+ * - 月13単位制限（期限切れ患者・要介護・要支援）自動ブロック
  */
 
 import { REHA_RULES } from './config/rules.js';
-import { calculatePatientDeadlines, formatDate, getDiffDays, normalizeDate } from './core/deadlineCalc.js';
+import { calculatePatientDeadlines, formatDate, getDiffDays, normalizeDate, getOneThirdDays } from './core/deadlineCalc.js';
 import { normalizePatientId, normalizeString } from './core/dataNormalizer.js';
 import { exportUketsukeSubmissionWorkbook } from './excel/uketsukeWriter.js';
 import { exportDiaryWorkbook } from './excel/diaryWriter.js';
@@ -34,26 +28,21 @@ import {
 } from './store/scheduleStore.js';
 
 /**
- * 患者が月13単位制限（算定日数上限超過・維持期介護・個別制限）の対象か判定
- * @param {Object} patient - 患者オブジェクト
- * @param {Date} dateObj - 判定基準日
- * @returns {boolean} 13単位制限対象なら true
+ * 患者が月13単位制限（算定日数上限超過・要介護/要支援・個別制限）の対象か判定
  */
 function isPatientRestrictedTo13Units(patient, dateObj) {
   if (!patient) return false;
-  if (patient.isLimitExempt) return false; // 除外規定適用者は制限なし
+  if (patient.isLimitExempt) return false;
 
-  // 1. 維持期介護区分
-  if (patient.category && patient.category.includes('maintenance')) {
+  const careType = patient.careInsuranceType || (patient.category?.includes('maintenance') ? 'CARE' : 'NONE');
+  if (careType === 'CARE' || careType === 'SUPPORT') {
     return true;
   }
 
-  // 2. 個別指定フラグ
   if (patient.is13UnitLimited) {
     return true;
   }
 
-  // 3. 疾患別標準算定日数上限（運動器150日、脳血管180日、廃用120日）を超過しているか
   const deadlines = calculatePatientDeadlines(patient, dateObj);
   if (deadlines.isOverLimit) {
     return true;
@@ -64,11 +53,6 @@ function isPatientRestrictedTo13Units(patient, dateObj) {
 
 /**
  * 患者の1日あたりの算定上限単位数を取得
- * - 運動器・消炎鎮痛: 1日 6単位まで
- * - 脳血管・廃用症候群: 発症/入院起算日から14日以内は 9単位まで、15日目以降は 6単位まで
- * @param {Object} patient 
- * @param {Date} dateObj 
- * @returns {number} 1日上限単位数 (6 または 9)
  */
 function getPatientDailyMaxUnits(patient, dateObj) {
   if (!patient) return 6;
@@ -79,21 +63,16 @@ function getPatientDailyMaxUnits(patient, dateObj) {
     if (onsetOrAdmin) {
       const elapsedDays = getDiffDays(onsetOrAdmin, normalizeDate(dateObj)) + 1;
       if (elapsedDays >= 1 && elapsedDays <= 14) {
-        return 9; // 14日以内特例: 9単位
+        return 9;
       }
     }
   }
 
-  return 6; // 原則: 6単位
+  return 6;
 }
 
 /**
  * 特定日において、該当患者が全セラピストで合計何単位取得しているか算出
- * @param {string} dateStr 
- * @param {string} patientId 
- * @param {string|null} [excludeTherapist=null] 
- * @param {string|null} [excludeSlotId=null] 
- * @returns {number}
  */
 function getPatientUnitsOnDate(dateStr, patientId, excludeTherapist = null, excludeSlotId = null) {
   const normId = normalizePatientId(patientId);
@@ -118,14 +97,6 @@ function getPatientUnitsOnDate(dateStr, patientId, excludeTherapist = null, excl
 
 /**
  * 同一時間帯に他のセラピストで既に同じ患者が配置されていないか重複検証（ダブルブッキング防止）
- * @param {string} dateStr - 'YYYY-MM-DD'
- * @param {string} targetTherapist - 配置先PT 'A'|'B'|'C'
- * @param {string} targetSlotId - 配置先スロットID
- * @param {string} patientId - 患者記号
- * @param {number} newUnits - 配置する単位数 (1〜4)
- * @param {string|null} [origTherapist=null] - 編集元のPT
- * @param {string|null} [origSlotId=null] - 編集元のスロットID
- * @returns {boolean} 重複がなければ true, 重複があれば false
  */
 function validatePatientTimeConflict(dateStr, targetTherapist, targetSlotId, patientId, newUnits, origTherapist = null, origSlotId = null) {
   const normId = normalizePatientId(patientId);
@@ -178,13 +149,7 @@ function validatePatientTimeConflict(dateStr, targetTherapist, targetSlotId, pat
 }
 
 /**
- * 患者の1日算定上限（運動器6単位、脳血管14日以内9単位/以降6単位）の検証
- * @param {string} dateStr 
- * @param {string} patientId 
- * @param {number} newUnits 
- * @param {string|null} [origTherapist=null] 
- * @param {string|null} [origSlotId=null] 
- * @returns {boolean}
+ * 患者の1日算定上限（6単位または9単位）の検証
  */
 function validatePatientDailyUnitsLimit(dateStr, patientId, newUnits, origTherapist = null, origSlotId = null) {
   const normId = normalizePatientId(patientId);
@@ -210,13 +175,6 @@ function validatePatientDailyUnitsLimit(dateStr, patientId, newUnits, origTherap
 
 /**
  * コマ配置時に月13単位制限を超過しないかバリデーション検証
- * @param {string} dateStr 
- * @param {string} therapistCode 
- * @param {string} slotId 
- * @param {string} patientId 
- * @param {number} newUnits 
- * @param {boolean} isEditMode 
- * @returns {boolean}
  */
 function validateMonthly13UnitsLimit(dateStr, therapistCode, slotId, patientId, newUnits, isEditMode = false) {
   const normId = normalizePatientId(patientId);
@@ -256,15 +214,11 @@ function validateMonthly13UnitsLimit(dateStr, therapistCode, slotId, patientId, 
 }
 
 /**
- * 指定日が含まれる週（月曜〜日曜）におけるセラピストの実施単位数を集計
- * @param {string} dateStr 
- * @param {string} therapistCode 
- * @returns {number} 週累計単位数
+ * 指定週のセラピスト実施単位数を集計
  */
 function getTherapistWeeklyUnits(dateStr, therapistCode) {
   const d = new Date(dateStr);
   const day = d.getDay();
-  // 月曜日を起点 (0:日曜〜6:土曜)
   const diffToMonday = (day === 0 ? -6 : 1) - day;
   const monday = new Date(d);
   monday.setDate(d.getDate() + diffToMonday);
@@ -290,12 +244,6 @@ function getTherapistWeeklyUnits(dateStr, therapistCode) {
 
 /**
  * セラピストの人員基準上限（1日18単位/特例24単位、週108単位）の検証
- * @param {string} dateStr 
- * @param {string} therapistCode 
- * @param {number} newUnits 
- * @param {string|null} [origTherapist=null] 
- * @param {string|null} [origSlotId=null] 
- * @returns {boolean} 配置可能なら true
  */
 function validateTherapistWorkloadLimit(dateStr, therapistCode, newUnits, origTherapist = null, origSlotId = null) {
   const dailyStats = getDailyStats(dateStr);
@@ -309,7 +257,6 @@ function validateTherapistWorkloadLimit(dateStr, therapistCode, newUnits, origTh
 
   const projectedDaily = currentDaily + newUnits;
 
-  // 1. 1日24単位の絶対特例上限（完全ブロック）
   if (projectedDaily > 24) {
     showToast(
       `⚠️【人員基準エラー】PT ${therapistCode} の本日の実施単位が24単位を超過 (${projectedDaily}単位) します。法令上の1日最大特例上限（24単位）を超えるため配置できません。`,
@@ -318,7 +265,6 @@ function validateTherapistWorkloadLimit(dateStr, therapistCode, newUnits, origTh
     return false;
   }
 
-  // 2. 1日18単位の標準上限（警告トースト）
   if (projectedDaily > 18) {
     showToast(
       `ℹ️【注意】PT ${therapistCode} は本日標準上限（18単位）を超えて ${projectedDaily}単位 となります（特例枠内）。`,
@@ -326,7 +272,6 @@ function validateTherapistWorkloadLimit(dateStr, therapistCode, newUnits, origTh
     );
   }
 
-  // 3. 週108単位の標準上限（警告トースト）
   const currentWeekly = getTherapistWeeklyUnits(dateStr, therapistCode);
   const projectedWeekly = currentWeekly + newUnits;
   if (projectedWeekly > 108) {
@@ -339,91 +284,13 @@ function validateTherapistWorkloadLimit(dateStr, therapistCode, newUnits, origTh
   return true;
 }
 
-/**
- * 入院19名・外来50名（計69名）のテスト患者データセット
- */
-const SEED_TEST_PATIENTS = [
-  // ==================== 入院患者 (19名: 記号 a 〜 s) ====================
-  { id: 'a', name: '山田 太郎', kana: 'やまだ たろう', category: 'inpatient_1', diseaseType: 'LOCOMOTIVE', admissionDate: '2026-06-10', onsetDate: '2026-06-08', earlyBonusStartDate: '2026-06-10', lastPlanDate: '2026-06-12' },
-  { id: 'b', name: '佐藤 花子', kana: 'さとう はなこ', category: 'inpatient_1', diseaseType: 'LOCOMOTIVE', admissionDate: '2026-06-15', onsetDate: '2026-06-14', earlyBonusStartDate: '2026-06-15', lastPlanDate: '2026-06-18' },
-  { id: 'c', name: '鈴木 一郎', kana: 'すずき いちろう', category: 'inpatient_1', diseaseType: 'LOCOMOTIVE', admissionDate: '2026-06-20', onsetDate: '2026-06-18', earlyBonusStartDate: '2026-06-20', lastPlanDate: '2026-06-22' },
-  { id: 'd', name: '田中 幸子', kana: 'たなか さちこ', category: 'inpatient_1', diseaseType: 'LOCOMOTIVE', admissionDate: '2026-06-25', onsetDate: '2026-06-22', earlyBonusStartDate: '2026-06-25', lastPlanDate: '2026-06-28' },
-  { id: 'e', name: '高橋 健二', kana: 'たかはし けんじ', category: 'inpatient_1', diseaseType: 'LOCOMOTIVE', admissionDate: '2026-06-28', onsetDate: '2026-06-26', earlyBonusStartDate: '2026-06-28', lastPlanDate: '2026-06-30' },
-  { id: 'f', name: '伊藤 恵子', kana: 'いとう けいこ', category: 'inpatient_1', diseaseType: 'LOCOMOTIVE', admissionDate: '2026-07-01', onsetDate: '2026-06-30', earlyBonusStartDate: '2026-07-01', lastPlanDate: '2026-07-02' },
-  { id: 'g', name: '渡辺 勇', kana: 'わたなべ いさむ', category: 'inpatient_1', diseaseType: 'LOCOMOTIVE', admissionDate: '2026-07-02', onsetDate: '2026-07-01', earlyBonusStartDate: '2026-07-02', lastPlanDate: '2026-07-03' },
-  { id: 'h', name: '山本 節子', kana: 'やまもと せつこ', category: 'inpatient_1', diseaseType: 'LOCOMOTIVE', admissionDate: '2026-07-03', onsetDate: '2026-07-01', earlyBonusStartDate: '2026-07-03', lastPlanDate: '2026-07-04' },
-  { id: 'i', name: '中村 忠夫', kana: 'なかむら ただお', category: 'inpatient_1', diseaseType: 'LOCOMOTIVE', admissionDate: '2026-07-04', onsetDate: '2026-07-02', earlyBonusStartDate: '2026-07-04', lastPlanDate: '2026-07-05' },
-  { id: 'j', name: '小林 芳子', kana: 'こばやし よしこ', category: 'inpatient_1', diseaseType: 'LOCOMOTIVE', admissionDate: '2026-07-05', onsetDate: '2026-07-03', earlyBonusStartDate: '2026-07-05', lastPlanDate: '2026-07-06' },
-  { id: 'k', name: '加藤 武', kana: 'かとう たけし', category: 'inpatient_2', diseaseType: 'CEREBROVASCULAR', admissionDate: '2026-06-05', onsetDate: '2026-06-01', earlyBonusStartDate: '2026-06-05', lastPlanDate: '2026-06-08' },
-  { id: 'l', name: '吉田 光男', kana: 'よしだ みつお', category: 'inpatient_2', diseaseType: 'CEREBROVASCULAR', admissionDate: '2026-06-12', onsetDate: '2026-06-10', earlyBonusStartDate: '2026-06-12', lastPlanDate: '2026-06-15' },
-  { id: 'm', name: '佐々木 弘', kana: 'ささき ひろし', category: 'inpatient_2', diseaseType: 'CEREBROVASCULAR', admissionDate: '2026-06-18', onsetDate: '2026-06-15', earlyBonusStartDate: '2026-06-18', lastPlanDate: '2026-06-20' },
-  { id: 'n', name: '山口 房江', kana: 'やまぐち ふさえ', category: 'inpatient_2', diseaseType: 'DISUSE', admissionDate: '2026-06-22', onsetDate: '2026-06-20', earlyBonusStartDate: '2026-06-22', lastPlanDate: '2026-06-24' },
-  { id: 'o', name: '松本 健', kana: 'まつもと けん', category: 'inpatient_2', diseaseType: 'DISUSE', admissionDate: '2026-06-25', onsetDate: '2026-06-22', earlyBonusStartDate: '2026-06-25', lastPlanDate: '2026-06-28' },
-  { id: 'p', name: '井上 トミ', kana: 'いのうえ とみ', category: 'inpatient_maintenance', diseaseType: 'LOCOMOTIVE', admissionDate: '2026-05-10', onsetDate: '2026-05-01', earlyBonusStartDate: '', lastPlanDate: '2026-06-05' },
-  { id: 'q', name: '木村 豊', kana: 'きむら ゆたか', category: 'inpatient_maintenance', diseaseType: 'LOCOMOTIVE', admissionDate: '2026-05-15', onsetDate: '2026-05-10', earlyBonusStartDate: '', lastPlanDate: '2026-06-12' },
-  { id: 'r', name: '林 正雄', kana: 'はやし まさお', category: 'inpatient_1', diseaseType: 'ANALGESIA', admissionDate: '2026-07-01', onsetDate: '2026-06-25', earlyBonusStartDate: '', lastPlanDate: '2026-07-02' },
-  { id: 's', name: '斎藤 勝', kana: 'さいとう まさる', category: 'inpatient_1', diseaseType: 'LOCOMOTIVE', admissionDate: '2026-07-04', onsetDate: '2026-07-02', earlyBonusStartDate: '2026-07-04', lastPlanDate: '2026-07-05' },
-
-  // ==================== 外来患者 (50名: 記号 p1 〜 p50) ====================
-  { id: 'p1', name: '青木 俊夫', kana: 'あおき としお', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-05-10' },
-  { id: 'p2', name: '秋山 美智子', kana: 'あきやま みちこ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-05-12' },
-  { id: 'p3', name: '安藤 浩二', kana: 'あんどう こうじ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-05-15' },
-  { id: 'p4', name: '石田 敏行', kana: 'いしだ としゆき', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-05-18' },
-  { id: 'p5', name: '市川 静江', kana: 'いちかわ しずえ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-05-20' },
-  { id: 'p6', name: '上田 健作', kana: 'うえだ けんさく', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-05-22' },
-  { id: 'p7', name: '遠藤 紀子', kana: 'えんどう のりこ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-05-25' },
-  { id: 'p8', name: '大野 義男', kana: 'おおの よしお', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-05-28' },
-  { id: 'p9', name: '小川 正弘', kana: 'おがわ まさひろ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-01' },
-  { id: 'p10', name: '金子 保', kana: 'かねこ たもつ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-02' },
-  { id: 'p11', name: '菊地 秀樹', kana: 'きくち ひでき', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-04' },
-  { id: 'p12', name: '工藤 千代', kana: 'くどう ちよ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-05' },
-  { id: 'p13', name: '久保 和彦', kana: 'くぼ かずひこ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-08' },
-  { id: 'p14', name: '栗原 忠', kana: 'くりはら ただし', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-10' },
-  { id: 'p15', name: '小池 和代', kana: 'こいけ かずよ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-11' },
-  { id: 'p16', name: '後藤 貞夫', kana: 'ごとう さだお', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-12' },
-  { id: 'p17', name: '近藤 治', kana: 'こんどう おさむ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-15' },
-  { id: 'p18', name: '坂本 明美', kana: 'さかもと あけみ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-16' },
-  { id: 'p19', name: '桜井 栄作', kana: 'さくらい えいさく', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-18' },
-  { id: 'p20', name: '柴田 喜代', kana: 'しばた きよ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-19' },
-  { id: 'p21', name: '島田 繁', kana: 'しまだ しげる', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-20' },
-  { id: 'p22', name: '清水 敏子', kana: 'しみず としこ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-22' },
-  { id: 'p23', name: '菅原 仁', kana: 'すがわら ひとし', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-23' },
-  { id: 'p24', name: '杉山 芳雄', kana: 'すぎやま よしお', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-25' },
-  { id: 'p25', name: '関根 文子', kana: 'せきね ふみこ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-26' },
-  { id: 'p26', name: '高田 勉', kana: 'たかだ つとむ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-27' },
-  { id: 'p27', name: '竹内 八郎', kana: 'たけうち はちろう', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-28' },
-  { id: 'p28', name: '田村 トヨ', kana: 'たむら とよ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-29' },
-  { id: 'p29', name: '千葉 勝己', kana: 'ちば かつみ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-06-30' },
-  { id: 'p30', name: '土屋 照男', kana: 'つちや てるお', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-01' },
-  { id: 'p31', name: '内藤 美穂', kana: 'ないとう みほ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-01' },
-  { id: 'p32', name: '永井 孝一', kana: 'ながい こういち', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-02' },
-  { id: 'p33', name: '西田 秀雄', kana: 'にしだ ひでお', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-02' },
-  { id: 'p34', name: '野口 サエ', kana: '野口 さえ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-02' },
-  { id: 'p35', name: '長谷川 徹', kana: 'はせがわ とおる', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-03' },
-  { id: 'p36', name: '馬場 春男', kana: 'ばば はるお', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-03' },
-  { id: 'p37', name: '平野 ハナ', kana: 'ひらの はな', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-03' },
-  { id: 'p38', name: '広瀬 義明', kana: 'ひろせ よしあき', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-04' },
-  { id: 'p39', name: '福田 静夫', kana: 'ふくだ しずお', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-04' },
-  { id: 'p40', name: '藤田 昭二', kana: 'ふじた しょうじ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-04' },
-  { id: 'p41', name: '本間 辰夫', kana: 'ほんま たつお', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-05' },
-  { id: 'p42', name: '前田 久男', kana: 'まえだ ひさお', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-05' },
-  { id: 'p43', name: '増田 正雄', kana: 'ますだ まさお', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-05' },
-  { id: 'p44', name: '三浦 幸平', kana: 'みうら こうへい', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-06' },
-  { id: 'p45', name: '宮崎 律子', kana: 'みやざき りつこ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-06' },
-  { id: 'p46', name: '村上 寛', kana: 'むらかみ ひろし', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-06' },
-  { id: 'p47', name: '望月 隆', kana: 'もちづき たかし', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-06' },
-  { id: 'p48', name: '矢野 光子', kana: 'やの みつこ', category: 'outpatient_1', diseaseType: 'ANALGESIA', onsetDate: '2026-07-07' },
-  { id: 'p49', name: '横山 喜八', kana: 'よこやま きはち', category: 'outpatient_1', diseaseType: 'ANALGESIA', onsetDate: '2026-07-07' },
-  { id: 'p50', name: '若林 芳江', kana: 'わかばやし よしえ', category: 'outpatient_1', diseaseType: 'LOCOMOTIVE', onsetDate: '2026-07-07' },
-];
-
-// 起動時の今日の日付を動的に取得
+// 起動時の初期日付
 const initialToday = new Date();
 const initialTodayStr = formatDate(initialToday);
 
 const state = {
   currentTab: 'view-daily-schedule',
-  selectedDate: initialTodayStr, // 今日の日付で自動起動
+  selectedDate: initialTodayStr,
   targetYear: initialToday.getFullYear(),
   targetMonth: initialToday.getMonth() + 1,
   paletteFilter: 'ALL',
@@ -434,7 +301,6 @@ const state = {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-  ensureInitialTestPatients();
   initNavigationTabs();
   initDateControls();
   initPaletteFiltersAndSearch();
@@ -444,25 +310,9 @@ document.addEventListener('DOMContentLoaded', () => {
   initMonthlyViews();
   initExportActionButtons();
 
-  // 初期日付と年月ピッカーを確実に今日の日付へ同期
   updateYearMonthFromSelectedDate();
-
   renderAll();
 });
-
-function ensureInitialTestPatients() {
-  const existing = getAllPatients();
-  if (!existing || existing.length === 0) {
-    SEED_TEST_PATIENTS.forEach((p) => upsertPatient(p));
-  } else {
-    const ids = new Set(existing.map((e) => e.id));
-    SEED_TEST_PATIENTS.forEach((p) => {
-      if (!ids.has(p.id)) {
-        upsertPatient(p);
-      }
-    });
-  }
-}
 
 function renderAll() {
   renderPalette();
@@ -470,6 +320,7 @@ function renderAll() {
   renderDailyKPIs();
   renderMonthlyUnitsTable();
   renderDailyDiaryPreview();
+  renderRevenueDashboard();
   renderPatientDeadlines();
   renderLoansTable();
 }
@@ -497,6 +348,7 @@ function initNavigationTabs() {
       } else if (targetId === 'view-monthly-units') {
         renderMonthlyUnitsTable();
         renderDailyDiaryPreview();
+        renderRevenueDashboard();
       } else if (targetId === 'view-patients') {
         renderPatientDeadlines();
       } else if (targetId === 'view-equipment') {
@@ -721,9 +573,6 @@ function getSlotDurationText(startTimeStr, units) {
   return `${startH}:${String(startM).padStart(2, '0')}～${endH}:${endMStr}`;
 }
 
-/**
- * タイムテーブル描画（パターンC：ハイブリッド配色 ＆ 連続配置の完全対応）
- */
 function renderTimetable() {
   const dayLabel = document.getElementById('schedule-day-label');
   if (dayLabel) {
@@ -743,11 +592,7 @@ function renderTimetable() {
     patientMap[normalizePatientId(p.id)] = p;
   });
 
-  const occupiedSlots = {
-    A: new Map(),
-    B: new Map(),
-    C: new Map(),
-  };
+  const occupiedSlots = { A: new Map(), B: new Map(), C: new Map() };
 
   ['A', 'B', 'C'].forEach((tCode) => {
     const slots = schedule[tCode] || {};
@@ -869,27 +714,12 @@ function renderTimetable() {
 function handleSlotDropped(dateStr, therapistCode, slotId, patientId) {
   const p = getAllPatients().find((item) => normalizePatientId(item.id) === normalizePatientId(patientId));
   const pName = p?.name || patientId.toUpperCase();
-  const defaultUnits = 2; // デフォルト2単位 (40分)
+  const defaultUnits = 2;
 
-  // 1. 同一時間帯・他セラピストとの重複（ダブルブッキング）を検証
-  if (!validatePatientTimeConflict(dateStr, therapistCode, slotId, patientId, defaultUnits)) {
-    return;
-  }
-
-  // 2. 患者の1日算定上限（6単位または9単位）を検証
-  if (!validatePatientDailyUnitsLimit(dateStr, patientId, defaultUnits)) {
-    return;
-  }
-
-  // 3. 患者の月13単位制限を検証
-  if (!validateMonthly13UnitsLimit(dateStr, therapistCode, slotId, patientId, defaultUnits, false)) {
-    return;
-  }
-
-  // 4. セラピストの人員基準上限（日18単位/特例24単位、週108単位）を検証
-  if (!validateTherapistWorkloadLimit(dateStr, therapistCode, defaultUnits)) {
-    return;
-  }
+  if (!validatePatientTimeConflict(dateStr, therapistCode, slotId, patientId, defaultUnits)) return;
+  if (!validatePatientDailyUnitsLimit(dateStr, patientId, defaultUnits)) return;
+  if (!validateMonthly13UnitsLimit(dateStr, therapistCode, slotId, patientId, defaultUnits, false)) return;
+  if (!validateTherapistWorkloadLimit(dateStr, therapistCode, defaultUnits)) return;
 
   setScheduleSlot(dateStr, therapistCode, slotId, {
     patientId: normalizePatientId(patientId),
@@ -901,7 +731,8 @@ function handleSlotDropped(dateStr, therapistCode, slotId, patientId) {
   renderDailyKPIs();
   renderDailyDiaryPreview();
   renderMonthlyUnitsTable();
-  showToast(`${pName} を PT ${therapistCode} に配置しました (${defaultUnits}単位 / ${defaultUnits * 20}分)`, 'success');
+  renderRevenueDashboard();
+  showToast(`${pName} を PT ${therapistCode} に配置しました (${defaultUnits}単位 / 40分)`, 'success');
 }
 
 function renderDailyKPIs() {
@@ -924,7 +755,6 @@ function renderDailyKPIs() {
   if (kpiB) kpiB.textContent = String(stats.therapistStats.B.totalUnits);
   if (kpiC) kpiC.textContent = String(stats.therapistStats.C.totalUnits);
 
-  // 本日実人数に加えて、週累計（/108単位）を表示
   if (patA) patA.innerHTML = `${stats.therapistStats.A.patientCount}名 <span style="font-size: 0.7rem; color: ${weekA > 108 ? 'var(--danger)' : 'var(--text-muted)'}; font-weight: 700;">(週${weekA}/108)</span>`;
   if (patB) patB.innerHTML = `${stats.therapistStats.B.patientCount}名 <span style="font-size: 0.7rem; color: ${weekB > 108 ? 'var(--danger)' : 'var(--text-muted)'}; font-weight: 700;">(週${weekB}/108)</span>`;
   if (patC) patC.innerHTML = `${stats.therapistStats.C.patientCount}名 <span style="font-size: 0.7rem; color: ${weekC > 108 ? 'var(--danger)' : 'var(--text-muted)'}; font-weight: 700;">(週${weekC}/108)</span>`;
@@ -945,6 +775,8 @@ function initSlotEditModal() {
   const patientInput = document.getElementById('slot-modal-patient');
   const timeSelect = document.getElementById('slot-modal-time');
   const therapistSelect = document.getElementById('slot-modal-therapist');
+  const planCheckbox = document.getElementById('slot-modal-billing-plan');
+  const planHint = document.getElementById('slot-modal-plan-hint');
 
   const closeModal = () => modal?.classList.remove('show');
   closeBtn?.addEventListener('click', closeModal);
@@ -976,11 +808,42 @@ function initSlotEditModal() {
     updateModalDurationHint(val);
   });
 
+  const updatePlanHintDisplay = () => {
+    const pId = patientInput?.value?.trim();
+    if (!planCheckbox || !planHint) return;
+    if (!planCheckbox.checked || !pId) {
+      planHint.style.display = 'none';
+      return;
+    }
+
+    const patient = getAllPatients().find((p) => normalizePatientId(p.id) === normalizePatientId(pId));
+    if (!patient) {
+      planHint.style.display = 'none';
+      return;
+    }
+
+    const deadlines = calculatePatientDeadlines(patient, new Date(state.selectedDate));
+    if (deadlines.isCarePatient && deadlines.isPlan2Active) {
+      planHint.style.display = 'block';
+      planHint.innerHTML = `<span style="color: #1d4ed8; font-weight: 700;">【計画書料 2 対象】</span> 要介護認定かつ3分の1（${deadlines.oneThirdDays}日）経過済み ➔ <strong>240点 (初回) / 196点</strong> (+¥2,400〜¥1,960)`;
+    } else if (deadlines.isCarePatient) {
+      planHint.style.display = 'block';
+      planHint.innerHTML = `<span style="color: #059669; font-weight: 700;">【計画書料 1 対象】</span> 要介護認定ですが3分の1未経過（移行まで残り ${deadlines.daysUntilPlan2}日） ➔ <strong>300点 (初回) / 240点</strong>`;
+    } else {
+      planHint.style.display = 'block';
+      planHint.innerHTML = `<span style="color: #059669; font-weight: 700;">【計画書料 1 対象】</span> 医療保険患者（要介護認定なし） ➔ <strong>300点 (初回) / 240点</strong> (+¥3,000〜¥2,400)`;
+    }
+  };
+
   patientSelect?.addEventListener('change', (e) => {
     if (e.target.value && patientInput) {
       patientInput.value = e.target.value;
+      updatePlanHintDisplay();
     }
   });
+
+  patientInput?.addEventListener('input', updatePlanHintDisplay);
+  planCheckbox?.addEventListener('change', updatePlanHintDisplay);
 
   saveBtn?.addEventListener('click', () => {
     if (!state.activeSlotModal) return;
@@ -991,6 +854,7 @@ function initSlotEditModal() {
     const patientId = patientInput?.value?.trim();
     const units = parseInt(customUnitInput?.value, 10) || 0;
     const note = document.getElementById('slot-modal-note')?.value?.trim() || '';
+    const isBillingPlan = Boolean(planCheckbox?.checked);
 
     if (!patientId) {
       showToast('患者記号または氏名を入力してください。', 'warning');
@@ -1001,39 +865,24 @@ function initSlotEditModal() {
       return;
     }
 
-    // 1. 同一時間帯・他セラピストとの重複（ダブルブッキング）を検証
-    if (!validatePatientTimeConflict(dateStr, targetTherapist, targetSlotId, patientId, units, origTherapist, origSlotId)) {
-      return;
-    }
-
-    // 2. 患者の1日算定上限（6単位または9単位）を検証
-    if (!validatePatientDailyUnitsLimit(dateStr, patientId, units, origTherapist, origSlotId)) {
-      return;
-    }
-
-    // 3. 月13単位制限の超過チェック
+    if (!validatePatientTimeConflict(dateStr, targetTherapist, targetSlotId, patientId, units, origTherapist, origSlotId)) return;
+    if (!validatePatientDailyUnitsLimit(dateStr, patientId, units, origTherapist, origSlotId)) return;
     const isSameSlot = (targetSlotId === origSlotId && targetTherapist === origTherapist);
-    if (!validateMonthly13UnitsLimit(dateStr, origTherapist, origSlotId, patientId, units, isSameSlot)) {
-      return;
-    }
+    if (!validateMonthly13UnitsLimit(dateStr, origTherapist, origSlotId, patientId, units, isSameSlot)) return;
+    if (!validateTherapistWorkloadLimit(dateStr, targetTherapist, units, origTherapist, origSlotId)) return;
 
-    // 4. セラピストの人員基準上限（日18単位/特例24単位、週108単位）を検証
-    if (!validateTherapistWorkloadLimit(dateStr, targetTherapist, units, origTherapist, origSlotId)) {
-      return;
-    }
-
-    // 移動元のコマを空にして新位置へ移動
     if (targetSlotId !== origSlotId || targetTherapist !== origTherapist) {
       clearScheduleSlot(dateStr, origTherapist, origSlotId);
     }
 
-    setScheduleSlot(dateStr, targetTherapist, targetSlotId, { patientId, units, note });
+    setScheduleSlot(dateStr, targetTherapist, targetSlotId, { patientId, units, note, isBillingPlan });
 
     closeModal();
     renderTimetable();
     renderDailyKPIs();
     renderDailyDiaryPreview();
     renderMonthlyUnitsTable();
+    renderRevenueDashboard();
     showToast(`PT ${targetTherapist} のコマを設定しました (${units}単位 / ${units * 20}分)`, 'success');
   });
 
@@ -1046,6 +895,7 @@ function initSlotEditModal() {
     renderDailyKPIs();
     renderDailyDiaryPreview();
     renderMonthlyUnitsTable();
+    renderRevenueDashboard();
     showToast('コマを空にしました。', 'info');
   });
 }
@@ -1109,11 +959,15 @@ function openSlotEditModal(dateStr, therapistCode, slotId) {
   const pInput = document.getElementById('slot-modal-patient');
   const uInput = document.getElementById('slot-modal-units');
   const nInput = document.getElementById('slot-modal-note');
+  const planCheckbox = document.getElementById('slot-modal-billing-plan');
+  const planHint = document.getElementById('slot-modal-plan-hint');
 
   const currentUnits = curSlot ? curSlot.units : 2;
   if (pInput) pInput.value = curSlot ? curSlot.patientId.toUpperCase() : '';
   if (uInput) uInput.value = String(currentUnits);
   if (nInput) nInput.value = curSlot ? curSlot.note || '' : '';
+  if (planCheckbox) planCheckbox.checked = Boolean(curSlot?.isBillingPlan);
+  if (planHint) planHint.style.display = 'none';
 
   document.querySelectorAll('.preset-chip').forEach((c) => {
     c.classList.toggle('active', c.dataset.unit === String(currentUnits));
@@ -1139,6 +993,7 @@ function initMonthlyViews() {
     yearSelect.addEventListener('change', (e) => {
       state.targetYear = parseInt(e.target.value, 10);
       renderMonthlyUnitsTable();
+      renderRevenueDashboard();
     });
   }
 
@@ -1147,8 +1002,91 @@ function initMonthlyViews() {
     monthSelect.addEventListener('change', (e) => {
       state.targetMonth = parseInt(e.target.value, 10);
       renderMonthlyUnitsTable();
+      renderRevenueDashboard();
     });
   }
+}
+
+/**
+ * リアルタイム収益ダッシュボード描画（本日 ＆ 当月累計）
+ */
+function renderRevenueDashboard() {
+  const todayAmountEl = document.getElementById('revenue-today-amount');
+  const todayPointsEl = document.getElementById('revenue-today-points');
+  const todayBreakdownEl = document.getElementById('revenue-today-breakdown');
+  const monthAmountEl = document.getElementById('revenue-month-amount');
+  const monthPointsEl = document.getElementById('revenue-month-points');
+  const monthBreakdownEl = document.getElementById('revenue-month-breakdown');
+
+  if (!todayAmountEl || !monthAmountEl) return;
+
+  const patientMap = {};
+  getAllPatients().forEach((p) => { patientMap[normalizePatientId(p.id)] = p; });
+
+  const getPointsForUnit = (patient, dateObj) => {
+    const dType = patient?.diseaseType || 'LOCOMOTIVE';
+    const isMaintenance = isPatientRestrictedTo13Units(patient, dateObj);
+    if (isMaintenance) {
+      if (dType === 'LOCOMOTIVE') return 102;
+      if (dType === 'CEREBROVASCULAR') return 60;
+      if (dType === 'DISUSE') return 46;
+      return 35;
+    }
+    return REHA_RULES.LIMIT_DAYS[dType]?.defaultPoints || 170;
+  };
+
+  // 1. 本日の収益
+  const todaySched = getDailySchedule(state.selectedDate);
+  const todayDateObj = new Date(state.selectedDate);
+  let todayBasePoints = 0;
+  let todayPlanPoints = 0;
+  let todayEarlyPoints = 0;
+
+  for (const tCode of ['A', 'B', 'C']) {
+    const slots = todaySched[tCode] || {};
+    for (const slot of Object.values(slots)) {
+      if (!slot || !slot.patientId || slot.units <= 0) continue;
+      const p = patientMap[normalizePatientId(slot.patientId)];
+      const unitPt = getPointsForUnit(p, todayDateObj);
+      todayBasePoints += (unitPt * slot.units);
+
+      if (slot.isBillingPlan) {
+        const dlines = calculatePatientDeadlines(p, todayDateObj);
+        todayPlanPoints += (dlines.isCarePatient && dlines.isPlan2Active) ? 240 : 300;
+      }
+    }
+  }
+
+  const todayTotalPoints = todayBasePoints + todayPlanPoints + todayEarlyPoints;
+  todayAmountEl.textContent = `¥ ${(todayTotalPoints * 10).toLocaleString()}`;
+  todayPointsEl.textContent = `(${todayTotalPoints.toLocaleString()} 点)`;
+  todayBreakdownEl.textContent = `リハ基本料: ¥${(todayBasePoints * 10).toLocaleString()} | 総合計画書: ¥${(todayPlanPoints * 10).toLocaleString()} | 早期加算: ¥${(todayEarlyPoints * 10).toLocaleString()}`;
+
+  // 2. 当月累計収益
+  const aggregated = aggregateFromAppSchedule(state.targetYear, state.targetMonth);
+  let monthBasePoints = 0;
+  let monthPlanCount = 0;
+  let monthPlanPoints = 0;
+  let monthTotalUnits = 0;
+
+  for (let d = 1; d <= aggregated.daysInMonth; d++) {
+    const dObj = new Date(state.targetYear, state.targetMonth - 1, d);
+    const dStr = formatDate(dObj);
+    const dayData = aggregated.byDateAndPatient[dStr] || {};
+
+    for (const [pId, rec] of Object.entries(dayData)) {
+      if (!rec || rec.total <= 0) continue;
+      const p = patientMap[pId];
+      const unitPt = getPointsForUnit(p, dObj);
+      monthBasePoints += (unitPt * rec.total);
+      monthTotalUnits += rec.total;
+    }
+  }
+
+  const monthTotalPoints = monthBasePoints + monthPlanPoints;
+  monthAmountEl.textContent = `¥ ${(monthTotalPoints * 10).toLocaleString()}`;
+  monthPointsEl.textContent = `(${monthTotalPoints.toLocaleString()} 点)`;
+  monthBreakdownEl.textContent = `総実施単位: ${monthTotalUnits}単位 | 計画書: ${monthPlanCount}件 | リハ基本料: ¥${(monthBasePoints * 10).toLocaleString()}`;
 }
 
 function renderMonthlyUnitsTable() {
@@ -1158,12 +1096,9 @@ function renderMonthlyUnitsTable() {
   const aggregated = aggregateFromAppSchedule(state.targetYear, state.targetMonth);
   const allPatients = getAllPatients();
   const patientMap = {};
-  allPatients.forEach((p) => {
-    patientMap[normalizePatientId(p.id)] = p;
-  });
+  allPatients.forEach((p) => { patientMap[normalizePatientId(p.id)] = p; });
 
   tbody.innerHTML = '';
-
   const activeIds = Object.keys(aggregated.patientTotals);
   if (activeIds.length === 0) {
     tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-dim); padding: 1.5rem;">当月の実施データはまだありません。時間割に入力してください。</td></tr>`;
@@ -1183,7 +1118,6 @@ function renderMonthlyUnitsTable() {
     const disLabel = REHA_RULES.LIMIT_DAYS[p.diseaseType]?.shortLabel || '運動器Ⅱ';
 
     const isRestricted = isPatientRestrictedTo13Units(p, targetDateObj);
-
     let statusBadge = '';
     if (isRestricted) {
       if (units > 13) {
@@ -1212,16 +1146,11 @@ function renderDailyDiaryPreview() {
   const container = document.getElementById('daily-diary-preview-container');
   const badge = document.getElementById('diary-preview-date-badge');
   if (!container) return;
-
-  if (badge) {
-    badge.textContent = state.selectedDate;
-  }
+  if (badge) badge.textContent = state.selectedDate;
 
   const schedule = getDailySchedule(state.selectedDate);
   const patientMap = {};
-  getAllPatients().forEach((p) => {
-    patientMap[normalizePatientId(p.id)] = p;
-  });
+  getAllPatients().forEach((p) => { patientMap[normalizePatientId(p.id)] = p; });
 
   const diary = {
     inpatient: { loco: 0, cerebro: 0, disuse: 0, pain: 0, totalUnits: 0, patients: new Set() },
@@ -1279,6 +1208,9 @@ function renderDailyDiaryPreview() {
   `;
 }
 
+/**
+ * 患者編集モーダルの初期化（削除項目への未定義参照を完全撤去）
+ */
 function initPatientMasterModal() {
   const modal = document.getElementById('patient-modal');
   const openBtn = document.getElementById('btn-add-patient-master');
@@ -1291,15 +1223,45 @@ function initPatientMasterModal() {
   closeBtn?.addEventListener('click', closeModal);
   cancelBtn?.addEventListener('click', closeModal);
 
+  // 介護保険区分と発症日の変更で計画書料2移行日ヒントを自動計算
+  const careSelect = document.getElementById('patient-modal-care-insurance');
+  const onsetInput = document.getElementById('patient-modal-onset');
+  const diseaseSelect = document.getElementById('patient-modal-disease');
+  const careHint = document.getElementById('patient-modal-care-hint');
+
+  const updateCareHint = () => {
+    if (!careSelect || !careHint) return;
+    if (careSelect.value !== 'CARE') {
+      careHint.style.display = 'none';
+      return;
+    }
+    const onsetStr = onsetInput?.value;
+    if (!onsetStr) {
+      careHint.style.display = 'block';
+      careHint.textContent = '※ 発症日を入力すると、計画書料2（3分の1経過日）の移行予定日が自動計算されます';
+      return;
+    }
+    const onsetDate = new Date(onsetStr);
+    const dType = diseaseSelect?.value || 'LOCOMOTIVE';
+    const oneThird = getOneThirdDays(dType);
+    const transDate = new Date(onsetDate.getTime() + oneThird * 86400000);
+    careHint.style.display = 'block';
+    careHint.textContent = `ℹ️ 発症日起算から${oneThird}日後（${formatDate(transDate)}）より総合実施計画書料2へ移行予定`;
+  };
+
+  careSelect?.addEventListener('change', updateCareHint);
+  onsetInput?.addEventListener('input', updateCareHint);
+  diseaseSelect?.addEventListener('change', updateCareHint);
+
   saveBtn?.addEventListener('click', () => {
     const id = document.getElementById('patient-modal-id')?.value?.trim();
     const name = document.getElementById('patient-modal-name')?.value?.trim();
     const category = document.getElementById('patient-modal-category')?.value;
     const diseaseType = document.getElementById('patient-modal-disease')?.value;
+    const careInsuranceType = careSelect?.value || 'NONE';
     const admissionDate = document.getElementById('patient-modal-admission')?.value;
     const earlyBonusStartDate = document.getElementById('patient-modal-early-start')?.value;
     const onsetDate = document.getElementById('patient-modal-onset')?.value;
-    const lastPlanDate = document.getElementById('patient-modal-last-plan')?.value;
     const notes = document.getElementById('patient-modal-notes')?.value?.trim();
 
     if (!id) {
@@ -1312,10 +1274,10 @@ function initPatientMasterModal() {
       name,
       category,
       diseaseType,
+      careInsuranceType,
       admissionDate,
       earlyBonusStartDate,
       onsetDate,
-      lastPlanDate,
       notes,
     });
 
@@ -1336,15 +1298,26 @@ function openPatientMasterModal(existingId = null) {
   document.getElementById('patient-modal-name').value = p ? p.name || '' : '';
   document.getElementById('patient-modal-category').value = p ? p.category || 'inpatient_1' : 'inpatient_1';
   document.getElementById('patient-modal-disease').value = p ? p.diseaseType || 'LOCOMOTIVE' : 'LOCOMOTIVE';
+  
+  const careSelect = document.getElementById('patient-modal-care-insurance');
+  if (careSelect) {
+    careSelect.value = p?.careInsuranceType || (p?.category?.includes('maintenance') ? 'CARE' : 'NONE');
+  }
+
   document.getElementById('patient-modal-admission').value = p ? p.admissionDate || '' : '';
   document.getElementById('patient-modal-early-start').value = p ? p.earlyBonusStartDate || '' : '';
   document.getElementById('patient-modal-onset').value = p ? p.onsetDate || '' : '';
-  document.getElementById('patient-modal-last-plan').value = p ? p.lastPlanDate || '' : '';
   document.getElementById('patient-modal-notes').value = p ? p.notes || '' : '';
+
+  // ヒント表示をトリガー
+  careSelect?.dispatchEvent(new Event('change'));
 
   modal.classList.add('show');
 }
 
+/**
+ * 患者台帳・期限管理テーブルの描画（編集ボタンの確実なバインド）
+ */
 function renderPatientDeadlines() {
   const tbody = document.getElementById('patient-deadlines-tbody');
   if (!tbody) return;
@@ -1368,11 +1341,19 @@ function renderPatientDeadlines() {
       earlyBadge = '<span style="color: var(--text-dim); font-size: 0.75rem;">加算終了</span>';
     }
 
-    let planBadge = calc.nextPlanLimitStr || '-';
-    if (calc.planStatus === 'WARNING') {
-      planBadge += ' <span style="color: var(--warning); font-weight: 700;">(間近)</span>';
-    } else if (calc.planStatus === 'EXPIRED') {
-      planBadge += ' <span style="color: var(--danger); font-weight: 800;">(超過)</span>';
+    let careLabel = '<span style="color: var(--text-muted);">なし(医療)</span>';
+    if (calc.careType === 'CARE') careLabel = '<span style="color: #d97706; font-weight: 800;">要介護</span>';
+    else if (calc.careType === 'SUPPORT') careLabel = '<span style="color: #2563eb; font-weight: 700;">要支援</span>';
+
+    let plan2Badge = '<span style="color: var(--text-dim);">-</span>';
+    if (calc.isCarePatient) {
+      if (calc.isPlan2Active) {
+        plan2Badge = `<span class="status-pill" style="background: #eff6ff; color: #1d4ed8; font-weight: 800;">料2移行済 (${calc.plan2TransitionDateStr})</span>`;
+      } else {
+        plan2Badge = `<span>${calc.plan2TransitionDateStr}</span> <span style="font-size: 0.725rem; color: var(--text-muted);">(残${calc.daysUntilPlan2}日)</span>`;
+      }
+    } else {
+      plan2Badge = '<span style="color: var(--text-dim); font-size: 0.75rem;">対象外(料1)</span>';
     }
 
     tr.innerHTML = `
@@ -1380,21 +1361,26 @@ function renderPatientDeadlines() {
       <td>${p.name || ''}</td>
       <td><span class="palette-category-tag ${isOut ? 'tag-outpatient' : 'tag-inpatient'}">${catLabel}</span></td>
       <td>${calc.diseaseLabel || '運動器Ⅱ'}</td>
+      <td>${careLabel}</td>
       <td>${p.admissionDate || '-'}</td>
       <td>${p.earlyBonusStartDate || '-'}</td>
       <td>${p.onsetDate || '-'}</td>
       <td>${earlyBadge}</td>
       <td>${calc.rehaLimitDateStr || '上限なし'}</td>
-      <td>${planBadge}</td>
+      <td>${plan2Badge}</td>
       <td>
-        <button class="btn-secondary-compact btn-edit-patient" data-id="${p.id}">編集</button>
+        <button type="button" class="btn-secondary-compact btn-edit-patient" data-id="${p.id}">編集</button>
       </td>
     `;
     tbody.appendChild(tr);
   });
 
-  tbody.querySelectorAll('.btn-edit-patient').forEach((btn) => {
-    btn.addEventListener('click', () => {
+  // 編集ボタンへの安全なイベントバインド（クエリ全走査）
+  const editButtons = tbody.querySelectorAll('.btn-edit-patient');
+  editButtons.forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       openPatientMasterModal(btn.dataset.id);
     });
   });
@@ -1483,8 +1469,8 @@ function renderLoansTable() {
       <td>${statusBadge}</td>
       <td style="color: var(--text-muted); font-size: 0.8rem;">${l.notes || ''}</td>
       <td>
-        ${isLoaned ? `<button class="btn-secondary-compact btn-return-loan" data-id="${l.id}">返却完了</button>` : ''}
-        <button class="btn-secondary-compact btn-delete-loan" data-id="${l.id}" style="color: var(--danger);">削除</button>
+        ${isLoaned ? `<button type="button" class="btn-secondary-compact btn-return-loan" data-id="${l.id}">返却完了</button>` : ''}
+        <button type="button" class="btn-secondary-compact btn-delete-loan" data-id="${l.id}" style="color: var(--danger);">削除</button>
       </td>
     `;
     tbody.appendChild(tr);
