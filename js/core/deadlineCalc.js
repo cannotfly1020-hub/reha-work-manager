@@ -1,73 +1,34 @@
-/**
- * @file deadlineCalc.js
- * @description リハビリテーション期限・早期加算・総合実施計画書料2移行日 計算エンジン
- * 
- * - 疾患別標準算定日数上限（運動器150日、脳血管180日、廃用120日）の超過判定
- * - 令和8年度改定 早期加算（4日以内: 60点 / 14日以内: 25点）の判定
- * - 要介護被保険者における「総合実施計画書料2 移行日（3分の1経過日）」の精密計算
- *   ・運動器: 50日後
- *   ・脳血管: 60日後
- *   ・廃用: 40日後
- * - 単体テスト容易・完全オフライン動作
- */
+// js/core/deadlineCalc.js
+// 期限・早期加算・要介護3分の1移行日計算エンジン
+// DOMおよびStorageに一切依存しない純粋関数群として実装
 
 import { REHA_RULES } from '../config/rules.js';
+import { normalizeDateString } from './dataNormalizer.js';
 
 /**
- * 日付オブジェクトまたは文字列を標準Dateオブジェクト（時刻00:00:00）に変換
- * @param {string|Date|number} input
+ * 日付オブジェクトまたは文字列を、時刻を切り捨てたローカルDateに変換する
+ * @param {string|Date} input 
  * @returns {Date|null}
  */
 export function normalizeDate(input) {
   if (!input) return null;
-
-  let d;
-  if (typeof input === 'number') {
-    d = new Date(Math.round((input - 25569) * 86400 * 1000));
-  } else if (input instanceof Date) {
-    d = new Date(input.getTime());
-  } else if (typeof input === 'string') {
-    const cleanStr = input.trim().replace(/\//g, '-');
-    d = new Date(cleanStr);
-  } else {
-    return null;
+  if (input instanceof Date) {
+    if (isNaN(input.getTime())) return null;
+    return new Date(input.getFullYear(), input.getMonth(), input.getDate());
   }
-
-  if (isNaN(d.getTime())) return null;
-
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const dateStr = normalizeDateString(input);
+  if (!dateStr) return null;
+  const parts = dateStr.split('-');
+  return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
 }
 
 /**
- * 指定日数を加算した新しいDateオブジェクトを返却
- * @param {Date} date 
- * @param {number} days 
- * @returns {Date}
- */
-export function addDays(date, days) {
-  const result = new Date(date.getTime());
-  result.setDate(result.getDate() + days);
-  return result;
-}
-
-/**
- * 2つの日付の日数差を計算
- * @param {Date} fromDate 
- * @param {Date} toDate 
- * @returns {number}
- */
-export function getDiffDays(fromDate, toDate) {
-  const oneDayMs = 24 * 60 * 60 * 1000;
-  return Math.round((toDate.getTime() - fromDate.getTime()) / oneDayMs);
-}
-
-/**
- * 日付を 'YYYY-MM-DD' 形式の文字列にフォーマット
+ * Dateオブジェクトを YYYY-MM-DD 形式にフォーマットする
  * @param {Date} date 
  * @returns {string}
  */
 export function formatDate(date) {
-  if (!date || isNaN(date.getTime())) return '';
+  if (!date || !(date instanceof Date) || isNaN(date.getTime())) return '';
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
@@ -75,146 +36,137 @@ export function formatDate(date) {
 }
 
 /**
- * 令和8年度改定 早期加算（4日以内 / 14日以内）の判定
- * @param {Date|string} admissionDate - 入院日（起算日）
- * @param {Date|string} sessionDate - リハビリ実施日
- * @returns {'PHASE_1'|'PHASE_2'|null}
+ * 2つの日付間の経過日数を計算する（開始日当日は0日目、diffDays=0）
+ * @param {string|Date} fromDate 
+ * @param {string|Date} toDate 
+ * @returns {number|null}
  */
-export function evaluateEarlyBonusPhase(admissionDate, sessionDate) {
-  const adminDate = normalizeDate(admissionDate);
-  const session = normalizeDate(sessionDate);
-
-  if (!adminDate || !session) return null;
-  if (session < adminDate) return null;
-
-  const elapsedDays = getDiffDays(adminDate, session) + 1;
-  const phase1Max = REHA_RULES.EARLY_BONUS.PHASE_1.maxDays; // 4日
-  const phase2Max = REHA_RULES.EARLY_BONUS.PHASE_2.maxDays; // 14日
-
-  if (elapsedDays <= phase1Max) {
-    return 'PHASE_1';
-  } else if (elapsedDays <= phase2Max) {
-    return 'PHASE_2';
-  }
-
-  return null;
+export function getDiffDays(fromDate, toDate) {
+  const f = normalizeDate(fromDate);
+  const t = normalizeDate(toDate);
+  if (!f || !t) return null;
+  const diffTime = t.getTime() - f.getTime();
+  return Math.floor(diffTime / (1000 * 60 * 60 * 24));
 }
 
 /**
- * 疾患別・標準算定日数の3分の1日数を取得
- * @param {string} diseaseType 
- * @returns {number} 3分の1日数 (運動器: 50, 脳血管: 60, 廃用: 40)
+ * 疾患区分に応じた標準算定日数の3分の1日数を取得する
+ * @param {string} diseaseType LOCOMOTIVE | CEREBROVASCULAR | DISUSE | ANALGESIA
+ * @returns {number}
  */
 export function getOneThirdDays(diseaseType) {
-  switch (diseaseType) {
-    case 'CEREBROVASCULAR':
-      return 60; // 180日 / 3
-    case 'DISUSE':
-      return 40; // 120日 / 3
-    case 'LOCOMOTIVE':
-    default:
-      return 50; // 150日 / 3
-  }
+  const rule = REHA_RULES.LIMIT_DAYS[diseaseType];
+  return rule ? rule.oneThirdDays : 9999;
 }
 
 /**
- * 患者ごとの各種期限（リハ上限・早期加算・計画書料2移行日・月13単位）を一括計算
- * 
- * @param {Object} patient 
- * @param {Date|string} [baseDate=new Date()] 
- * @returns {Object}
+ * 基準日に指定日数を加算した日付文字列を返す
+ * @param {string|Date} baseDate 
+ * @param {number} daysToAdd 
+ * @returns {string}
  */
-export function calculatePatientDeadlines(patient, baseDate = new Date()) {
-  const today = normalizeDate(baseDate) || new Date();
-  
-  const adminDate = normalizeDate(patient.admissionDate);
-  const earlyStart = normalizeDate(patient.earlyBonusStartDate) || adminDate;
-  const onset = normalizeDate(patient.onsetDate) || adminDate;
+export function addDays(baseDate, daysToAdd) {
+  const d = normalizeDate(baseDate);
+  if (!d) return '';
+  d.setDate(d.getDate() + daysToAdd);
+  return formatDate(d);
+}
 
-  if (!adminDate && !onset && !earlyStart) {
+/**
+ * 入院患者の早期加算フェーズを自動評価する（令和8年度改定準拠）
+ * 起算日（転院患者は前医入院日、直接入院は当院入院日）含めての日数判定
+ * 1〜4日目: 第1期 (60点), 5〜14日目: 第2期 (25点), 15日目以降/外来: なし
+ * @param {string|Date} admissionOrStart 早期起算日
+ * @param {string|Date} sessionDate 実施日
+ * @param {string} category 患者区分 (INPATIENT | OUTPATIENT)
+ * @returns {{ phase: 'PHASE_1'|'PHASE_2'|null, points: number, label: string }}
+ */
+export function evaluateEarlyBonusPhase(admissionOrStart, sessionDate, category = 'INPATIENT') {
+  if (category !== 'INPATIENT') {
+    return { phase: null, points: 0, label: '外来対象外' };
+  }
+  const diff = getDiffDays(admissionOrStart, sessionDate);
+  if (diff === null || diff < 0) {
+    return { phase: null, points: 0, label: '対象外' };
+  }
+
+  // 起算日当日を1日目とするため dayCount = diff + 1
+  const dayCount = diff + 1;
+  if (dayCount <= REHA_RULES.EARLY_BONUS.PHASE_1.maxDays) {
     return {
-      isValid: false,
-      error: '日付情報が設定されていません。',
+      phase: 'PHASE_1',
+      points: REHA_RULES.EARLY_BONUS.PHASE_1.points,
+      label: `早期加算(Ⅰ) +${REHA_RULES.EARLY_BONUS.PHASE_1.points}点 [${dayCount}日目]`
     };
   }
-
-  // 1. 早期加算判定
-  let earlyPhase1Limit = null;
-  let earlyPhase2Limit = null;
-  let earlyBonusStatus = 'NOT_APPLICABLE';
-
-  if (earlyStart) {
-    earlyPhase1Limit = addDays(earlyStart, REHA_RULES.EARLY_BONUS.PHASE_1.maxDays - 1);
-    earlyPhase2Limit = addDays(earlyStart, REHA_RULES.EARLY_BONUS.PHASE_2.maxDays - 1);
-
-    if (today <= earlyPhase1Limit) {
-      earlyBonusStatus = 'PHASE_1_ACTIVE';
-    } else if (today <= earlyPhase2Limit) {
-      earlyBonusStatus = 'PHASE_2_ACTIVE';
-    } else {
-      earlyBonusStatus = 'EXPIRED';
-    }
+  if (dayCount <= REHA_RULES.EARLY_BONUS.PHASE_2.maxDays) {
+    return {
+      phase: 'PHASE_2',
+      points: REHA_RULES.EARLY_BONUS.PHASE_2.points,
+      label: `早期加算(Ⅱ) +${REHA_RULES.EARLY_BONUS.PHASE_2.points}点 [${dayCount}日目]`
+    };
   }
+  return { phase: null, points: 0, label: `早期加算終了 [${dayCount}日目]` };
+}
 
-  // 2. 疾患別標準算定上限
-  const diseaseConfig = REHA_RULES.LIMIT_DAYS[patient.diseaseType] || REHA_RULES.LIMIT_DAYS.LOCOMOTIVE;
-  const limitDays = diseaseConfig.days;
-  const rehaLimitDate = (onset && limitDays < 9999) ? addDays(onset, limitDays - 1) : null;
-  const remainingRehaDays = rehaLimitDate ? getDiffDays(today, rehaLimitDate) : 9999;
-  const isOverLimit = rehaLimitDate ? (remainingRehaDays < 0) : false;
-
-  // 3. 要介護被保険者における「総合実施計画書料2 移行日（3分の1経過日）」
-  const careType = patient.careInsuranceType || (patient.category?.includes('maintenance') ? 'CARE' : 'NONE');
-  const isCarePatient = careType === 'CARE'; // 要介護認定者のみが対象
-  const oneThirdDays = getOneThirdDays(patient.diseaseType || 'LOCOMOTIVE');
+/**
+ * 患者の標準算定上限日・早期加算ステータス・要介護3分の1移行日を包括計算する
+ * @param {Object} patient 患者マスター情報
+ * @param {string|Date} baseDate 判定基準日（通常は当日）
+ * @returns {Object} 判定結果オブジェクト
+ */
+export function calculatePatientDeadlines(patient, baseDate = new Date()) {
+  const disease = REHA_RULES.LIMIT_DAYS[patient.diseaseType] || REHA_RULES.LIMIT_DAYS.ANALGESIA;
   
-  let plan2TransitionDate = null;
-  let plan2TransitionDateStr = '-';
-  let isPlan2Active = false;
-  let daysUntilPlan2 = 9999;
+  // 起算日選定（発症日・手術日優先、無ければ入院日）
+  const startDateStr = patient.onsetDate || patient.admissionDate || '';
+  const earlyStartStr = patient.earlyBonusStartDate || patient.admissionDate || '';
 
-  if (onset && isCarePatient && patient.diseaseType !== 'ANALGESIA') {
-    // 起算日から 3分の1 日数を加算した翌日以降が「料2」
-    plan2TransitionDate = addDays(onset, oneThirdDays);
-    plan2TransitionDateStr = formatDate(plan2TransitionDate);
-    daysUntilPlan2 = getDiffDays(today, plan2TransitionDate);
-    isPlan2Active = daysUntilPlan2 <= 0;
+  // 1. 標準算定日数上限到達日および残日数
+  let limitDateStr = '';
+  let remainingDays = null;
+  let isLimitExceeded = false;
+
+  if (startDateStr && disease.days < 9000) {
+    limitDateStr = addDays(startDateStr, disease.days);
+    const diff = getDiffDays(baseDate, limitDateStr);
+    remainingDays = diff !== null ? diff : null;
+    isLimitExceeded = remainingDays !== null && remainingDays < 0;
   }
 
-  // 4. 月13単位制限判定
-  const isRestrictedTo13 = isOverLimit || careType === 'CARE' || careType === 'SUPPORT' || Boolean(patient.is13UnitLimited);
+  // 2. 令和8年度改定 早期加算ステータス
+  const earlyBonus = evaluateEarlyBonusPhase(earlyStartStr, baseDate, patient.category);
+
+  // 3. 介護保険認定区分と総合実施計画書料2 移行日（3分の1経過日）
+  let plan2TransitionDateStr = '';
+  let plan2RemainingDays = null;
+  let isPlan2Required = false;
+
+  if (patient.careInsuranceType === 'CARE' && startDateStr && disease.oneThirdDays < 9000) {
+    plan2TransitionDateStr = addDays(startDateStr, disease.oneThirdDays);
+    const diffToPlan2 = getDiffDays(baseDate, plan2TransitionDateStr);
+    plan2RemainingDays = diffToPlan2 !== null ? diffToPlan2 : null;
+    isPlan2Required = plan2RemainingDays !== null && plan2RemainingDays <= 0;
+  }
+
+  // 4. 適用基本点数（100分の60減算判定連動）
+  const isMaintenanceReduction = isLimitExceeded || patient.careInsuranceType === 'SUPPORT' || patient.careInsuranceType === 'CARE';
+  const currentBasePoints = isMaintenanceReduction ? disease.maintPoints : disease.defaultPoints;
 
   return {
-    isValid: true,
-    patientId: patient.id,
-    diseaseLabel: diseaseConfig.shortLabel,
-    admissionDateStr: formatDate(adminDate),
-    earlyBonusStartDateStr: formatDate(earlyStart),
-    onsetDateStr: formatDate(onset),
-    todayStr: formatDate(today),
-
-    // 早期加算
-    earlyPhase1LimitDate: earlyPhase1Limit,
-    earlyPhase1LimitStr: formatDate(earlyPhase1Limit),
-    earlyPhase2LimitDate: earlyPhase2Limit,
-    earlyPhase2LimitStr: formatDate(earlyPhase2Limit),
-    earlyBonusStatus,
-
-    // リハ上限
-    rehaLimitDays: limitDays,
-    rehaLimitDate,
-    rehaLimitDateStr: formatDate(rehaLimitDate),
-    remainingRehaDays,
-    isOverLimit,
-    isRestrictedTo13,
-
-    // 総合実施計画書料2 移行情報
-    careType,
-    isCarePatient,
-    oneThirdDays,
-    plan2TransitionDate,
+    diseaseLabel: disease.shortLabel,
+    diseaseFullName: disease.fullName,
+    standardDays: disease.days,
+    startDateStr,
+    limitDateStr,
+    remainingDays,
+    isLimitExceeded,
+    earlyBonus,
+    isMaintenanceReduction,
+    currentBasePoints,
+    careInsuranceType: patient.careInsuranceType || 'NONE',
     plan2TransitionDateStr,
-    isPlan2Active,
-    daysUntilPlan2,
+    plan2RemainingDays,
+    isPlan2Required
   };
 }
