@@ -1,129 +1,128 @@
-/**
- * @file dataNormalizer.js
- * @description リハビリ記録（A, B, C）のセル文字列・シート名・患者記号の正規化処理
- * 
- * Excelマクロで発生しがちな「全角/半角スペース混在」「全角アルファベット」「シート名の余白」
- * によるマッチング失敗や集計漏れを完全に防ぎます。
- */
+// js/core/dataNormalizer.js
+// 文字列・患者記号・日付・五十音インデックス等の正規化ユーティリティ
+// 純粋関数群として実装し、DOMやStorageへの依存を排除
 
 /**
- * 全角英数・全角記号を半角に変換し、全角スペースを半角スペースに統一、前後の余白を除去
- * @param {string|any} input - 入力文字列または値
- * @returns {string} 正規化された文字列
+ * 全角英数を半角に変換し、前後の連続空白をトリミングする
+ * @param {string|any} input 
+ * @returns {string}
  */
 export function normalizeString(input) {
   if (input === null || input === undefined) return '';
-  const str = String(input);
-
-  return str
-    // Unicode正規化 (NFKC: 全角英数や記号を標準半角へ分解・結合)
-    .normalize('NFKC')
-    // 全角スペース (U+3000) を半角スペースへ変換
-    .replace(/\u3000/g, ' ')
-    // 連続する空白（タブ・改行含む）を1つの半角スペースに集約
-    .replace(/\s+/g, ' ')
-    // 前後の余白をトリム
-    .trim();
+  return String(input)
+    .replace(/[！-～]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .replace(/　/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
 }
 
 /**
- * 患者識別記号（a, b, c...）を統一フォーマット（半角小文字）へ正規化
- * 例: ' ａ ' -> 'a', 'A' -> 'a', 'ｒ' -> 'r'
- * @param {string|any} rawId - 入力記号
- * @returns {string} 半角小文字の患者記号
+ * ひらがなを全角カタカナに変換する（五十音検索・比較用）
+ * @param {string|any} input 
+ * @returns {string}
  */
-export function normalizePatientId(rawId) {
-  if (!rawId) return '';
-  const cleaned = normalizeString(rawId).toLowerCase();
-  // 英字部分のみを抽出（前後についてしまった余分な記号等を除去）
-  const match = cleaned.match(/[a-z]+/);
-  return match ? match[0] : cleaned;
+export function normalizeToKatakana(input) {
+  const str = normalizeString(input);
+  return str.replace(/[\u3041-\u3096]/g, (ch) =>
+    String.fromCharCode(ch.charCodeAt(0) + 0x60)
+  );
 }
 
 /**
- * リハ記録の1コマセル値（例: "a 3", "a　3", "l 1", "p 3", "a3" など）を解析
- * 患者記号と単位数に分離して安全なオブジェクトとして返却
- * 
- * @param {string|any} cellValue - セル内の値
- * @returns {{ patientId: string, units: number, raw: string } | null} 解析結果（該当しない場合はnull）
+ * 氏名・カナの頭文字から五十音グループ（ア行〜ワ行・他）を取得する
+ * @param {string} nameOrKana 
+ * @returns {string} 'ア' | 'カ' | 'サ' | 'タ' | 'ナ' | 'ハ' | 'マ' | 'ヤ' | 'ラ' | 'ワ' | '他'
  */
-export function parseSessionCell(cellValue) {
-  if (!cellValue) return null;
+export function getGojuonGroup(nameOrKana) {
+  const kana = normalizeToKatakana(nameOrKana);
+  if (!kana || kana.length === 0) return '他';
 
-  // 基本的な正規化（NFKC・全角スペース解消・前後トリム）
-  const normalized = normalizeString(cellValue);
-  if (!normalized) return null;
+  const firstChar = kana.charAt(0);
+  const code = firstChar.charCodeAt(0);
 
-  // 時間割見出しや「午前」「午後」「年」「月」などのラベル行は除外
-  if (/^(午前|午後|年|月|日|職種|合計|実施)/.test(normalized)) {
-    return null;
-  }
-  // コマの時間帯表記 (例: "9:00~9:20", "14:00～14:20") は除外
-  if (/^\d{1,2}:\d{2}/.test(normalized)) {
-    return null;
-  }
-
-  // パターン1: "a 3", "b 2", "a  3", "l 1" (記号 + 空白 + 単位数)
-  // パターン2: "a3", "k1" (空白なしの結合)
-  // パターン3: "a:3", "a-3" (区切り記号つき)
-  const match = normalized.match(/^([a-zA-Z]+)[\s:\-_]*(\d+)$/);
-
-  if (match) {
-    const patientId = match[1].toLowerCase();
-    const units = parseInt(match[2], 10);
-
-    // 単位数が0〜9の常識的な範囲（リハビリ1回は通常1〜3単位、最大9単位程度）
-    if (units > 0 && units <= 18) {
-      return {
-        patientId,
-        units,
-        raw: normalized,
-      };
+  // カタカナ範囲: 0x30A1(ァ) 〜 0x30FA(ヺ)
+  if (code >= 0x30A1 && code <= 0x30AA) return 'ア'; // ア〜オ
+  if (code >= 0x30AB && code <= 0x30F4) {
+    if (code <= 0x30BF) {
+      if (code <= 0x30B4) return 'カ'; // カ〜ゴ
+      return 'サ'; // サ〜ゾ
     }
+    if (code <= 0x30C9) return 'タ'; // タ〜ド
+    if (code <= 0x30CE) return 'ナ'; // ナ〜ノ
+    if (code <= 0x30DD) return 'ハ'; // ハ〜ポ
+    if (code <= 0x30E2) return 'マ'; // マ〜モ
+    if (code <= 0x30E8) return 'ヤ'; // ヤ〜ヨ
+    if (code <= 0x30ED) return 'ラ'; // ラ〜ロ
+    return 'ワ'; // ワ〜ン・ヴ
   }
-
-  return null;
+  return '他';
 }
 
 /**
- * Excelシート名から「月」と「午前/午後区分」を抽出
- * リハ記録ファイル内の表記揺れ（例: '7(am) ', '7(pm)', '10(am)', ' 7 (am) '）に対応
- * 
- * @param {string} sheetName - シート名
- * @returns {{ month: number, period: 'am' | 'pm', raw: string } | null}
+ * 患者ID・記号を正規化する（英数は大文字・半角化）
+ * @param {string|any} id 
+ * @returns {string}
  */
-export function parseRehaSheetName(sheetName) {
-  if (!sheetName) return null;
-
-  // 全角括弧や全角英数、末尾の空白を綺麗に除去
-  const clean = normalizeString(sheetName).toLowerCase().replace(/\s+/g, '');
-
-  // 例: "7(am)", "7(pm)", "12(am)", "1(pm)" をキャプチャ
-  const match = clean.match(/^(\d{1,2})\((am|pm)\)$/);
-  if (match) {
-    const month = parseInt(match[1], 10);
-    const period = match[2]; // 'am' または 'pm'
-
-    if (month >= 1 && month <= 12) {
-      return {
-        month,
-        period,
-        raw: sheetName,
-      };
-    }
-  }
-
-  return null;
+export function normalizePatientId(id) {
+  return normalizeString(id).toUpperCase().replace(/[^A-Z0-9_-]/g, '');
 }
 
 /**
- * 数値または数値文字列を安全な正の整数に変換（不正値はデフォルト値にフォールバック）
- * @param {any} val - 入力値
- * @param {number} [fallback=0] - 変換失敗時のフォールバック値
+ * 日付文字列を YYYY-MM-DD 形式に正規化する
+ * @param {string|Date|any} dateInput 
+ * @returns {string} 正規化された日付文字列（無効時は空文字）
+ */
+export function normalizeDateString(dateInput) {
+  if (!dateInput) return '';
+
+  if (dateInput instanceof Date) {
+    if (isNaN(dateInput.getTime())) return '';
+    const y = dateInput.getFullYear();
+    const m = String(dateInput.getMonth() + 1).padStart(2, '0');
+    const d = String(dateInput.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  const str = normalizeString(dateInput);
+  // YYYY/M/D や YYYY-M-D 等のゆらぎを検出
+  const match = str.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (match) {
+    const y = match[1];
+    const m = String(match[2]).padStart(2, '0');
+    const d = String(match[3]).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  // 8桁連続数字 (YYYYMMDD) の場合
+  if (/^\d{8}$/.test(str)) {
+    return `${str.slice(0, 4)}-${str.slice(4, 6)}-${str.slice(6, 8)}`;
+  }
+
+  return '';
+}
+
+/**
+ * HTML特殊文字をエスケープしてXSSを防止する
+ * @param {string|any} str 
+ * @returns {string}
+ */
+export function sanitizeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+/**
+ * 数値を正の整数に安全変換する（単位数・点数用）
+ * @param {any} val 
+ * @param {number} fallback 
  * @returns {number}
  */
 export function safeParseInt(val, fallback = 0) {
-  if (val === null || val === undefined || val === '') return fallback;
-  const num = Number(normalizeString(val));
-  return isNaN(num) ? fallback : Math.round(num);
+  const n = parseInt(val, 10);
+  return isNaN(n) ? fallback : n;
 }
