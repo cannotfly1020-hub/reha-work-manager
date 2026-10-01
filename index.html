@@ -1,220 +1,320 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>リハビリ業務管理システム | reha-work-manager</title>
-<link rel="stylesheet" href="css/style.css">
-<!-- SheetJS (Excel入出力用ライブラリ) -->
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>リハビリ業務管理システム | reha-work-manager</title>
+  <link rel="stylesheet" href="css/style.css">
+  <!-- SheetJS (Excel入出力用ライブラリ) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
-<!-- アプリケーションヘッダー＆メインナビゲーション -->
-<header class="app-header">
-<div style="display:flex; align-items:center; gap:16px;">
-<h1 style="font-size:1.15rem; font-weight:700; color:var(--color-primary);">reha-work-manager</h1>
-<span style="font-size:0.75rem; background:#e0f2fe; color:#0369a1; padding:2px 8px; border-radius:12px; font-weight:600;">令和8年度改定準拠</span>
-</div>
-<nav class="nav-tab-group">
-<button class="nav-tab active" data-target="viewSchedule">本日時間割</button>
-<button class="nav-tab" data-target="viewMonthly">月間単位・収益</button>
-<button class="nav-tab" data-target="viewPatient">患者台帳</button>
-<button class="nav-tab" data-target="viewLoan">物品貸出</button>
-<button class="nav-tab" data-target="viewExport">Excel出力</button>
-</nav>
-</header>
-​<!-- VIEW 1: 当日時間割・患者パレット -->
-<section id="viewSchedule" class="view-panel active">
-<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-<div style="display:flex; align-items:center; gap:10px;">
-<input type="date" id="scheduleDateInput" style="padding:6px 12px; border:1px solid var(--color-border); border-radius:var(--radius-sm); font-weight:600;">
-<button id="btnTodaySchedule" style="padding:6px 14px; border:1px solid var(--color-border); border-radius:var(--radius-sm); background:#fff; cursor:pointer;">今日</button>
-</div>
-<div id="dailyKpiStrip" style="display:flex; gap:16px; font-size:0.85rem; font-weight:600;"></div>
-</div>
-<div style="display:grid; grid-template-columns:280px 1fr; gap:20px;">
-<aside style="background:#fff; border:1px solid var(--color-border); border-radius:var(--radius-md); padding:16px; height:calc(100vh - 170px); display:flex; flex-direction:column; gap:12px;">
-<h3 style="font-size:0.9rem; font-weight:700;">患者パレット</h3>
-<input type="text" id="paletteSearch" placeholder="氏名・ID・疾患名検索..." style="width:100%; padding:6px 10px; border:1px solid var(--color-border); border-radius:var(--radius-sm); font-size:0.8rem;">
-<div style="display:flex; gap:6px;">
-<button class="palette-cat-btn active" data-cat="ALL" style="flex:1; padding:4px; font-size:0.75rem; border:1px solid var(--color-border); border-radius:4px; cursor:pointer;">全て</button>
-<button class="palette-cat-btn" data-cat="INPATIENT" style="flex:1; padding:4px; font-size:0.75rem; border:1px solid var(--color-border); border-radius:4px; cursor:pointer;">入院</button>
-<button class="palette-cat-btn" data-cat="OUTPATIENT" style="flex:1; padding:4px; font-size:0.75rem; border:1px solid var(--color-border); border-radius:4px; cursor:pointer;">外来</button>
-</div>
-<div id="palettePatientList" style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:8px;"></div>
-</aside>
-<main>
-<div class="timetable-container" id="timetableGrid"></div>
-</main>
-</div>
-</section>
-​<!-- VIEW 2: 月間単位表・収益ダッシュボード -->
-<section id="viewMonthly" class="view-panel">
-<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-<div style="display:flex; gap:8px; align-items:center;">
-<select id="monthlyYearSelect" style="padding:6px 10px; border:1px solid var(--color-border); border-radius:var(--radius-sm);"></select>
-<select id="monthlyMonthSelect" style="padding:6px 10px; border:1px solid var(--color-border); border-radius:var(--radius-sm);"></select>
-</div>
-<div id="revenueDashboardStrip" style="display:flex; gap:16px;"></div>
-</div>
-<div class="table-container" style="max-height:65vh;">
-<table class="modern-table" id="monthlyUnitsTable"></table>
-</div>
-</section>
-​<!-- VIEW 3: 患者台帳・期限管理 -->
-<section id="viewPatient" class="view-panel">
-<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-<div style="display:flex; gap:10px;">
-<input type="text" id="patientSearchInput" placeholder="氏名・ID・疾患名で検索..." style="padding:6px 12px; border:1px solid var(--color-border); border-radius:var(--radius-sm); width:280px;">
-<select id="patientCategoryFilter" style="padding:6px 10px; border:1px solid var(--color-border); border-radius:var(--radius-sm);">
-<option value="ALL">全患者</option>
-<option value="INPATIENT">入院患者</option>
-<option value="OUTPATIENT">外来患者</option>
-</select>
-</div>
-<button id="btnOpenAddPatientModal" style="padding:8px 16px; background:var(--color-primary); color:#fff; border:none; border-radius:var(--radius-sm); font-weight:600; cursor:pointer;">＋ 新規患者登録</button>
-</div>
-<div class="table-container" style="max-height:75vh;">
-<table class="modern-table" id="patientMasterTable"></table>
-</div>
-</section>
-​<!-- VIEW 4: 物品・装具貸出管理 -->
-<section id="viewLoan" class="view-panel">
-<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-<div style="display:flex; gap:10px;">
-<input type="text" id="loanSearchInput" placeholder="物品名・患者名で絞り込み..." style="padding:6px 12px; border:1px solid var(--color-border); border-radius:var(--radius-sm); width:280px;">
-<select id="loanStatusFilter" style="padding:6px 10px; border:1px solid var(--color-border); border-radius:var(--radius-sm);">
-<option value="ALL">全ステータス</option>
-<option value="ACTIVE" selected>貸出中</option>
-<option value="RETURNED">返却済</option>
-</select>
-</div>
-<button id="btnOpenAddLoanModal" style="padding:8px 16px; background:var(--color-primary); color:#fff; border:none; border-radius:var(--radius-sm); font-weight:600; cursor:pointer;">＋ 貸出登録</button>
-</div>
-<div class="table-container">
-<table class="modern-table" id="loanMasterTable"></table>
-</div>
-</section>
-​<!-- VIEW 5: 月末原本Excel出力 -->
-<section id="viewExport" class="view-panel">
-<div style="max-width:760px; margin:20px auto; background:#fff; border:1px solid var(--color-border); border-radius:var(--radius-md); padding:32px;">
-<h2 style="font-size:1.15rem; font-weight:700; margin-bottom:20px; border-bottom:2px solid var(--color-border); padding-bottom:8px;">提出用原本Excel自動生成</h2>
-<div style="display:flex; gap:12px; align-items:center; margin-bottom:24px;">
-<label style="font-weight:600; font-size:0.85rem;">対象年月:</label>
-<select id="exportYearSelect" style="padding:6px 12px; border:1px solid var(--color-border); border-radius:var(--radius-sm);"></select>
-<select id="exportMonthSelect" style="padding:6px 12px; border:1px solid var(--color-border); border-radius:var(--radius-sm);"></select>
-</div>
-<div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
-<div style="border:1px solid var(--color-border); border-radius:var(--radius-sm); padding:20px;">
-<h3 style="font-size:0.95rem; font-weight:700; margin-bottom:8px;">1. 受付提出用Excel</h3>
-<p style="font-size:0.75rem; color:var(--color-text-muted); margin-bottom:16px;">実施リスト（入院・外来・レセプト合計）を完全転記して出力します。</p>
-<button id="btnExportUketsuke" style="width:100%; padding:10px; background:#059669; color:#fff; border:none; border-radius:var(--radius-sm); font-weight:600; cursor:pointer;">受付提出用Excel出力</button>
-</div>
-<div style="border:1px solid var(--color-border); border-radius:var(--radius-sm); padding:20px;">
-<h3 style="font-size:0.95rem; font-weight:700; margin-bottom:8px;">2. 業務日誌Excel</h3>
-<p style="font-size:0.75rem; color:var(--color-text-muted); margin-bottom:16px;">1日〜31日の日別シート（24列目）へ集計データを自動転記して出力します。</p>
-<button id="btnExportDiary" style="width:100%; padding:10px; background:#0284c7; color:#fff; border:none; border-radius:var(--radius-sm); font-weight:600; cursor:pointer;">業務日誌Excel出力</button>
-</div>
-</div>
-</div>
-</section>
-​<!-- MODAL 1: コマ編集モーダル -->
-<div id="modalSlotEdit" class="modal-overlay">
-<div class="modal-card">
-<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-<h3 id="slotModalTitle" style="font-size:1.05rem; font-weight:700;">コマ配置・編集</h3>
-<button id="btnCloseSlotModal" style="border:none; background:none; font-size:1.2rem; cursor:pointer;">✕</button>
-</div>
-<form id="slotEditForm" style="display:flex; flex-direction:column; gap:14px;">
-<input type="hidden" id="slotTherapistId"><input type="hidden" id="slotId"><input type="hidden" id="slotPatientId">
-<div id="slotPatientInfo" style="padding:10px; background:#f8fafc; border-radius:6px; font-size:0.85rem; font-weight:600;"></div>
-<div>
-<label style="font-size:0.8rem; font-weight:600; display:block; margin-bottom:6px;">単位数（所要時間）</label>
-<div style="display:flex; gap:8px;">
-<button type="button" class="btn-unit-select" data-unit="1" style="flex:1; padding:8px; border:1px solid var(--color-border); border-radius:4px; cursor:pointer;">1単位 (20分)</button>
-<button type="button" class="btn-unit-select" data-unit="2" style="flex:1; padding:8px; border:1px solid var(--color-border); border-radius:4px; cursor:pointer;">2単位 (40分)</button>
-<button type="button" class="btn-unit-select" data-unit="3" style="flex:1; padding:8px; border:1px solid var(--color-border); border-radius:4px; cursor:pointer;">3単位 (60分)</button>
-<button type="button" class="btn-unit-select" data-unit="4" style="flex:1; padding:8px; border:1px solid var(--color-border); border-radius:4px; cursor:pointer;">4単位 (80分)</button>
-</div>
-<input type="hidden" id="slotUnitsInput" value="1">
-</div>
-<div style="display:flex; align-items:center; gap:8px; padding:10px; background:#fef9c3; border-radius:6px;">
-<input type="checkbox" id="slotBillingPlanInput" style="width:16px; height:16px;">
-<label for="slotBillingPlanInput" style="font-size:0.85rem; font-weight:700; color:#854d0e; cursor:pointer;">総合実施計画書料を算定する（240点）</label>
-</div>
-<div>
-<label style="font-size:0.8rem; font-weight:600; display:block; margin-bottom:4px;">特記事項・伝達メモ</label>
-<input type="text" id="slotNoteInput" placeholder="車椅子移乗、病棟送り等..." style="width:100%; padding:8px; border:1px solid var(--color-border); border-radius:4px;">
-</div>
-<div style="display:flex; justify-content:space-between; margin-top:10px;">
-<button type="button" id="btnDeleteSlot" style="padding:8px 16px; background:#ef4444; color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:600;">配置解除</button>
-<button type="submit" style="padding:8px 24px; background:var(--color-primary); color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:600;">保存する</button>
-</div>
-</form>
-</div>
-</div>
-​<!-- MODAL 2: 患者編集/新規モーダル -->
-<div id="modalPatientEdit" class="modal-overlay">
-<div class="modal-card">
-<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-<h3 id="patientModalTitle" style="font-size:1.05rem; font-weight:700;">患者情報登録・編集</h3>
-<button id="btnClosePatientModal" style="border:none; background:none; font-size:1.2rem; cursor:pointer;">✕</button>
-</div>
-<form id="patientEditForm" style="display:flex; flex-direction:column; gap:12px;">
-<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-<div><label style="font-size:0.75rem; font-weight:600;">患者ID（記号）</label><input type="text" id="patientFormId" required style="width:100%; padding:6px; border:1px solid var(--color-border); border-radius:4px;"></div>
-<div><label style="font-size:0.75rem; font-weight:600;">区分</label><select id="patientFormCategory" style="width:100%; padding:6px; border:1px solid var(--color-border); border-radius:4px;"><option value="INPATIENT">入院</option><option value="OUTPATIENT">外来</option></select></div>
-</div>
-<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-<div><label style="font-size:0.75rem; font-weight:600;">氏名*</label><input type="text" id="patientFormName" required style="width:100%; padding:6px; border:1px solid var(--color-border); border-radius:4px;"></div>
-<div><label style="font-size:0.75rem; font-weight:600;">フリガナ</label><input type="text" id="patientFormKana" style="width:100%; padding:6px; border:1px solid var(--color-border); border-radius:4px;"></div>
-</div>
-<div><label style="font-size:0.75rem; font-weight:600;">疾患名（自由記述）</label><input type="text" id="patientFormDiseaseName" placeholder="右大腿骨頸部骨折 術後 など" required style="width:100%; padding:6px; border:1px solid var(--color-border); border-radius:4px;"></div>
-<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-<div><label style="font-size:0.75rem; font-weight:600;">算定疾患区分</label><select id="patientFormDiseaseType" style="width:100%; padding:6px; border:1px solid var(--color-border); border-radius:4px;"><option value="LOCOMOTIVE">運動器(Ⅱ) - 150日</option><option value="CEREBROVASCULAR">脳血管(Ⅲ) - 180日</option><option value="DISUSE">廃用症候群(Ⅲ) - 120日</option><option value="ANALGESIA">消炎鎮痛等処置</option></select></div>
-<div><label style="font-size:0.75rem; font-weight:600;">介護保険認定*</label><select id="patientFormCareType" style="width:100%; padding:6px; border:1px solid var(--color-border); border-radius:4px;"><option value="NONE">なし(医療保険のみ)</option><option value="SUPPORT">要支援</option><option value="CARE">要介護</option></select></div>
-</div>
-<div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
-<div><label style="font-size:0.7rem; font-weight:600;">当院入院日</label><input type="date" id="patientFormAdmissionDate" style="width:100%; padding:5px; border:1px solid var(--color-border); border-radius:4px;"></div>
-<div><label style="font-size:0.7rem; font-weight:600;">早期起算日</label><input type="date" id="patientFormEarlyBonusStartDate" style="width:100%; padding:5px; border:1px solid var(--color-border); border-radius:4px;"></div>
-<div><label style="font-size:0.7rem; font-weight:600;">発症・手術日</label><input type="date" id="patientFormOnsetDate" style="width:100%; padding:5px; border:1px solid var(--color-border); border-radius:4px;"></div>
-</div>
-<div id="patientFormTransitionPreview" style="font-size:0.75rem; padding:8px; background:#eff6ff; border-radius:4px; color:#1e40af; display:none;"></div>
-<div style="display:flex; justify-content:space-between; margin-top:8px;">
-<button type="button" id="btnDeletePatient" style="padding:8px 16px; background:#ef4444; color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:600; display:none;">削除</button>
-<button type="submit" style="padding:8px 24px; background:var(--color-primary); color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:600; margin-left:auto;">保存</button>
-</div>
-</form>
-</div>
-</div>
-​<!-- MODAL 3: 物品貸出モーダル -->
-<div id="modalLoanEdit" class="modal-overlay">
-<div class="modal-card">
-<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-<h3 style="font-size:1.05rem; font-weight:700;">物品・装具貸出登録</h3>
-<button id="btnCloseLoanModal" style="border:none; background:none; font-size:1.2rem; cursor:pointer;">✕</button>
-</div>
-<form id="loanEditForm" style="display:flex; flex-direction:column; gap:12px;">
-<div><label style="font-size:0.75rem; font-weight:600;">対象患者*</label><select id="loanFormPatientSelect" required style="width:100%; padding:6px; border:1px solid var(--color-border); border-radius:4px bank-solid;"></select></div>
-<div><label style="font-size:0.75rem; font-weight:600;">品名・装具名*</label><input type="text" id="loanFormItemName" placeholder="短下肢装具、車椅子など" required style="width:100%; padding:6px; border:1px solid var(--color-border); border-radius:4px;"></div>
-<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-<div><label style="font-size:0.75rem; font-weight:600;">所有区分*</label><select id="loanFormOwnerType" style="width:100%; padding:6px; border:1px solid var(--color-border); border-radius:4px;"><option value="HOSPITAL">院内備品</option><option value="VENDOR">業者借用（デモ等）</option></select></div>
-<div><label style="font-size:0.75rem; font-weight:600;">業者名</label><input type="text" id="loanFormVendorName" placeholder="業者貸出時のみ入力" style="width:100%; padding:6px; border:1px solid var(--color-border); border-radius:4px;"></div>
-</div>
-<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-<div><label style="font-size:0.75rem; font-weight:600;">貸出日*</label><input type="date" id="loanFormLoanDate" required style="width:100%; padding:6px; border:1px solid var(--color-border); border-radius:4px;"></div>
-<div><label style="font-size:0.75rem; font-weight:600;">返却予定日</label><input type="date" id="loanFormDueDate" style="width:100%; padding:6px; border:1px solid var(--color-border); border-radius:4px;"></div>
-</div>
-<div><label style="font-size:0.75rem; font-weight:600;">特記・使用目的</label><input type="text" id="loanFormNotes" placeholder="屋外歩行訓練用など" style="width:100%; padding:6px; border:1px solid var(--color-border); border-radius:4px;"></div>
-<div style="display:flex; justify-content:flex-end; margin-top:8px;">
-<button type="submit" style="padding:8px 24px; background:var(--color-primary); color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:600;">貸出登録</button>
-</div>
-</form>
-</div>
-</div>
-​<!-- トースト通知コンテナ -->
-<div id="toastContainer" class="toast-container"></div>
-​<!-- アプリケーションエントリーポイント -->
-<script type="module" src="js/app.js"></script>
+
+  <!-- アプリヘッダー & ナビゲーションタブ -->
+  <header class="app-header">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <h1 style="font-size:1.15rem; font-weight:800; color:#0f172a; margin:0;">reha-work-manager</h1>
+      <span style="font-size:0.75rem; background:#e0f2fe; color:#0369a1; padding:2px 8px; border-radius:9999px; font-weight:700;">令和8年度改定準拠</span>
+    </div>
+    <nav class="nav-tab-group">
+      <button class="nav-tab active" data-target="viewSchedule">本日時間割</button>
+      <button class="nav-tab" data-target="viewMonthly">月間単位・収益</button>
+      <button class="nav-tab" data-target="viewPatient">患者台帳</button>
+      <button class="nav-tab" data-target="viewLoan">物品貸出</button>
+      <button class="nav-tab" data-target="viewExport">Excel出力</button>
+    </nav>
+  </header>
+
+  <!-- VIEW 1: 本日時間割 -->
+  <section id="viewSchedule" class="view-panel active">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <input type="date" id="scheduleDateInput" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.9rem;">
+        <button id="btnTodaySchedule" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; cursor:pointer;">今日</button>
+      </div>
+      <div id="dailyKpiStrip" style="display:flex; gap:16px; font-size:0.88rem; font-weight:600; background:#fff; padding:6px 16px; border-radius:6px; border:1px solid #e2e8f0;"></div>
+    </div>
+    <div style="display:grid; grid-template-columns: 240px 1fr; gap:16px;">
+      <aside style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:8px; max-height:80vh; overflow-y:auto;">
+        <input type="text" id="paletteSearch" placeholder="患者名・ID検索..." style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem;">
+        <div style="display:flex; gap:4px;">
+          <button class="palette-cat-btn active" data-cat="ALL" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">全て</button>
+          <button class="palette-cat-btn" data-cat="INPATIENT" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">入院</button>
+          <button class="palette-cat-btn" data-cat="OUTPATIENT" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">外来</button>
+        </div>
+        <div id="palettePatientList" style="display:flex; flex-direction:column; gap:6px; margin-top:4px;"></div>
+      </aside>
+      <main class="timetable-container" id="timetableGrid"></main>
+    </div>
+  </section>
+
+  <!-- VIEW 2: 月間単位・収益ダッシュボード -->
+  <section id="viewMonthly" class="view-panel">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <button id="btnPrevMonth" style="padding:6px 12px; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer;">◀ 前月</button>
+        <input type="month" id="monthlyMonthInput" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.95rem; font-weight:700;">
+        <button id="btnNextMonth" style="padding:6px 12px; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer;">次月 ▶</button>
+      </div>
+      <div style="display:flex; gap:16px;">
+        <div style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:8px 16px; text-align:center;">
+          <div style="font-size:0.75rem; color:#64748b;">本日収益見込 (単位)</div>
+          <div style="font-size:1.1rem; font-weight:800; color:#0369a1;"><span id="kpiTodayRevenue">¥0</span> <span id="kpiTodayUnits" style="font-size:0.8rem; font-weight:600; color:#64748b;">(0u)</span></div>
+        </div>
+        <div style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:8px 16px; text-align:center;">
+          <div style="font-size:0.75rem; color:#64748b;">当月累計収益 (総単位)</div>
+          <div style="font-size:1.1rem; font-weight:800; color:#059669;"><span id="kpiMonthRevenue">¥0</span> <span id="kpiMonthUnits" style="font-size:0.8rem; font-weight:600; color:#64748b;">(0u)</span></div>
+        </div>
+      </div>
+    </div>
+    <div id="dailyDiaryPreviewContainer" style="margin-bottom:16px;"></div>
+    <div class="table-container" id="monthlyTableContainer"></div>
+  </section>
+
+  <!-- VIEW 3: 患者台帳 -->
+  <section id="viewPatient" class="view-panel">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="patientSearchInput" placeholder="氏名・ID・疾患名で検索..." style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; width:260px;">
+        <select id="patientCategoryFilter" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem;">
+          <option value="ALL">全患者区分</option>
+          <option value="INPATIENT">入院患者</option>
+          <option value="OUTPATIENT">外来患者</option>
+        </select>
+      </div>
+      <button id="btnNewPatient" style="padding:8px 16px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.85rem; cursor:pointer;">＋ 新規患者登録</button>
+    </div>
+    <div class="table-container" id="patientTableContainer"></div>
+  </section>
+
+  <!-- VIEW 4: 物品貸出 -->
+  <section id="viewLoan" class="view-panel">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="loanSearchInput" placeholder="物品名・患者名で絞り込み..." style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; width:240px;">
+        <select id="loanStatusFilter" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem;">
+          <option value="ALL">全ステータス</option>
+          <option value="ACTIVE" selected>貸出中</option>
+          <option value="RETURNED">返却済</option>
+        </select>
+        <select id="loanOwnerFilter" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem;">
+          <option value="ALL">全所有区分</option>
+          <option value="HOSPITAL">院内備品</option>
+          <option value="VENDOR">業者借用</option>
+        </select>
+      </div>
+      <button id="btnNewLoan" style="padding:8px 16px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.85rem; cursor:pointer;">＋ 貸出登録</button>
+    </div>
+    <div class="table-container" id="loanTableContainer"></div>
+  </section>
+
+  <!-- VIEW 5: Excel出力 -->
+  <section id="viewExport" class="view-panel">
+    <div style="max-width:720px; margin:0 auto; background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:32px; box-shadow:var(--shadow-sm);">
+      <h2 style="font-size:1.1rem; font-weight:800; margin-bottom:20px; color:#0f172a;">提出用原本Excel 自動生成</h2>
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom:28px;">
+        <label for="exportMonthInput" style="font-weight:700; font-size:0.9rem;">対象年月:</label>
+        <input type="month" id="exportMonthInput" style="padding:8px 14px; border:1px solid #cbd5e1; border-radius:6px; font-size:1rem; font-weight:700;">
+      </div>
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:20px; display:flex; flex-direction:column; justify-content:space-between;">
+          <div>
+            <h3 style="font-size:0.95rem; font-weight:700; color:#0f172a; margin-bottom:8px;">1. 受付提出用Excel</h3>
+            <p style="font-size:0.8rem; color:#64748b; line-height:1.6; margin-bottom:12px;">実施リスト（入院・外来・レセプト合計）を集計転記して出力します。</p>
+            <input type="file" id="uketsukeTemplateFile" accept=".xlsx,.xls" style="font-size:0.75rem; width:100%; margin-bottom:12px;">
+          </div>
+          <button id="btnExportUketsuke" style="padding:10px; background:#059669; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.85rem; cursor:pointer;">受付提出用Excel出力</button>
+        </div>
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:20px; display:flex; flex-direction:column; justify-content:space-between;">
+          <div>
+            <h3 style="font-size:0.95rem; font-weight:700; color:#0f172a; margin-bottom:8px;">2. 業務日誌Excel</h3>
+            <p style="font-size:0.8rem; color:#64748b; line-height:1.6; margin-bottom:12px;">1日〜31日の日別シート（24列目）へ集計データを自動転記して出力します。</p>
+            <input type="file" id="diaryTemplateFile" accept=".xlsx,.xls" style="font-size:0.75rem; width:100%; margin-bottom:12px;">
+          </div>
+          <button id="btnExportDiary" style="padding:10px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.85rem; cursor:pointer;">業務日誌Excel出力</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- モーダル 1: 時間割コマ編集 -->
+  <div id="modalSlotEdit" class="modal-overlay">
+    <div class="modal-card">
+      <h3 id="slotModalTitle" style="font-size:1rem; font-weight:700; margin-bottom:12px;">コマ配置</h3>
+      <div id="slotPatientInfo" style="font-size:0.85rem; color:#475569; margin-bottom:12px; background:#f8fafc; padding:8px; border-radius:4px;"></div>
+      <form id="slotEditForm" style="display:flex; flex-direction:column; gap:12px;">
+        <input type="hidden" id="slotTherapistId">
+        <input type="hidden" id="slotId">
+        <input type="hidden" id="slotPatientId">
+        <input type="hidden" id="slotUnitsInput" value="1">
+        <div>
+          <label style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">単位数選択</label>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="btn-unit-select" data-unit="1" style="flex:1; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:700;">1単位</button>
+            <button type="button" class="btn-unit-select" data-unit="2" style="flex:1; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:700;">2単位</button>
+            <button type="button" class="btn-unit-select" data-unit="3" style="flex:1; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:700;">3単位</button>
+            <button type="button" class="btn-unit-select" data-unit="4" style="flex:1; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:700;">4単位</button>
+          </div>
+        </div>
+        <div>
+          <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; cursor:pointer;">
+            <input type="checkbox" id="slotBillingPlanInput">
+            <span>📝 リハビリテーション総合計画評価料を算定</span>
+          </label>
+        </div>
+        <div>
+          <label for="slotNoteInput" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">備考・メモ</label>
+          <input type="text" id="slotNoteInput" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem;">
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-top:12px;">
+          <button type="button" id="btnDeleteSlot" style="padding:6px 12px; background:#fff; border:1px solid #ef4444; color:#ef4444; border-radius:4px; cursor:pointer; font-size:0.85rem;">解除</button>
+          <div style="display:flex; gap:8px;">
+            <button type="button" id="btnCloseSlotModal" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; font-size:0.85rem;">閉じる</button>
+            <button type="submit" style="padding:6px 16px; background:#0284c7; color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:700; font-size:0.85rem;">保存</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- モーダル 2: 患者登録・編集 -->
+  <div id="modalPatientEdit" class="modal-overlay">
+    <div class="modal-card">
+      <h3 id="patientModalTitle" style="font-size:1rem; font-weight:700; margin-bottom:12px;">患者台帳</h3>
+      <div id="patientPlan2Guide" style="display:none; font-size:0.75rem; color:#0369a1; background:#e0f2fe; padding:8px; border-radius:4px; margin-bottom:10px;"></div>
+      <form id="patientEditForm" style="display:flex; flex-direction:column; gap:10px; font-size:0.85rem;">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">患者ID (記号) *</label>
+            <input type="text" id="patientFormId" required style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </div>
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">患者区分 *</label>
+            <select id="patientFormCategory" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+              <option value="INPATIENT">入院</option>
+              <option value="OUTPATIENT">外来</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">患者氏名 *</label>
+            <input type="text" id="patientFormName" required style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </div>
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">氏名カナ</label>
+            <input type="text" id="patientFormKana" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </div>
+        </div>
+        <div>
+          <label style="font-size:0.75rem; font-weight:700; display:block;">疾患名 (病名自由記述)</label>
+          <input type="text" id="patientFormDiseaseName" placeholder="右大腿骨頸部骨折 術後 等" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">疾患区分 *</label>
+            <select id="patientFormDiseaseType" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+              <option value="LOCOMOTIVE">運動器リハ(Ⅱ)</option>
+              <option value="CEREBROVASCULAR">脳血管等リハ(Ⅲ)</option>
+              <option value="DISUSE">廃用症候群リハ(Ⅲ)</option>
+              <option value="ANALGESIA">消炎鎮痛等処置</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">介護保険認定区分 *</label>
+            <select id="patientFormCareType" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+              <option value="NONE">なし (医療保険のみ)</option>
+              <option value="SUPPORT">要支援</option>
+              <option value="CARE">要介護</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">起算日 (発症/手術日)</label>
+            <input type="date" id="patientFormOnsetDate" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </div>
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">当院入院日</label>
+            <input type="date" id="patientFormAdmissionDate" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">早期加算起算日 (前医含)</label>
+            <input type="date" id="patientFormEarlyStartDate" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </div>
+          <div style="display:flex; align-items:center; padding-top:14px;">
+            <label style="display:flex; align-items:center; gap:6px; font-size:0.75rem; cursor:pointer;">
+              <input type="checkbox" id="patientFormForce13">
+              <span>個別で月13単位制限を適用</span>
+            </label>
+          </div>
+        </div>
+        <div>
+          <label style="font-size:0.75rem; font-weight:700; display:block;">特記事項・備考</label>
+          <input type="text" id="patientFormNotes" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-top:8px;">
+          <button type="button" id="btnDeletePatient" style="padding:6px 12px; background:#fff; border:1px solid #ef4444; color:#ef4444; border-radius:4px; cursor:pointer;">削除</button>
+          <div style="display:flex; gap:8px;">
+            <button type="button" id="btnClosePatientModal" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer;">閉じる</button>
+            <button type="submit" style="padding:6px 16px; background:#0284c7; color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:700;">保存</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- モーダル 3: 物品貸出登録 -->
+  <div id="modalLoanRegister" class="modal-overlay">
+    <div class="modal-card">
+      <h3 style="font-size:1rem; font-weight:700; margin-bottom:12px;">新規物品・装具貸出</h3>
+      <form id="loanRegisterForm" style="display:flex; flex-direction:column; gap:10px; font-size:0.85rem;">
+        <div>
+          <label style="font-size:0.75rem; font-weight:700; display:block;">対象患者 *</label>
+          <select id="loanPatientSelect" required style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;"></select>
+        </div>
+        <div>
+          <label style="font-size:0.75rem; font-weight:700; display:block;">品名・装具名 *</label>
+          <input type="text" id="loanItemName" required placeholder="短下肢装具、車椅子等" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">所有区分</label>
+            <select id="loanOwnerType" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+              <option value="HOSPITAL">院内備品</option>
+              <option value="VENDOR">業者借用</option>
+            </select>
+          </div>
+          <div id="loanVendorGroup" style="display:none;">
+            <label style="font-size:0.75rem; font-weight:700; display:block;">業者名</label>
+            <input type="text" id="loanVendorName" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">貸出日 *</label>
+            <input type="date" id="loanDate" required style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </div>
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">返却予定日</label>
+            <input type="date" id="loanDueDate" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </div>
+        </div>
+        <div>
+          <label style="font-size:0.75rem; font-weight:700; display:block;">備考</label>
+          <input type="text" id="loanNotes" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+          <button type="button" id="btnCloseLoanModal" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer;">閉じる</button>
+          <button type="submit" style="padding:6px 16px; background:#0284c7; color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:700;">登録</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toastContainer" class="toast-container"></div>
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>
