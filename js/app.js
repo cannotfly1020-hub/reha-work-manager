@@ -4,7 +4,7 @@
  * 
  * - 編集ボタンのイベント登録を堅牢化（クラッシュ原因を完全解消）
  * - 要介護者の「総合実施計画書料2 移行日（3分の1経過日）」自動計算・プレビュー連動
- * - 本日の収益 ＆ 当月累計収益リアルタイムダッシュボード
+ * - 本日の収益 ＆ 当月累計収益リアルタイムダッシュボード（1点＝10円）
  * - 同時間帯の重複（ダブルブッキング）防止
  * - 患者の1日算定上限（6単位/9単位）＆ セラピスト週108単位監視
  * - 月13単位制限（期限切れ患者・要介護・要支援）自動ブロック
@@ -43,16 +43,20 @@ function isPatientRestrictedTo13Units(patient, dateObj) {
     return true;
   }
 
-  const deadlines = calculatePatientDeadlines(patient, dateObj);
-  if (deadlines.isOverLimit) {
-    return true;
+  try {
+    const deadlines = calculatePatientDeadlines(patient, dateObj);
+    if (deadlines && deadlines.isOverLimit) {
+      return true;
+    }
+  } catch (err) {
+    console.warn('[app.js] calculatePatientDeadlines error:', err);
   }
 
   return false;
 }
 
 /**
- * 患者の1日あたりの算定上限単位数を取得
+ * 患者の1日あたりの算定上限単位数を取得（原則6単位、発症14日以内の脳血管/廃用は9単位）
  */
 function getPatientDailyMaxUnits(patient, dateObj) {
   if (!patient) return 6;
@@ -135,7 +139,7 @@ function validatePatientTimeConflict(dateStr, targetTherapist, targetSlotId, pat
           if (occSlot && occSlot.period === slot.period && targetCoveredSlotIds.has(occSlot.id)) {
             const conflictTime = occSlot.time;
             showToast(
-              `⚠️【重複エラー】${pName} 様は、同時間帯（${conflictTime}）に既に PT ${tCode} でリハビリが予定されています。同一時間帯に重複して配置することはできません。`,
+              `⚠️【重複エラー】${pName} 様は、同時間帯（${conflictTime}）に既に PT ${tCode} でリハビリが予定されています。重複配置はできません。`,
               'error'
             );
             return false;
@@ -204,7 +208,7 @@ function validateMonthly13UnitsLimit(dateStr, therapistCode, slotId, patientId, 
   if (projectedTotal > 13) {
     const pName = patient.name || patientId.toUpperCase();
     showToast(
-      `⚠️【13単位制限エラー】${pName} 様は月13単位上限の対象です。当月現在 ${currentMonthUnits}単位のため、${newUnits}単位を追加すると13単位を超過 (${projectedTotal}単位) します。配置できません。`,
+      `⚠️️【13単位制限エラー】${pName} 様は月13単位上限の対象です。当月現在 ${currentMonthUnits}単位のため、${newUnits}単位を追加すると13単位を超過 (${projectedTotal}単位) します。配置できません。`,
       'error'
     );
     return false;
@@ -284,7 +288,7 @@ function validateTherapistWorkloadLimit(dateStr, therapistCode, newUnits, origTh
   return true;
 }
 
-// 起動時の初期日付
+// 起動時の初期日付（動的今日）
 const initialToday = new Date();
 const initialTodayStr = formatDate(initialToday);
 
@@ -301,28 +305,32 @@ const state = {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-  initNavigationTabs();
-  initDateControls();
-  initPaletteFiltersAndSearch();
-  initSlotEditModal();
-  initPatientMasterModal();
-  initLoanModal();
-  initMonthlyViews();
-  initExportActionButtons();
+  try {
+    initNavigationTabs();
+    initDateControls();
+    initPaletteFiltersAndSearch();
+    initSlotEditModal();
+    initPatientMasterModal();
+    initLoanModal();
+    initMonthlyViews();
+    initExportActionButtons();
 
-  updateYearMonthFromSelectedDate();
-  renderAll();
+    updateYearMonthFromSelectedDate();
+    renderAll();
+  } catch (err) {
+    console.error('[DOMContentLoaded] 起動時エラー:', err);
+  }
 });
 
 function renderAll() {
-  renderPalette();
-  renderTimetable();
-  renderDailyKPIs();
-  renderMonthlyUnitsTable();
-  renderDailyDiaryPreview();
-  renderRevenueDashboard();
-  renderPatientDeadlines();
-  renderLoansTable();
+  try { renderPalette(); } catch (e) { console.error('renderPalette error:', e); }
+  try { renderTimetable(); } catch (e) { console.error('renderTimetable error:', e); }
+  try { renderDailyKPIs(); } catch (e) { console.error('renderDailyKPIs error:', e); }
+  try { renderMonthlyUnitsTable(); } catch (e) { console.error('renderMonthlyUnitsTable error:', e); }
+  try { renderDailyDiaryPreview(); } catch (e) { console.error('renderDailyDiaryPreview error:', e); }
+  try { renderRevenueDashboard(); } catch (e) { console.error('renderRevenueDashboard error:', e); }
+  try { renderPatientDeadlines(); } catch (e) { console.error('renderPatientDeadlines error:', e); }
+  try { renderLoansTable(); } catch (e) { console.error('renderLoansTable error:', e); }
 }
 
 function initNavigationTabs() {
@@ -646,11 +654,16 @@ function renderTimetable() {
         const card = document.createElement('div');
         card.className = `slot-pill-card ${typeClass} ${unitThemeClass} ${spanClass}`;
 
+        const planBadgeHtml = slotData.billingPlan
+          ? `<span style="font-size: 0.65rem; background: #fef08a; color: #854d0e; padding: 0.05rem 0.35rem; border-radius: 4px; font-weight: 800;">📝計画書</span>`
+          : '';
+
         card.innerHTML = `
           <div class="slot-patient-title" style="flex: 1; min-width: 0;">
             <div style="display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.1rem;">
               <span class="slot-id-badge">${slotData.patientId.toUpperCase()}</span>
               <span class="slot-name-label" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${pName}</span>
+              ${planBadgeHtml}
             </div>
             <div class="slot-time-sub">
               🕒 ${durationText} (${units * 20}分)
@@ -716,15 +729,31 @@ function handleSlotDropped(dateStr, therapistCode, slotId, patientId) {
   const pName = p?.name || patientId.toUpperCase();
   const defaultUnits = 2;
 
-  if (!validatePatientTimeConflict(dateStr, therapistCode, slotId, patientId, defaultUnits)) return;
-  if (!validatePatientDailyUnitsLimit(dateStr, patientId, defaultUnits)) return;
-  if (!validateMonthly13UnitsLimit(dateStr, therapistCode, slotId, patientId, defaultUnits, false)) return;
-  if (!validateTherapistWorkloadLimit(dateStr, therapistCode, defaultUnits)) return;
+  // 1. 同時間帯の重複（ダブルブッキング）防止
+  if (!validatePatientTimeConflict(dateStr, therapistCode, slotId, patientId, defaultUnits)) {
+    return;
+  }
+
+  // 2. 患者の1日上限（6単位/9単位）検証
+  if (!validatePatientDailyUnitsLimit(dateStr, patientId, defaultUnits)) {
+    return;
+  }
+
+  // 3. セラピストの法令上限（日24単位/特例・週108単位）検証
+  if (!validateTherapistWorkloadLimit(dateStr, therapistCode, defaultUnits)) {
+    return;
+  }
+
+  // 4. 月13単位制限検証
+  if (!validateMonthly13UnitsLimit(dateStr, therapistCode, slotId, patientId, defaultUnits, false)) {
+    return;
+  }
 
   setScheduleSlot(dateStr, therapistCode, slotId, {
     patientId: normalizePatientId(patientId),
     units: defaultUnits,
     note: '',
+    billingPlan: false,
   });
 
   renderTimetable();
@@ -732,7 +761,7 @@ function handleSlotDropped(dateStr, therapistCode, slotId, patientId) {
   renderDailyDiaryPreview();
   renderMonthlyUnitsTable();
   renderRevenueDashboard();
-  showToast(`${pName} を PT ${therapistCode} に配置しました (${defaultUnits}単位 / 40分)`, 'success');
+  showToast(`${pName} を PT ${therapistCode} に配置しました (2単位 / 40分)`, 'success');
 }
 
 function renderDailyKPIs() {
@@ -755,9 +784,9 @@ function renderDailyKPIs() {
   if (kpiB) kpiB.textContent = String(stats.therapistStats.B.totalUnits);
   if (kpiC) kpiC.textContent = String(stats.therapistStats.C.totalUnits);
 
-  if (patA) patA.innerHTML = `${stats.therapistStats.A.patientCount}名 <span style="font-size: 0.7rem; color: ${weekA > 108 ? 'var(--danger)' : 'var(--text-muted)'}; font-weight: 700;">(週${weekA}/108)</span>`;
-  if (patB) patB.innerHTML = `${stats.therapistStats.B.patientCount}名 <span style="font-size: 0.7rem; color: ${weekB > 108 ? 'var(--danger)' : 'var(--text-muted)'}; font-weight: 700;">(週${weekB}/108)</span>`;
-  if (patC) patC.innerHTML = `${stats.therapistStats.C.patientCount}名 <span style="font-size: 0.7rem; color: ${weekC > 108 ? 'var(--danger)' : 'var(--text-muted)'}; font-weight: 700;">(週${weekC}/108)</span>`;
+  if (patA) patA.textContent = `${stats.therapistStats.A.patientCount}名 (週${weekA}/108)`;
+  if (patB) patB.textContent = `${stats.therapistStats.B.patientCount}名 (週${weekB}/108)`;
+  if (patC) patC.textContent = `${stats.therapistStats.C.patientCount}名 (週${weekC}/108)`;
 
   if (kpiTotal) kpiTotal.textContent = String(stats.grandTotalUnits);
   if (patTotal) patTotal.textContent = `実人数 ${stats.grandPatientCount}名`;
@@ -775,8 +804,7 @@ function initSlotEditModal() {
   const patientInput = document.getElementById('slot-modal-patient');
   const timeSelect = document.getElementById('slot-modal-time');
   const therapistSelect = document.getElementById('slot-modal-therapist');
-  const planCheckbox = document.getElementById('slot-modal-billing-plan');
-  const planHint = document.getElementById('slot-modal-plan-hint');
+  const billingPlanCheckbox = document.getElementById('slot-modal-billing-plan');
 
   const closeModal = () => modal?.classList.remove('show');
   closeBtn?.addEventListener('click', closeModal);
@@ -808,42 +836,20 @@ function initSlotEditModal() {
     updateModalDurationHint(val);
   });
 
-  const updatePlanHintDisplay = () => {
-    const pId = patientInput?.value?.trim();
-    if (!planCheckbox || !planHint) return;
-    if (!planCheckbox.checked || !pId) {
-      planHint.style.display = 'none';
-      return;
-    }
-
-    const patient = getAllPatients().find((p) => normalizePatientId(p.id) === normalizePatientId(pId));
-    if (!patient) {
-      planHint.style.display = 'none';
-      return;
-    }
-
-    const deadlines = calculatePatientDeadlines(patient, new Date(state.selectedDate));
-    if (deadlines.isCarePatient && deadlines.isPlan2Active) {
-      planHint.style.display = 'block';
-      planHint.innerHTML = `<span style="color: #1d4ed8; font-weight: 700;">【計画書料 2 対象】</span> 要介護認定かつ3分の1（${deadlines.oneThirdDays}日）経過済み ➔ <strong>240点 (初回) / 196点</strong> (+¥2,400〜¥1,960)`;
-    } else if (deadlines.isCarePatient) {
-      planHint.style.display = 'block';
-      planHint.innerHTML = `<span style="color: #059669; font-weight: 700;">【計画書料 1 対象】</span> 要介護認定ですが3分の1未経過（移行まで残り ${deadlines.daysUntilPlan2}日） ➔ <strong>300点 (初回) / 240点</strong>`;
-    } else {
-      planHint.style.display = 'block';
-      planHint.innerHTML = `<span style="color: #059669; font-weight: 700;">【計画書料 1 対象】</span> 医療保険患者（要介護認定なし） ➔ <strong>300点 (初回) / 240点</strong> (+¥3,000〜¥2,400)`;
-    }
-  };
-
   patientSelect?.addEventListener('change', (e) => {
     if (e.target.value && patientInput) {
       patientInput.value = e.target.value;
-      updatePlanHintDisplay();
+      updatePlanEvaluationHint(e.target.value);
     }
   });
 
-  patientInput?.addEventListener('input', updatePlanHintDisplay);
-  planCheckbox?.addEventListener('change', updatePlanHintDisplay);
+  patientInput?.addEventListener('input', (e) => {
+    updatePlanEvaluationHint(e.target.value);
+  });
+
+  billingPlanCheckbox?.addEventListener('change', () => {
+    updatePlanEvaluationHint(patientInput?.value || '');
+  });
 
   saveBtn?.addEventListener('click', () => {
     if (!state.activeSlotModal) return;
@@ -854,7 +860,7 @@ function initSlotEditModal() {
     const patientId = patientInput?.value?.trim();
     const units = parseInt(customUnitInput?.value, 10) || 0;
     const note = document.getElementById('slot-modal-note')?.value?.trim() || '';
-    const isBillingPlan = Boolean(planCheckbox?.checked);
+    const billingPlan = Boolean(billingPlanCheckbox?.checked);
 
     if (!patientId) {
       showToast('患者記号または氏名を入力してください。', 'warning');
@@ -865,17 +871,37 @@ function initSlotEditModal() {
       return;
     }
 
-    if (!validatePatientTimeConflict(dateStr, targetTherapist, targetSlotId, patientId, units, origTherapist, origSlotId)) return;
-    if (!validatePatientDailyUnitsLimit(dateStr, patientId, units, origTherapist, origSlotId)) return;
+    // 1. 同時間帯重複防止
+    if (!validatePatientTimeConflict(dateStr, targetTherapist, targetSlotId, patientId, units, origTherapist, origSlotId)) {
+      return;
+    }
+
+    // 2. 1日上限チェック
+    if (!validatePatientDailyUnitsLimit(dateStr, patientId, units, origTherapist, origSlotId)) {
+      return;
+    }
+
+    // 3. セラピスト上限チェック
+    if (!validateTherapistWorkloadLimit(dateStr, targetTherapist, units, origTherapist, origSlotId)) {
+      return;
+    }
+
+    // 4. 月13単位制限チェック
     const isSameSlot = (targetSlotId === origSlotId && targetTherapist === origTherapist);
-    if (!validateMonthly13UnitsLimit(dateStr, origTherapist, origSlotId, patientId, units, isSameSlot)) return;
-    if (!validateTherapistWorkloadLimit(dateStr, targetTherapist, units, origTherapist, origSlotId)) return;
+    if (!validateMonthly13UnitsLimit(dateStr, origTherapist, origSlotId, patientId, units, isSameSlot)) {
+      return;
+    }
 
     if (targetSlotId !== origSlotId || targetTherapist !== origTherapist) {
       clearScheduleSlot(dateStr, origTherapist, origSlotId);
     }
 
-    setScheduleSlot(dateStr, targetTherapist, targetSlotId, { patientId, units, note, isBillingPlan });
+    setScheduleSlot(dateStr, targetTherapist, targetSlotId, {
+      patientId,
+      units,
+      note,
+      billingPlan,
+    });
 
     closeModal();
     renderTimetable();
@@ -898,6 +924,45 @@ function initSlotEditModal() {
     renderRevenueDashboard();
     showToast('コマを空にしました。', 'info');
   });
+}
+
+function updatePlanEvaluationHint(patientId) {
+  const hintEl = document.getElementById('slot-modal-plan-hint');
+  const chk = document.getElementById('slot-modal-billing-plan');
+  if (!hintEl) return;
+
+  if (!chk || !chk.checked) {
+    hintEl.style.display = 'none';
+    return;
+  }
+
+  const p = getAllPatients().find((item) => normalizePatientId(item.id) === normalizePatientId(patientId));
+  if (!p) {
+    hintEl.innerHTML = `<span style="color: var(--text-muted);">患者情報を読み込み中...</span>`;
+    hintEl.style.display = 'block';
+    return;
+  }
+
+  const deadlines = calculatePatientDeadlines(p, new Date(state.selectedDate));
+  let planTypeLabel = '総合実施計画書料 1';
+  let points = 240;
+  let explanation = '';
+
+  if (deadlines.isCarePatient && deadlines.isPlan2Active) {
+    planTypeLabel = '総合実施計画書料 2';
+    points = 240; // 初回扱い (2回目以降は196点)
+    explanation = `要介護認定者（起算日から3分の1経過: ${deadlines.plan2TransitionDateStr}〜）のため【料2】対象です。`;
+  } else if (deadlines.isCarePatient) {
+    explanation = `要介護認定者ですが、3分の1（${deadlines.plan2TransitionDateStr}）到達前のため【料1】を算定します。`;
+  } else {
+    explanation = `医療保険のみ（要介護認定なし）のため【料1】を算定します。`;
+  }
+
+  hintEl.innerHTML = `
+    <div style="font-weight: 800; color: #15803d;">✅ 算定判定: ${planTypeLabel}（${points}点 / ¥${(points * 10).toLocaleString()}）</div>
+    <div style="font-size: 0.725rem; color: var(--text-secondary); margin-top: 0.2rem;">${explanation}</div>
+  `;
+  hintEl.style.display = 'block';
 }
 
 function updateModalDurationHint(units) {
@@ -959,21 +1024,22 @@ function openSlotEditModal(dateStr, therapistCode, slotId) {
   const pInput = document.getElementById('slot-modal-patient');
   const uInput = document.getElementById('slot-modal-units');
   const nInput = document.getElementById('slot-modal-note');
-  const planCheckbox = document.getElementById('slot-modal-billing-plan');
-  const planHint = document.getElementById('slot-modal-plan-hint');
+  const planCheck = document.getElementById('slot-modal-billing-plan');
 
   const currentUnits = curSlot ? curSlot.units : 2;
-  if (pInput) pInput.value = curSlot ? curSlot.patientId.toUpperCase() : '';
+  const currentPatientId = curSlot ? curSlot.patientId.toUpperCase() : '';
+
+  if (pInput) pInput.value = currentPatientId;
   if (uInput) uInput.value = String(currentUnits);
   if (nInput) nInput.value = curSlot ? curSlot.note || '' : '';
-  if (planCheckbox) planCheckbox.checked = Boolean(curSlot?.isBillingPlan);
-  if (planHint) planHint.style.display = 'none';
+  if (planCheck) planCheck.checked = Boolean(curSlot?.billingPlan);
 
   document.querySelectorAll('.preset-chip').forEach((c) => {
     c.classList.toggle('active', c.dataset.unit === String(currentUnits));
   });
 
   updateModalDurationHint(currentUnits);
+  updatePlanEvaluationHint(currentPatientId);
   modal.classList.add('show');
 }
 
@@ -1007,88 +1073,6 @@ function initMonthlyViews() {
   }
 }
 
-/**
- * リアルタイム収益ダッシュボード描画（本日 ＆ 当月累計）
- */
-function renderRevenueDashboard() {
-  const todayAmountEl = document.getElementById('revenue-today-amount');
-  const todayPointsEl = document.getElementById('revenue-today-points');
-  const todayBreakdownEl = document.getElementById('revenue-today-breakdown');
-  const monthAmountEl = document.getElementById('revenue-month-amount');
-  const monthPointsEl = document.getElementById('revenue-month-points');
-  const monthBreakdownEl = document.getElementById('revenue-month-breakdown');
-
-  if (!todayAmountEl || !monthAmountEl) return;
-
-  const patientMap = {};
-  getAllPatients().forEach((p) => { patientMap[normalizePatientId(p.id)] = p; });
-
-  const getPointsForUnit = (patient, dateObj) => {
-    const dType = patient?.diseaseType || 'LOCOMOTIVE';
-    const isMaintenance = isPatientRestrictedTo13Units(patient, dateObj);
-    if (isMaintenance) {
-      if (dType === 'LOCOMOTIVE') return 102;
-      if (dType === 'CEREBROVASCULAR') return 60;
-      if (dType === 'DISUSE') return 46;
-      return 35;
-    }
-    return REHA_RULES.LIMIT_DAYS[dType]?.defaultPoints || 170;
-  };
-
-  // 1. 本日の収益
-  const todaySched = getDailySchedule(state.selectedDate);
-  const todayDateObj = new Date(state.selectedDate);
-  let todayBasePoints = 0;
-  let todayPlanPoints = 0;
-  let todayEarlyPoints = 0;
-
-  for (const tCode of ['A', 'B', 'C']) {
-    const slots = todaySched[tCode] || {};
-    for (const slot of Object.values(slots)) {
-      if (!slot || !slot.patientId || slot.units <= 0) continue;
-      const p = patientMap[normalizePatientId(slot.patientId)];
-      const unitPt = getPointsForUnit(p, todayDateObj);
-      todayBasePoints += (unitPt * slot.units);
-
-      if (slot.isBillingPlan) {
-        const dlines = calculatePatientDeadlines(p, todayDateObj);
-        todayPlanPoints += (dlines.isCarePatient && dlines.isPlan2Active) ? 240 : 300;
-      }
-    }
-  }
-
-  const todayTotalPoints = todayBasePoints + todayPlanPoints + todayEarlyPoints;
-  todayAmountEl.textContent = `¥ ${(todayTotalPoints * 10).toLocaleString()}`;
-  todayPointsEl.textContent = `(${todayTotalPoints.toLocaleString()} 点)`;
-  todayBreakdownEl.textContent = `リハ基本料: ¥${(todayBasePoints * 10).toLocaleString()} | 総合計画書: ¥${(todayPlanPoints * 10).toLocaleString()} | 早期加算: ¥${(todayEarlyPoints * 10).toLocaleString()}`;
-
-  // 2. 当月累計収益
-  const aggregated = aggregateFromAppSchedule(state.targetYear, state.targetMonth);
-  let monthBasePoints = 0;
-  let monthPlanCount = 0;
-  let monthPlanPoints = 0;
-  let monthTotalUnits = 0;
-
-  for (let d = 1; d <= aggregated.daysInMonth; d++) {
-    const dObj = new Date(state.targetYear, state.targetMonth - 1, d);
-    const dStr = formatDate(dObj);
-    const dayData = aggregated.byDateAndPatient[dStr] || {};
-
-    for (const [pId, rec] of Object.entries(dayData)) {
-      if (!rec || rec.total <= 0) continue;
-      const p = patientMap[pId];
-      const unitPt = getPointsForUnit(p, dObj);
-      monthBasePoints += (unitPt * rec.total);
-      monthTotalUnits += rec.total;
-    }
-  }
-
-  const monthTotalPoints = monthBasePoints + monthPlanPoints;
-  monthAmountEl.textContent = `¥ ${(monthTotalPoints * 10).toLocaleString()}`;
-  monthPointsEl.textContent = `(${monthTotalPoints.toLocaleString()} 点)`;
-  monthBreakdownEl.textContent = `総実施単位: ${monthTotalUnits}単位 | 計画書: ${monthPlanCount}件 | リハ基本料: ¥${(monthBasePoints * 10).toLocaleString()}`;
-}
-
 function renderMonthlyUnitsTable() {
   const tbody = document.getElementById('monthly-patient-units-tbody');
   if (!tbody) return;
@@ -1096,39 +1080,40 @@ function renderMonthlyUnitsTable() {
   const aggregated = aggregateFromAppSchedule(state.targetYear, state.targetMonth);
   const allPatients = getAllPatients();
   const patientMap = {};
-  allPatients.forEach((p) => { patientMap[normalizePatientId(p.id)] = p; });
+  allPatients.forEach((p) => {
+    patientMap[normalizePatientId(p.id)] = p;
+  });
 
   tbody.innerHTML = '';
+
   const activeIds = Object.keys(aggregated.patientTotals);
   if (activeIds.length === 0) {
     tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-dim); padding: 1.5rem;">当月の実施データはまだありません。時間割に入力してください。</td></tr>`;
     return;
   }
 
-  const targetDateObj = new Date(state.targetYear, state.targetMonth - 1, 1);
-
   activeIds.forEach((pId) => {
     const totals = aggregated.patientTotals[pId];
     const p = patientMap[pId] || { id: pId, name: `患者${pId.toUpperCase()}`, category: 'inpatient_1', diseaseType: 'LOCOMOTIVE' };
     const units = totals.totalUnits;
+    const isRestricted = isPatientRestrictedTo13Units(p, new Date(state.selectedDate));
 
     const tr = document.createElement('tr');
     const isOut = p.category && p.category.startsWith('outpatient');
     const catLabel = isOut ? '外来' : '入院';
     const disLabel = REHA_RULES.LIMIT_DAYS[p.diseaseType]?.shortLabel || '運動器Ⅱ';
 
-    const isRestricted = isPatientRestrictedTo13Units(p, targetDateObj);
     let statusBadge = '';
-    if (isRestricted) {
-      if (units > 13) {
-        statusBadge = `<span style="color: var(--danger); font-weight: 800; background: var(--danger-light); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill);">⚠️ 13単位超過 (${units}単位)</span>`;
-      } else if (units >= 11) {
-        statusBadge = `<span style="color: var(--warning); font-weight: 700; background: var(--warning-light); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill);">残枠わずか (${units}/13)</span>`;
-      } else {
-        statusBadge = `<span style="color: var(--success); font-weight: 700;">算定枠内 (${units}/13)</span>`;
-      }
+    if (!isRestricted) {
+      statusBadge = `<span style="color: var(--success); font-weight: 700; background: var(--success-light); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill); border: 1px solid var(--success-border);">通常算定中 (上限期限内)</span>`;
     } else {
-      statusBadge = `<span style="color: var(--primary); font-weight: 700; background: var(--primary-light); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill);">通常算定中 (上限期限内)</span>`;
+      if (units > 13) {
+        statusBadge = `<span style="color: var(--danger); font-weight: 800; background: var(--danger-light); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill); border: 1px solid var(--danger-border);">⚠️ 13単位超過 (${units}単位)</span>`;
+      } else if (units >= 11) {
+        statusBadge = `<span style="color: var(--warning); font-weight: 700; background: var(--warning-light); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill); border: 1px solid var(--warning-border);">残枠わずか (${units}/13)</span>`;
+      } else {
+        statusBadge = `<span style="color: var(--text-secondary); font-weight: 700; background: var(--bg-surface-subtle); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill);">算定枠内 (${units}/13)</span>`;
+      }
     }
 
     tr.innerHTML = `
@@ -1142,15 +1127,156 @@ function renderMonthlyUnitsTable() {
   });
 }
 
+function renderRevenueDashboard() {
+  const patientMap = {};
+  getAllPatients().forEach((p) => {
+    patientMap[normalizePatientId(p.id)] = p;
+  });
+
+  // 1. 本日の収益集計
+  const todaySchedule = getDailySchedule(state.selectedDate);
+  const todayDateObj = new Date(state.selectedDate);
+  let todayRehaPoints = 0;
+  let todayPlanPoints = 0;
+  let todayEarlyPoints = 0;
+
+  ['A', 'B', 'C'].forEach((tCode) => {
+    const slots = todaySchedule[tCode] || {};
+    for (const slot of Object.values(slots)) {
+      if (!slot || !slot.patientId || slot.units <= 0) continue;
+      const p = patientMap[normalizePatientId(slot.patientId)];
+      if (!p) continue;
+
+      const deadlines = calculatePatientDeadlines(p, todayDateObj);
+      const isMaintDiscount = (p.careInsuranceType === 'CARE' || p.careInsuranceType === 'SUPPORT') && deadlines.isOverLimit;
+
+      // リハビリ基本料（維持期要介護等の算定超過時は 100分の60）
+      let unitPoints = REHA_RULES.LIMIT_DAYS[p.diseaseType]?.defaultPoints || 170;
+      if (isMaintDiscount) {
+        if (p.diseaseType === 'LOCOMOTIVE') unitPoints = 102;
+        else if (p.diseaseType === 'CEREBROVASCULAR') unitPoints = 60;
+        else if (p.diseaseType === 'DISUSE') unitPoints = 46;
+      }
+      todayRehaPoints += (unitPoints * slot.units);
+
+      // 早期加算判定
+      const earlyStart = p.earlyBonusStartDate || p.admissionDate;
+      if (earlyStart && p.category && !p.category.startsWith('outpatient')) {
+        const elapsed = getDiffDays(normalizeDate(earlyStart), todayDateObj) + 1;
+        if (elapsed >= 1 && elapsed <= 4) todayEarlyPoints += 60;
+        else if (elapsed <= 14) todayEarlyPoints += 25;
+      }
+
+      // 総合実施計画書料
+      if (slot.billingPlan) {
+        if (deadlines.isCarePatient && deadlines.isPlan2Active) {
+          todayPlanPoints += 240; // 計画書料2
+        } else {
+          todayPlanPoints += 240; // 計画書料1
+        }
+      }
+    }
+  });
+
+  const todayTotalPoints = todayRehaPoints + todayPlanPoints + todayEarlyPoints;
+  const todayTotalAmount = todayTotalPoints * 10;
+
+  const todayAmountEl = document.getElementById('revenue-today-amount');
+  const todayPointsEl = document.getElementById('revenue-today-points');
+  const todayBreakdownEl = document.getElementById('revenue-today-breakdown');
+  const todayDateBadge = document.getElementById('revenue-today-date-badge');
+
+  if (todayDateBadge) todayDateBadge.textContent = state.selectedDate;
+  if (todayAmountEl) todayAmountEl.textContent = `¥ ${todayTotalAmount.toLocaleString()}`;
+  if (todayPointsEl) todayPointsEl.textContent = `(${todayTotalPoints.toLocaleString()} 点)`;
+  if (todayBreakdownEl) {
+    todayBreakdownEl.textContent = `リハ基本料: ¥${(todayRehaPoints * 10).toLocaleString()} | 総合計画書: ¥${(todayPlanPoints * 10).toLocaleString()} | 早期加算: ¥${(todayEarlyPoints * 10).toLocaleString()}`;
+  }
+
+  // 2. 当月累計の収益集計
+  const allSchedules = getAllSchedules();
+  const daysInMonth = new Date(state.targetYear, state.targetMonth, 0).getDate();
+  let monthTotalUnits = 0;
+  let monthRehaPoints = 0;
+  let monthPlanCount = 0;
+  let monthPlanPoints = 0;
+  let monthEarlyCount = 0;
+  let monthEarlyPoints = 0;
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const curDate = new Date(state.targetYear, state.targetMonth - 1, d);
+    const curDateStr = formatDate(curDate);
+    const daySchedule = allSchedules[curDateStr] || {};
+
+    ['A', 'B', 'C'].forEach((tCode) => {
+      const slots = daySchedule[tCode] || {};
+      for (const slot of Object.values(slots)) {
+        if (!slot || !slot.patientId || slot.units <= 0) continue;
+        const p = patientMap[normalizePatientId(slot.patientId)];
+        if (!p) continue;
+
+        monthTotalUnits += slot.units;
+        const deadlines = calculatePatientDeadlines(p, curDate);
+        const isMaintDiscount = (p.careInsuranceType === 'CARE' || p.careInsuranceType === 'SUPPORT') && deadlines.isOverLimit;
+
+        let unitPoints = REHA_RULES.LIMIT_DAYS[p.diseaseType]?.defaultPoints || 170;
+        if (isMaintDiscount) {
+          if (p.diseaseType === 'LOCOMOTIVE') unitPoints = 102;
+          else if (p.diseaseType === 'CEREBROVASCULAR') unitPoints = 60;
+          else if (p.diseaseType === 'DISUSE') unitPoints = 46;
+        }
+        monthRehaPoints += (unitPoints * slot.units);
+
+        const earlyStart = p.earlyBonusStartDate || p.admissionDate;
+        if (earlyStart && p.category && !p.category.startsWith('outpatient')) {
+          const elapsed = getDiffDays(normalizeDate(earlyStart), curDate) + 1;
+          if (elapsed >= 1 && elapsed <= 4) {
+            monthEarlyCount += 1;
+            monthEarlyPoints += 60;
+          } else if (elapsed <= 14) {
+            monthEarlyCount += 1;
+            monthEarlyPoints += 25;
+          }
+        }
+
+        if (slot.billingPlan) {
+          monthPlanCount += 1;
+          monthPlanPoints += 240;
+        }
+      }
+    });
+  }
+
+  const monthTotalPoints = monthRehaPoints + monthPlanPoints + monthEarlyPoints;
+  const monthTotalAmount = monthTotalPoints * 10;
+
+  const monthAmountEl = document.getElementById('revenue-month-amount');
+  const monthPointsEl = document.getElementById('revenue-month-points');
+  const monthBreakdownEl = document.getElementById('revenue-month-breakdown');
+  const monthBadgeEl = document.getElementById('revenue-month-badge');
+
+  if (monthBadgeEl) monthBadgeEl.textContent = `${state.targetYear}年${state.targetMonth}月累計`;
+  if (monthAmountEl) monthAmountEl.textContent = `¥ ${monthTotalAmount.toLocaleString()}`;
+  if (monthPointsEl) monthPointsEl.textContent = `(${monthTotalPoints.toLocaleString()} 点)`;
+  if (monthBreakdownEl) {
+    monthBreakdownEl.textContent = `総実施: ${monthTotalUnits}単位 | 総合計画書: ${monthPlanCount}件 | 早期加算: ${monthEarlyCount}件`;
+  }
+}
+
 function renderDailyDiaryPreview() {
   const container = document.getElementById('daily-diary-preview-container');
   const badge = document.getElementById('diary-preview-date-badge');
   if (!container) return;
-  if (badge) badge.textContent = state.selectedDate;
+
+  if (badge) {
+    badge.textContent = state.selectedDate;
+  }
 
   const schedule = getDailySchedule(state.selectedDate);
   const patientMap = {};
-  getAllPatients().forEach((p) => { patientMap[normalizePatientId(p.id)] = p; });
+  getAllPatients().forEach((p) => {
+    patientMap[normalizePatientId(p.id)] = p;
+  });
 
   const diary = {
     inpatient: { loco: 0, cerebro: 0, disuse: 0, pain: 0, totalUnits: 0, patients: new Set() },
@@ -1208,9 +1334,6 @@ function renderDailyDiaryPreview() {
   `;
 }
 
-/**
- * 患者編集モーダルの初期化（削除項目への未定義参照を完全撤去）
- */
 function initPatientMasterModal() {
   const modal = document.getElementById('patient-modal');
   const openBtn = document.getElementById('btn-add-patient-master');
@@ -1218,40 +1341,38 @@ function initPatientMasterModal() {
   const cancelBtn = document.getElementById('btn-cancel-patient');
   const saveBtn = document.getElementById('btn-save-patient');
 
+  const careSelect = document.getElementById('patient-modal-care-insurance');
+  const onsetInput = document.getElementById('patient-modal-onset');
+  const diseaseSelect = document.getElementById('patient-modal-disease');
+
   const closeModal = () => modal?.classList.remove('show');
   openBtn?.addEventListener('click', () => openPatientMasterModal());
   closeBtn?.addEventListener('click', closeModal);
   cancelBtn?.addEventListener('click', closeModal);
 
-  // 介護保険区分と発症日の変更で計画書料2移行日ヒントを自動計算
-  const careSelect = document.getElementById('patient-modal-care-insurance');
-  const onsetInput = document.getElementById('patient-modal-onset');
-  const diseaseSelect = document.getElementById('patient-modal-disease');
-  const careHint = document.getElementById('patient-modal-care-hint');
+  const updateCareInsuranceHint = () => {
+    const hintEl = document.getElementById('patient-modal-care-hint');
+    if (!hintEl) return;
 
-  const updateCareHint = () => {
-    if (!careSelect || !careHint) return;
-    if (careSelect.value !== 'CARE') {
-      careHint.style.display = 'none';
-      return;
+    const careVal = careSelect?.value;
+    const onsetVal = onsetInput?.value;
+    const disVal = diseaseSelect?.value || 'LOCOMOTIVE';
+
+    if (careVal === 'CARE' && onsetVal) {
+      const onsetDate = normalizeDate(onsetVal);
+      const oneThird = getOneThirdDays(disVal);
+      const transitionDate = new Date(onsetDate.getTime());
+      transitionDate.setDate(transitionDate.getDate() + oneThird);
+      hintEl.textContent = `ℹ️ 要介護認定: 起算日より${oneThird}日後（${formatDate(transitionDate)}）に「計画書料2」へ移行します。`;
+      hintEl.style.display = 'block';
+    } else {
+      hintEl.style.display = 'none';
     }
-    const onsetStr = onsetInput?.value;
-    if (!onsetStr) {
-      careHint.style.display = 'block';
-      careHint.textContent = '※ 発症日を入力すると、計画書料2（3分の1経過日）の移行予定日が自動計算されます';
-      return;
-    }
-    const onsetDate = new Date(onsetStr);
-    const dType = diseaseSelect?.value || 'LOCOMOTIVE';
-    const oneThird = getOneThirdDays(dType);
-    const transDate = new Date(onsetDate.getTime() + oneThird * 86400000);
-    careHint.style.display = 'block';
-    careHint.textContent = `ℹ️ 発症日起算から${oneThird}日後（${formatDate(transDate)}）より総合実施計画書料2へ移行予定`;
   };
 
-  careSelect?.addEventListener('change', updateCareHint);
-  onsetInput?.addEventListener('input', updateCareHint);
-  diseaseSelect?.addEventListener('change', updateCareHint);
+  careSelect?.addEventListener('change', updateCareInsuranceHint);
+  onsetInput?.addEventListener('input', updateCareInsuranceHint);
+  diseaseSelect?.addEventListener('change', updateCareInsuranceHint);
 
   saveBtn?.addEventListener('click', () => {
     const id = document.getElementById('patient-modal-id')?.value?.trim();
@@ -1261,7 +1382,7 @@ function initPatientMasterModal() {
     const careInsuranceType = careSelect?.value || 'NONE';
     const admissionDate = document.getElementById('patient-modal-admission')?.value;
     const earlyBonusStartDate = document.getElementById('patient-modal-early-start')?.value;
-    const onsetDate = document.getElementById('patient-modal-onset')?.value;
+    const onsetDate = onsetInput?.value;
     const notes = document.getElementById('patient-modal-notes')?.value?.trim();
 
     if (!id) {
@@ -1292,32 +1413,46 @@ function openPatientMasterModal(existingId = null) {
   const modal = document.getElementById('patient-modal');
   if (!modal) return;
 
-  const p = existingId ? getAllPatients().find((item) => item.id === existingId) : null;
+  const p = existingId ? getAllPatients().find((item) => normalizePatientId(item.id) === normalizePatientId(existingId)) : null;
 
-  document.getElementById('patient-modal-id').value = p ? p.id : '';
-  document.getElementById('patient-modal-name').value = p ? p.name || '' : '';
-  document.getElementById('patient-modal-category').value = p ? p.category || 'inpatient_1' : 'inpatient_1';
-  document.getElementById('patient-modal-disease').value = p ? p.diseaseType || 'LOCOMOTIVE' : 'LOCOMOTIVE';
-  
-  const careSelect = document.getElementById('patient-modal-care-insurance');
-  if (careSelect) {
-    careSelect.value = p?.careInsuranceType || (p?.category?.includes('maintenance') ? 'CARE' : 'NONE');
+  const idInput = document.getElementById('patient-modal-id');
+  const nameInput = document.getElementById('patient-modal-name');
+  const catInput = document.getElementById('patient-modal-category');
+  const disInput = document.getElementById('patient-modal-disease');
+  const careInput = document.getElementById('patient-modal-care-insurance');
+  const admInput = document.getElementById('patient-modal-admission');
+  const earlyInput = document.getElementById('patient-modal-early-start');
+  const onsetInput = document.getElementById('patient-modal-onset');
+  const noteInput = document.getElementById('patient-modal-notes');
+
+  if (idInput) idInput.value = p ? p.id : '';
+  if (nameInput) nameInput.value = p ? p.name || '' : '';
+  if (catInput) catInput.value = p ? p.category || 'inpatient_1' : 'inpatient_1';
+  if (disInput) disInput.value = p ? p.diseaseType || 'LOCOMOTIVE' : 'LOCOMOTIVE';
+  if (careInput) careInput.value = p ? p.careInsuranceType || (p.category?.includes('maintenance') ? 'CARE' : 'NONE') : 'NONE';
+  if (admInput) admInput.value = p ? p.admissionDate || '' : '';
+  if (earlyInput) earlyInput.value = p ? p.earlyBonusStartDate || '' : '';
+  if (onsetInput) onsetInput.value = p ? p.onsetDate || '' : '';
+  if (noteInput) noteInput.value = p ? p.notes || '' : '';
+
+  // 介護保険ヒントの更新
+  const hintEl = document.getElementById('patient-modal-care-hint');
+  if (hintEl) {
+    if (careInput?.value === 'CARE' && onsetInput?.value) {
+      const onsetDate = normalizeDate(onsetInput.value);
+      const oneThird = getOneThirdDays(disInput?.value || 'LOCOMOTIVE');
+      const transitionDate = new Date(onsetDate.getTime());
+      transitionDate.setDate(transitionDate.getDate() + oneThird);
+      hintEl.textContent = `ℹ️ 要介護認定: 起算日より${oneThird}日後（${formatDate(transitionDate)}）に「計画書料2」へ移行します。`;
+      hintEl.style.display = 'block';
+    } else {
+      hintEl.style.display = 'none';
+    }
   }
-
-  document.getElementById('patient-modal-admission').value = p ? p.admissionDate || '' : '';
-  document.getElementById('patient-modal-early-start').value = p ? p.earlyBonusStartDate || '' : '';
-  document.getElementById('patient-modal-onset').value = p ? p.onsetDate || '' : '';
-  document.getElementById('patient-modal-notes').value = p ? p.notes || '' : '';
-
-  // ヒント表示をトリガー
-  careSelect?.dispatchEvent(new Event('change'));
 
   modal.classList.add('show');
 }
 
-/**
- * 患者台帳・期限管理テーブルの描画（編集ボタンの確実なバインド）
- */
 function renderPatientDeadlines() {
   const tbody = document.getElementById('patient-deadlines-tbody');
   if (!tbody) return;
@@ -1332,6 +1467,7 @@ function renderPatientDeadlines() {
     const isOut = p.category && p.category.startsWith('outpatient');
     const catLabel = isOut ? '外来' : '入院';
 
+    // 早期加算ステータス
     let earlyBadge = '<span style="color: var(--text-dim);">-</span>';
     if (calc.earlyBonusStatus === 'PHASE_1_ACTIVE') {
       earlyBadge = '<span class="status-pill" style="background: #eff6ff; color: #1d4ed8; font-weight: 700;">第1期 (4日以内)</span>';
@@ -1341,19 +1477,22 @@ function renderPatientDeadlines() {
       earlyBadge = '<span style="color: var(--text-dim); font-size: 0.75rem;">加算終了</span>';
     }
 
-    let careLabel = '<span style="color: var(--text-muted);">なし(医療)</span>';
-    if (calc.careType === 'CARE') careLabel = '<span style="color: #d97706; font-weight: 800;">要介護</span>';
-    else if (calc.careType === 'SUPPORT') careLabel = '<span style="color: #2563eb; font-weight: 700;">要支援</span>';
+    // 介護保険表示
+    let careBadge = '<span style="color: var(--text-muted); font-size: 0.8rem;">なし (医療)</span>';
+    if (calc.careType === 'CARE') {
+      careBadge = '<span class="status-pill" style="background: #fef3c7; color: #92400e; font-weight: 800;">要介護</span>';
+    } else if (calc.careType === 'SUPPORT') {
+      careBadge = '<span class="status-pill" style="background: #e0e7ff; color: #3730a3; font-weight: 800;">要支援</span>';
+    }
 
-    let plan2Badge = '<span style="color: var(--text-dim);">-</span>';
+    // 計画書料2移行日表示
+    let plan2Badge = '<span style="color: var(--text-dim); font-size: 0.8rem;">対象外(料1)</span>';
     if (calc.isCarePatient) {
       if (calc.isPlan2Active) {
-        plan2Badge = `<span class="status-pill" style="background: #eff6ff; color: #1d4ed8; font-weight: 800;">料2移行済 (${calc.plan2TransitionDateStr})</span>`;
+        plan2Badge = `<span style="color: #92400e; font-weight: 800;">${calc.plan2TransitionDateStr}</span> <span class="status-pill" style="background: #fef08a; color: #854d0e; font-size: 0.7rem;">料2適用中</span>`;
       } else {
-        plan2Badge = `<span>${calc.plan2TransitionDateStr}</span> <span style="font-size: 0.725rem; color: var(--text-muted);">(残${calc.daysUntilPlan2}日)</span>`;
+        plan2Badge = `<span>${calc.plan2TransitionDateStr}</span> <span style="font-size: 0.725rem; color: var(--text-muted);">(あと${calc.daysUntilPlan2}日)</span>`;
       }
-    } else {
-      plan2Badge = '<span style="color: var(--text-dim); font-size: 0.75rem;">対象外(料1)</span>';
     }
 
     tr.innerHTML = `
@@ -1361,27 +1500,29 @@ function renderPatientDeadlines() {
       <td>${p.name || ''}</td>
       <td><span class="palette-category-tag ${isOut ? 'tag-outpatient' : 'tag-inpatient'}">${catLabel}</span></td>
       <td>${calc.diseaseLabel || '運動器Ⅱ'}</td>
-      <td>${careLabel}</td>
+      <td>${careBadge}</td>
       <td>${p.admissionDate || '-'}</td>
       <td>${p.earlyBonusStartDate || '-'}</td>
       <td>${p.onsetDate || '-'}</td>
       <td>${earlyBadge}</td>
       <td>${calc.rehaLimitDateStr || '上限なし'}</td>
       <td>${plan2Badge}</td>
-      <td>
-        <button type="button" class="btn-secondary-compact btn-edit-patient" data-id="${p.id}">編集</button>
+      <td style="position: sticky; right: 0; background-color: inherit; text-align: center;">
+        <button type="button" class="btn-secondary-compact btn-edit-patient" data-id="${p.id}" style="font-weight: 800;">編集</button>
       </td>
     `;
     tbody.appendChild(tr);
   });
 
-  // 編集ボタンへの安全なイベントバインド（クエリ全走査）
-  const editButtons = tbody.querySelectorAll('.btn-edit-patient');
-  editButtons.forEach((btn) => {
+  // 編集ボタンへの確実なイベント登録
+  tbody.querySelectorAll('.btn-edit-patient').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      openPatientMasterModal(btn.dataset.id);
+      const patientId = btn.getAttribute('data-id');
+      if (patientId) {
+        openPatientMasterModal(patientId);
+      }
     });
   });
 }
@@ -1397,11 +1538,16 @@ function initLoanModal() {
 
   const closeModal = () => modal?.classList.remove('show');
   openBtn?.addEventListener('click', () => {
-    document.getElementById('loan-date').value = state.selectedDate;
-    document.getElementById('loan-item-name').value = '';
-    document.getElementById('loan-patient-id').value = '';
-    document.getElementById('loan-vendor-name').value = '';
-    document.getElementById('loan-notes').value = '';
+    const loanDateInput = document.getElementById('loan-date');
+    if (loanDateInput) loanDateInput.value = state.selectedDate;
+    const itemInput = document.getElementById('loan-item-name');
+    if (itemInput) itemInput.value = '';
+    const patInput = document.getElementById('loan-patient-id');
+    if (patInput) patInput.value = '';
+    const venInput = document.getElementById('loan-vendor-name');
+    if (venInput) venInput.value = '';
+    const noteInput = document.getElementById('loan-notes');
+    if (noteInput) noteInput.value = '';
     modal?.classList.add('show');
   });
 
@@ -1469,8 +1615,8 @@ function renderLoansTable() {
       <td>${statusBadge}</td>
       <td style="color: var(--text-muted); font-size: 0.8rem;">${l.notes || ''}</td>
       <td>
-        ${isLoaned ? `<button type="button" class="btn-secondary-compact btn-return-loan" data-id="${l.id}">返却完了</button>` : ''}
-        <button type="button" class="btn-secondary-compact btn-delete-loan" data-id="${l.id}" style="color: var(--danger);">削除</button>
+        ${isLoaned ? `<button class="btn-secondary-compact btn-return-loan" data-id="${l.id}">返却完了</button>` : ''}
+        <button class="btn-secondary-compact btn-delete-loan" data-id="${l.id}" style="color: var(--danger);">削除</button>
       </td>
     `;
     tbody.appendChild(tr);
