@@ -1,9 +1,9 @@
 /**
  * @file patientStore.js
- * @description 患者マスター情報（入院日・早期加算起算日・発症日・疾患区分等）のローカル保存・管理
+ * @description 患者マスター情報（入院日・早期加算起算日・発症日・疾患区分・介護保険認定・疾患名等）のローカル保存・管理
  * 
- * すべてのデータはブラウザの LocalStorage に暗号化/安全保存され、
- * 外部サーバーやクラウドへの通信は一切行いません（完全オフライン）。
+ * - 完全オフライン（LocalStorage）で安全管理
+ * - 介護保険認定区分（careInsuranceType）および 具体的な疾患名（diseaseName）の確実な永続化に対応
  */
 
 import { normalizePatientId, safeParseInt } from '../core/dataNormalizer.js';
@@ -13,50 +13,41 @@ const STORAGE_KEY_PATIENTS = 'reha_manager_patients_v1';
 
 /**
  * 初期マスターテンプレート（記号 a 〜 y の標準枠）
- * 受付提出ファイル（入院・外来シート）の見出し記号に対応
  */
 const DEFAULT_PATIENT_SEEDS = [
   // 入院1（運動器Ⅱ）
-  { id: 'a', name: '患者A', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1' },
-  { id: 'b', name: '患者B', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1' },
-  { id: 'c', name: '患者C', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1' },
-  { id: 'd', name: '患者D', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1' },
-  { id: 'e', name: '患者E', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1' },
-  { id: 'f', name: '患者F', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1' },
-  { id: 'g', name: '患者G', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1' },
-  { id: 'h', name: '患者H', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1' },
-  { id: 'i', name: '患者I', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1' },
-  { id: 'j', name: '患者J', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1' },
+  { id: 'a', name: '患者A', diseaseName: '大腿骨頸部骨折', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1', careInsuranceType: 'NONE' },
+  { id: 'b', name: '患者B', diseaseName: '変形性膝関節症', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1', careInsuranceType: 'NONE' },
+  { id: 'c', name: '患者C', diseaseName: '腰椎圧迫骨折', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1', careInsuranceType: 'NONE' },
+  { id: 'd', name: '患者D', diseaseName: '胸椎圧迫骨折', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1', careInsuranceType: 'NONE' },
+  { id: 'e', name: '患者E', diseaseName: '大腿骨転子部骨折', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1', careInsuranceType: 'NONE' },
+  { id: 'f', name: '患者F', diseaseName: '肩関節周囲炎', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1', careInsuranceType: 'NONE' },
+  { id: 'g', name: '患者G', diseaseName: '脊柱管狭窄症', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1', careInsuranceType: 'NONE' },
+  { id: 'h', name: '患者H', diseaseName: '大腿骨骨折', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1', careInsuranceType: 'NONE' },
+  { id: 'i', name: '患者I', diseaseName: '骨盤骨折', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1', careInsuranceType: 'NONE' },
+  { id: 'j', name: '患者J', diseaseName: '膝周囲骨折', diseaseType: 'LOCOMOTIVE', category: 'inpatient_1', careInsuranceType: 'NONE' },
   // 入院(2)（脳血管Ⅲ等）
-  { id: 'k', name: '患者K', diseaseType: 'CEREBROVASCULAR', category: 'inpatient_2' },
-  { id: 'l', name: '患者L', diseaseType: 'CEREBROVASCULAR', category: 'inpatient_2' },
-  { id: 'm', name: '患者M', diseaseType: 'CEREBROVASCULAR', category: 'inpatient_2' },
+  { id: 'k', name: '患者K', diseaseName: '脳梗塞', diseaseType: 'CEREBROVASCULAR', category: 'inpatient_2', careInsuranceType: 'CARE' },
+  { id: 'l', name: '患者L', diseaseName: '脳出血', diseaseType: 'CEREBROVASCULAR', category: 'inpatient_2', careInsuranceType: 'CARE' },
+  { id: 'm', name: '患者M', diseaseName: 'くも膜下出血', diseaseType: 'CEREBROVASCULAR', category: 'inpatient_2', careInsuranceType: 'CARE' },
   // 入院（維持期介護）
-  { id: 'n', name: '患者N', diseaseType: 'LOCOMOTIVE', category: 'inpatient_maintenance' },
-  { id: 'o', name: '患者O', diseaseType: 'LOCOMOTIVE', category: 'inpatient_maintenance' },
+  { id: 'n', name: '患者N', diseaseName: '廃用症候群', diseaseType: 'DISUSE', category: 'inpatient_maintenance', careInsuranceType: 'CARE' },
+  { id: 'o', name: '患者O', diseaseName: '廃用症候群', diseaseType: 'DISUSE', category: 'inpatient_maintenance', careInsuranceType: 'CARE' },
   // 外来
-  { id: 'p', name: '外来P', diseaseType: 'LOCOMOTIVE', category: 'outpatient_1' },
-  { id: 'q', name: '外来Q', diseaseType: 'LOCOMOTIVE', category: 'outpatient_1' },
-  { id: 'r', name: '外来R', diseaseType: 'LOCOMOTIVE', category: 'outpatient_1' },
-  { id: 's', name: '外来S', diseaseType: 'LOCOMOTIVE', category: 'outpatient_1' },
-  { id: 't', name: '外来T', diseaseType: 'LOCOMOTIVE', category: 'outpatient_1' },
-  { id: 'u', name: '外来U', diseaseType: 'LOCOMOTIVE', category: 'outpatient_1' },
-  { id: 'v', name: '外来V', diseaseType: 'LOCOMOTIVE', category: 'outpatient_1' },
-  { id: 'w', name: '外来W', diseaseType: 'LOCOMOTIVE', category: 'outpatient_1' },
-  { id: 'x', name: '外来X', diseaseType: 'LOCOMOTIVE', category: 'outpatient_1' },
-  { id: 'y', name: '外来Y', diseaseType: 'LOCOMOTIVE', category: 'outpatient_1' },
+  { id: 'p', name: '外来P', diseaseName: '変形性膝関節症', diseaseType: 'LOCOMOTIVE', category: 'outpatient_1', careInsuranceType: 'NONE' },
+  { id: 'q', name: '外来Q', diseaseName: '肩関節周囲炎', diseaseType: 'LOCOMOTIVE', category: 'outpatient_1', careInsuranceType: 'NONE' },
+  { id: 'r', name: '外来R', diseaseName: '腰痛症', diseaseType: 'LOCOMOTIVE', category: 'outpatient_1', careInsuranceType: 'NONE' },
+  { id: 's', name: '外来S', diseaseName: '頚椎症', diseaseType: 'LOCOMOTIVE', category: 'outpatient_1', careInsuranceType: 'NONE' },
+  { id: 't', name: '外来T', diseaseName: '足関節捻挫', diseaseType: 'LOCOMOTIVE', category: 'outpatient_1', careInsuranceType: 'NONE' },
 ];
 
-
 /**
- * 全患者リストを取得（LocalStorageから読み出し、未初期化時はシードデータを保存）
- * @returns {Array<Object>} 患者オブジェクトの配列
+ * 全患者リストを取得
  */
 export function getAllPatients() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_PATIENTS);
     if (!raw) {
-      // 初回起動時はデフォルトマスターを保存して返却
       saveAllPatients(DEFAULT_PATIENT_SEEDS);
       return DEFAULT_PATIENT_SEEDS;
     }
@@ -70,7 +61,6 @@ export function getAllPatients() {
 
 /**
  * 全患者リストを一括保存
- * @param {Array<Object>} patients - 保存する患者配列
  */
 export function saveAllPatients(patients) {
   try {
@@ -81,9 +71,7 @@ export function saveAllPatients(patients) {
 }
 
 /**
- * 患者ID（記号: a, b...）を指定して単一患者情報を取得
- * @param {string} patientId 
- * @returns {Object|null}
+ * 患者IDを指定して単一患者情報を取得
  */
 export function getPatientById(patientId) {
   const normId = normalizePatientId(patientId);
@@ -93,21 +81,9 @@ export function getPatientById(patientId) {
   return list.find((p) => normalizePatientId(p.id) === normId) || null;
 }
 
-
 /**
  * 患者情報を新規追加または更新（Upsert）
- * @param {Object} patientData - 患者オブジェクト
- * @param {string} patientData.id - 患者記号 (例: 'a')
- * @param {string} [patientData.name] - 患者氏名
- * @param {string} [patientData.admissionDate] - 当院入院日 (YYYY-MM-DD)
- * @param {string} [patientData.earlyBonusStartDate] - 早期加算起算日（転院患者は前医入院日）
- * @param {string} [patientData.onsetDate] - 発症日/手術日（疾患別算定上限起算日）
- * @param {string} [patientData.diseaseType] - 疾患区分 ('LOCOMOTIVE' | 'CEREBROVASCULAR' | 'DISUSE' | 'ANALGESIA')
- * @param {string} [patientData.category] - 受付シート区分 ('inpatient_1' | 'inpatient_2' | 'inpatient_maintenance' | 'outpatient_1')
- * @param {string} [patientData.lastPlanDate] - 前回総合実施計画書算定日 (YYYY-MM-DD)
- * @param {boolean} [patientData.isLimitExempt] - 月13単位上限除外フラグ
- * @param {string} [patientData.notes] - 備考メモ
- * @returns {Object} 保存された患者オブジェクト
+ * - careInsuranceType (介護保険区分) および diseaseName (疾患名) を確実に保存
  */
 export function upsertPatient(patientData) {
   const normId = normalizePatientId(patientData.id);
@@ -118,25 +94,30 @@ export function upsertPatient(patientData) {
   const list = getAllPatients();
   const index = list.findIndex((p) => normalizePatientId(p.id) === normId);
 
+  // 介護保険区分の正規化 (NONE, SUPPORT, CARE)
+  let careType = patientData.careInsuranceType || 'NONE';
+  if (!['NONE', 'SUPPORT', 'CARE'].includes(careType)) {
+    careType = patientData.category?.includes('maintenance') ? 'CARE' : 'NONE';
+  }
+
   const merged = {
     id: normId,
     name: patientData.name || `患者${normId.toUpperCase()}`,
+    diseaseName: patientData.diseaseName || '', // ★ 新設: 具体的な疾患名（病名）
+    diseaseType: patientData.diseaseType || 'LOCOMOTIVE',
+    careInsuranceType: careType, // ★ 確実に保存（データ落ちを完全解消）
+    category: patientData.category || 'inpatient_1',
     admissionDate: patientData.admissionDate || '',
     earlyBonusStartDate: patientData.earlyBonusStartDate || patientData.admissionDate || '',
     onsetDate: patientData.onsetDate || patientData.admissionDate || '',
-    diseaseType: patientData.diseaseType || 'LOCOMOTIVE',
-    category: patientData.category || 'inpatient_1',
-    lastPlanDate: patientData.lastPlanDate || '',
     isLimitExempt: Boolean(patientData.isLimitExempt),
     notes: patientData.notes || '',
     updatedAt: new Date().toISOString(),
   };
 
   if (index >= 0) {
-    // 既存レコードをマージ更新
     list[index] = { ...list[index], ...merged };
   } else {
-    // 新規レコード追加
     list.push(merged);
   }
 
@@ -144,10 +125,8 @@ export function upsertPatient(patientData) {
   return merged;
 }
 
-
 /**
- * 患者マスターをJSON文字列としてエクスポート（バックアップ用）
- * @returns {string} JSON文字列
+ * 患者マスターをJSON文字列としてエクスポート
  */
 export function exportPatientsAsJson() {
   const list = getAllPatients();
@@ -159,9 +138,7 @@ export function exportPatientsAsJson() {
 }
 
 /**
- * JSON文字列から患者マスターをインポート（リストア）
- * @param {string} jsonString - インポートするJSON
- * @returns {{ success: boolean, count: number, error?: string }}
+ * JSON文字列から患者マスターをインポート
  */
 export function importPatientsFromJson(jsonString) {
   try {
@@ -170,18 +147,18 @@ export function importPatientsFromJson(jsonString) {
       return { success: false, count: 0, error: '有効な患者データ形式（JSON）ではありません。' };
     }
 
-    // データの正規化チェック
     const validPatients = data.patients
       .filter((p) => p && p.id)
       .map((p) => ({
         id: normalizePatientId(p.id),
         name: p.name || `患者${normalizePatientId(p.id).toUpperCase()}`,
+        diseaseName: p.diseaseName || '',
+        diseaseType: p.diseaseType || 'LOCOMOTIVE',
+        careInsuranceType: p.careInsuranceType || 'NONE',
+        category: p.category || 'inpatient_1',
         admissionDate: p.admissionDate || '',
         earlyBonusStartDate: p.earlyBonusStartDate || p.admissionDate || '',
         onsetDate: p.onsetDate || p.admissionDate || '',
-        diseaseType: p.diseaseType || 'LOCOMOTIVE',
-        category: p.category || 'inpatient_1',
-        lastPlanDate: p.lastPlanDate || '',
         isLimitExempt: Boolean(p.isLimitExempt),
         notes: p.notes || '',
         updatedAt: p.updatedAt || new Date().toISOString(),
