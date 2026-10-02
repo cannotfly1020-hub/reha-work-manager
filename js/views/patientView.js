@@ -1,9 +1,9 @@
 // js/views/patientView.js
 // VIEW 3: 患者台帳・算定期限管理・患者登録編集モーダル制御層（200行制限準拠）
 
-import { sanitizeHtml, normalizeString } from '../core/dataNormalizer.js';
+import { sanitizeHtml } from '../core/dataNormalizer.js';
 import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
-import { getAllPatients, getPatientById, upsertPatient, deletePatient, searchPatients } from '../store/patientStore.js';
+import { getPatientById, upsertPatient, deletePatient, searchPatients } from '../store/patientStore.js';
 import { showToast } from './exportView.js';
 
 let editingPatientId = null;
@@ -15,10 +15,19 @@ export function initPatientView() {
 
   searchInput?.addEventListener('input', () => renderPatientView());
   catFilter?.addEventListener('change', () => renderPatientView());
-
   btnNew?.addEventListener('click', () => openPatientModal(null));
 
   setupPatientModalListeners();
+}
+
+function getPlanStatusBadge(status) {
+  if (status === 'PLAN_2_FOLLOW') {
+    return '<span style="color:#7c3aed; font-weight:800; background:#f5f3ff; border:1px solid #ddd6fe; padding:2px 5px; border-radius:3px; font-size:0.72rem;">計2継続(196点)</span>';
+  }
+  if (status === 'PLAN_1_FOLLOW') {
+    return '<span style="color:#0369a1; font-weight:700; background:#e0f2fe; padding:2px 5px; border-radius:3px; font-size:0.72rem;">計1継続(240点)</span>';
+  }
+  return '<span style="color:#64748b; font-size:0.72rem;">未算定(初回)</span>';
 }
 
 export function renderPatientView() {
@@ -34,7 +43,6 @@ export function renderPatientView() {
     return;
   }
 
-  // 固定幅(min-width)を撤廃し、画面幅に合わせて自然にフィットするスリム設計
   let html = `
     <table class="modern-table" style="width:100%; table-layout:auto; font-size:0.78rem;">
       <thead>
@@ -49,7 +57,7 @@ export function renderPatientView() {
           <th style="padding:6px 6px;">起算日</th>
           <th style="padding:6px 6px; text-align:center;">早期加算</th>
           <th style="padding:6px 6px;">上限日(残日)</th>
-          <th style="padding:6px 6px;">計画書2移行日</th>
+          <th style="padding:6px 6px; text-align:center;">計画書フェーズ</th>
           <th style="padding:6px 6px; text-align:center; width:54px;">操作</th>
         </tr>
       </thead>
@@ -58,49 +66,29 @@ export function renderPatientView() {
 
   const today = new Date();
   patients.forEach((p) => {
-    const deadlines = calculatePatientDeadlines(p, today);
+    const dl = calculatePatientDeadlines(p, today);
     const isOut = p.category === 'OUTPATIENT';
-    // 区分を1文字化（入 / 外）
-    const catBadge = isOut
-      ? '<span style="color:#2563eb; font-weight:700;">外</span>'
-      : '<span style="color:#d97706; font-weight:700;">入</span>';
+    const catBadge = isOut ? '<span style="color:#2563eb; font-weight:700;">外</span>' : '<span style="color:#d97706; font-weight:700;">入</span>';
 
-    // 早期加算バッジ
     let earlyBadge = '<span style="color:#94a3b8;">-</span>';
-    if (!isOut && deadlines.earlyBonus && deadlines.earlyBonus.points > 0) {
-      const isP1 = deadlines.earlyBonus.phase === 'PHASE_1';
-      const color = isP1 ? '#059669' : '#0284c7';
-      earlyBadge = `<span style="background:${isP1 ? '#d1fae5' : '#e0f2fe'}; color:${color}; padding:1px 5px; border-radius:3px; font-weight:700; font-size:0.72rem;">+${deadlines.earlyBonus.points}点</span>`;
+    if (!isOut && dl.earlyBonus && dl.earlyBonus.points > 0) {
+      const isP1 = dl.earlyBonus.phase === 'PHASE_1';
+      earlyBadge = `<span style="background:${isP1 ? '#d1fae5' : '#e0f2fe'}; color:${isP1 ? '#059669' : '#0284c7'}; padding:1px 5px; border-radius:3px; font-weight:700; font-size:0.72rem;">+${dl.earlyBonus.points}点</span>`;
     }
 
-    // 上限到達日と残日数バッジ
     let limitDisplay = '<span style="color:#94a3b8;">上限なし</span>';
-    if (deadlines.limitDateStr) {
-      if (deadlines.isLimitExceeded) {
-        limitDisplay = `<span style="color:#e11d48; font-weight:700;">超過 (${deadlines.remainingDays}日)</span>`;
+    if (dl.limitDateStr) {
+      if (dl.isLimitExceeded) {
+        limitDisplay = `<span style="color:#e11d48; font-weight:700;">超過 (${dl.remainingDays}日)</span>`;
       } else {
-        const warnStyle = (deadlines.remainingDays <= 30) ? 'color:#d97706; font-weight:700;' : 'color:#334155;';
-        limitDisplay = `<span style="${warnStyle}">${deadlines.limitDateStr} (${deadlines.remainingDays}日)</span>`;
+        const warnStyle = (dl.remainingDays <= 30) ? 'color:#d97706; font-weight:700;' : 'color:#334155;';
+        limitDisplay = `<span style="${warnStyle}">${dl.limitDateStr} (${dl.remainingDays}日)</span>`;
       }
     }
 
-    // 計画書2移行日（要介護者の1/3経過日）
-    let plan2Display = '<span style="color:#94a3b8;">対象外</span>';
-    if (p.careInsuranceType === 'CARE' && deadlines.plan2TransitionDateStr) {
-      if (deadlines.isPlan2Required) {
-        plan2Display = `<span style="color:#7c3aed; font-weight:700;">移行済 (${deadlines.plan2TransitionDateStr})</span>`;
-      } else {
-        plan2Display = `<span style="color:#0369a1;">${deadlines.plan2TransitionDateStr} (${deadlines.plan2RemainingDays}日)</span>`;
-      }
-    }
-
-    // 介護認定表示の1文字化・スリム化
     let careDisplay = '<span style="color:#94a3b8;">なし</span>';
-    if (p.careInsuranceType === 'CARE') {
-      careDisplay = '<span style="color:#7c3aed; font-weight:700;">要介護</span>';
-    } else if (p.careInsuranceType === 'SUPPORT') {
-      careDisplay = '<span style="color:#059669; font-weight:700;">要支援</span>';
-    }
+    if (p.careInsuranceType === 'CARE') careDisplay = '<span style="color:#7c3aed; font-weight:700;">要介護</span>';
+    else if (p.careInsuranceType === 'SUPPORT') careDisplay = '<span style="color:#059669; font-weight:700;">要支援</span>';
 
     html += `
       <tr>
@@ -108,18 +96,17 @@ export function renderPatientView() {
         <td style="padding:6px 8px; white-space:nowrap;"><strong>${sanitizeHtml(p.name)}</strong><br><span style="font-size:0.68rem; color:#64748b;">${sanitizeHtml(p.nameKana || '')}</span></td>
         <td style="padding:6px 6px; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${sanitizeHtml(p.diseaseName || '')}">${sanitizeHtml(p.diseaseName || '-')}</td>
         <td style="padding:6px 4px; text-align:center;">${catBadge}</td>
-        <td style="padding:6px 4px; text-align:center;"><span style="font-size:0.72rem; background:#f1f5f9; padding:1px 4px; border-radius:3px;">${deadlines.diseaseLabel}</span></td>
+        <td style="padding:6px 4px; text-align:center;"><span style="font-size:0.72rem; background:#f1f5f9; padding:1px 4px; border-radius:3px;">${dl.diseaseLabel}</span></td>
         <td style="padding:6px 4px; text-align:center;">${careDisplay}</td>
         <td style="padding:6px 6px; font-size:0.75rem; white-space:nowrap;">${p.admissionDate || '-'}</td>
         <td style="padding:6px 6px; font-size:0.75rem; white-space:nowrap;">${p.onsetDate || p.admissionDate || '-'}</td>
         <td style="padding:6px 6px; text-align:center;">${earlyBadge}</td>
         <td style="padding:6px 6px; font-size:0.75rem; white-space:nowrap;">${limitDisplay}</td>
-        <td style="padding:6px 6px; font-size:0.75rem; white-space:nowrap;">${plan2Display}</td>
+        <td style="padding:6px 6px; text-align:center;">${getPlanStatusBadge(p.planStatus)}</td>
         <td style="padding:6px 6px; text-align:center;">
           <button class="btn-edit-patient" data-id="${p.id}" style="padding:2px 6px; font-size:0.72rem; border:1px solid #cbd5e1; background:#fff; border-radius:4px; cursor:pointer;">編集</button>
         </td>
-      </tr>
-    `;
+      </tr>`;
   });
 
   html += `</tbody></table>`;
@@ -160,6 +147,7 @@ function setupPatientModalListeners() {
       category: document.getElementById('patientFormCategory').value,
       diseaseType: document.getElementById('patientFormDiseaseType').value,
       careInsuranceType: document.getElementById('patientFormCareType').value,
+      planStatus: document.getElementById('patientFormPlanStatus')?.value || 'NOT_YET',
       admissionDate: document.getElementById('patientFormAdmissionDate').value,
       earlyBonusStartDate: document.getElementById('patientFormEarlyStartDate').value,
       onsetDate: document.getElementById('patientFormOnsetDate').value,
@@ -198,6 +186,10 @@ function openPatientModal(patientId) {
   document.getElementById('patientFormCategory').value = p ? p.category : 'INPATIENT';
   document.getElementById('patientFormDiseaseType').value = p ? p.diseaseType : 'LOCOMOTIVE';
   document.getElementById('patientFormCareType').value = p ? p.careInsuranceType : 'NONE';
+  
+  const planSelect = document.getElementById('patientFormPlanStatus');
+  if (planSelect) planSelect.value = p ? (p.planStatus || 'NOT_YET') : 'NOT_YET';
+
   document.getElementById('patientFormAdmissionDate').value = p ? (p.admissionDate || '') : '';
   document.getElementById('patientFormEarlyStartDate').value = p ? (p.earlyBonusStartDate || '') : '';
   document.getElementById('patientFormOnsetDate').value = p ? (p.onsetDate || '') : '';
