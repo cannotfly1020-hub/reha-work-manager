@@ -1,5 +1,5 @@
 // js/store/scheduleStore.js
-// 時間割コマCRUD・LocalStorage永続化・月間集計・計画書算定履歴検索層（200行制限準拠）
+// 時間割コマCRUD・消炎鎮痛マルチ患者CRUD・LocalStorage永続化・月間集計層（200行制限準拠）
 
 import { normalizeDateString, safeParseInt } from '../core/dataNormalizer.js';
 import { getPatientById } from './patientStore.js';
@@ -12,7 +12,7 @@ function getStorageKey(dateStr) {
 }
 
 export function getDailySchedule(dateStr) {
-  const defaultSchedule = { A: {}, B: {}, C: {} };
+  const defaultSchedule = { A: {}, B: {}, C: {}, analgesia: {} };
   const cleanDate = normalizeDateString(dateStr);
   if (!cleanDate) return defaultSchedule;
 
@@ -20,7 +20,12 @@ export function getDailySchedule(dateStr) {
     const raw = localStorage.getItem(getStorageKey(cleanDate));
     if (!raw) return defaultSchedule;
     const parsed = JSON.parse(raw);
-    return { A: parsed.A || {}, B: parsed.B || {}, C: parsed.C || {} };
+    return {
+      A: parsed.A || {},
+      B: parsed.B || {},
+      C: parsed.C || {},
+      analgesia: parsed.analgesia || {}
+    };
   } catch (error) {
     console.error('getDailySchedule parse error:', error);
     return defaultSchedule;
@@ -62,11 +67,43 @@ export function clearScheduleSlot(dateStr, therapistId, slotId) {
   return true;
 }
 
+export function addAnalgesiaPatient(dateStr, slotId, patientId) {
+  if (!dateStr || !slotId || !patientId) return false;
+  const current = getDailySchedule(dateStr);
+  if (!current.analgesia) current.analgesia = {};
+  if (!Array.isArray(current.analgesia[slotId])) current.analgesia[slotId] = [];
+
+  if (!current.analgesia[slotId].includes(patientId)) {
+    current.analgesia[slotId].push(patientId);
+    return saveDailySchedule(dateStr, current);
+  }
+  return true;
+}
+
+export function removeAnalgesiaPatient(dateStr, slotId, patientId) {
+  if (!dateStr || !slotId || !patientId) return false;
+  const current = getDailySchedule(dateStr);
+  if (!current.analgesia?.[slotId]) return true;
+
+  current.analgesia[slotId] = current.analgesia[slotId].filter((id) => id !== patientId);
+  if (current.analgesia[slotId].length === 0) {
+    delete current.analgesia[slotId];
+  }
+  return saveDailySchedule(dateStr, current);
+}
+
+export function getAnalgesiaSlotPatients(dateStr, slotId) {
+  const schedule = getDailySchedule(dateStr);
+  const patientIds = schedule.analgesia?.[slotId] || [];
+  return patientIds.map((id) => getPatientById(id) || { id, name: '未登録患者', category: 'OUTPATIENT' });
+}
+
 export function getDailyStats(dateStr) {
   const schedule = getDailySchedule(dateStr);
   const stats = {
     totalUnits: 0, totalPatients: 0, planCount: 0,
-    therapists: { A: { units: 0, patients: 0 }, B: { units: 0, patients: 0 }, C: { units: 0, patients: 0 } }
+    therapists: { A: { units: 0, patients: 0 }, B: { units: 0, patients: 0 }, C: { units: 0, patients: 0 } },
+    analgesia: { total: 0, inpatients: 0, outpatients: 0 }
   };
   const uniquePatients = new Set();
 
@@ -85,13 +122,24 @@ export function getDailyStats(dateStr) {
     });
     stats.therapists[tId].patients = tSet.size;
   });
+
+  const aSlots = schedule.analgesia || {};
+  Object.values(aSlots).forEach((pIds) => {
+    if (Array.isArray(pIds)) {
+      pIds.forEach((pId) => {
+        uniquePatients.add(pId);
+        stats.analgesia.total += 1;
+        const p = getPatientById(pId);
+        if (p?.category === 'INPATIENT') stats.analgesia.inpatients += 1;
+        else stats.analgesia.outpatients += 1;
+      });
+    }
+  });
+
   stats.totalPatients = uniquePatients.size;
   return stats;
 }
 
-/**
- * 当月内に同一患者が既に計画書料を算定している日付を走査・検出する
- */
 export function findPatientMonthlyPlanDate(patientId, year, month, excludeDate = '', excludeSlotId = '') {
   const daysInMonth = new Date(year, month, 0).getDate();
   for (let d = 1; d <= daysInMonth; d++) {
@@ -102,7 +150,7 @@ export function findPatientMonthlyPlanDate(patientId, year, month, excludeDate =
       for (const [sId, item] of Object.entries(slots)) {
         if (!item || item.patientId !== patientId || !item.billingPlan) continue;
         if (dStr === excludeDate && sId === excludeSlotId) continue;
-        return dStr; // 算定日を発見
+        return dStr;
       }
     }
   }
@@ -119,7 +167,10 @@ export function aggregateFromAppSchedule(year, month) {
   for (let day = 1; day <= daysInMonth; day++) {
     const dayStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const schedule = getDailySchedule(dayStr);
-    dailyBreakdown[day] = { totalUnits: 0, inpatients: 0, outpatients: 0, planCount: 0 };
+    dailyBreakdown[day] = {
+      totalUnits: 0, inpatients: 0, outpatients: 0, planCount: 0,
+      analgesiaTotal: 0, analgesiaInpatients: 0, analgesiaOutpatients: 0
+    };
 
     ['A', 'B', 'C'].forEach((tId) => {
       const tSlots = schedule[tId] || {};
@@ -131,14 +182,8 @@ export function aggregateFromAppSchedule(year, month) {
 
         if (!patientMap[pId]) {
           patientMap[pId] = {
-            patient,
-            totalUnits: 0,
-            planCount: 0,
-            earlyBonusCount: 0,
-            totalEarlyUnits: 0,
-            dailyUnits: Array(daysInMonth + 1).fill(0),
-            dailyEarlyUnits: Array(daysInMonth + 1).fill(0),
-            slots: []
+            patient, totalUnits: 0, planCount: 0, earlyBonusCount: 0, totalEarlyUnits: 0,
+            dailyUnits: Array(daysInMonth + 1).fill(0), dailyEarlyUnits: Array(daysInMonth + 1).fill(0), slots: []
           };
         }
         patientMap[pId].totalUnits += u;
@@ -153,12 +198,23 @@ export function aggregateFromAppSchedule(year, month) {
           patientMap[pId].totalEarlyUnits += u;
           patientMap[pId].dailyEarlyUnits[day] += u;
         }
-
         patientMap[pId].slots.push({ date: dayStr, therapist: tId, slotId, units: u, billingPlan: item.billingPlan });
         dailyBreakdown[day].totalUnits += u;
         if (patient.category === 'INPATIENT') dailyBreakdown[day].inpatients += u;
         else dailyBreakdown[day].outpatients += u;
       });
+    });
+
+    const aSlots = schedule.analgesia || {};
+    Object.values(aSlots).forEach((pIds) => {
+      if (Array.isArray(pIds)) {
+        pIds.forEach((pId) => {
+          dailyBreakdown[day].analgesiaTotal += 1;
+          const p = getPatientById(pId);
+          if (p?.category === 'INPATIENT') dailyBreakdown[day].analgesiaInpatients += 1;
+          else dailyBreakdown[day].analgesiaOutpatients += 1;
+        });
+      }
     });
   }
   return { year: y, month: m, daysInMonth, patientMap, dailyBreakdown };
