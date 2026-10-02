@@ -182,16 +182,26 @@
             <button type="button" class="btn-unit-select" data-unit="4" style="flex:1; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:700;">4単位</button>
           </div>
         </div>
-        <div>
-          <label for="slotBillingPlanSelect" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">📝 リハビリテーション総合計画評価料</label>
-          <select id="slotBillingPlanSelect" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff;">
+
+        <!-- 総合計画評価料 算定セクション（チェックボックス連動仕様） -->
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+            <label style="font-size:0.8rem; font-weight:700; display:flex; align-items:center; gap:6px; cursor:pointer; color:#0f172a; margin:0;">
+              <input type="checkbox" id="slotBillingPlanCheck" style="width:16px; height:16px; cursor:pointer;">
+              <span>📝 総合計画評価料を算定する</span>
+            </label>
+            <span style="font-size:0.7rem; color:#64748b;">(月1回)</span>
+          </div>
+          <select id="slotBillingPlanSelect" disabled style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#f1f5f9; color:#64748b;">
             <option value="">なし (算定しない)</option>
             <option value="PLAN_1_FIRST">総合実施計画書1 (初回: 300点 / ¥3,000)</option>
             <option value="PLAN_1_FOLLOW">総合実施計画書1 (2回目以降: 240点 / ¥2,400)</option>
             <option value="PLAN_2_FIRST">総合実施計画書2 (初回: 240点 / ¥2,400)</option>
             <option value="PLAN_2_FOLLOW">総合実施計画書2 (2回目以降: 196点 / ¥1,960)</option>
           </select>
+          <div id="slotPlanRecommendGuide" style="display:none; font-size:0.72rem; margin-top:6px; background:#eff6ff; border:1px solid #bfdbfe; color:#1d4ed8; padding:4px 8px; border-radius:4px;"></div>
         </div>
+
         <div>
           <label for="slotNoteInput" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">備考・メモ</label>
           <input type="text" id="slotNoteInput" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem;">
@@ -317,7 +327,8 @@
       <form id="loanRegisterForm" style="display:flex; flex-direction:column; gap:10px; font-size:0.85rem;">
         <div>
           <label style="font-size:0.75rem; font-weight:700; display:block;">対象患者 *</label>
-          <select id="loanPatientSelect" required style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;"></select>
+          <select id="loanPatientSelect" required style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </select>
         </div>
         <div>
           <label style="font-size:0.75rem; font-weight:700; display:block;">品名・装具名 *</label>
