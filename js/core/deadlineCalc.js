@@ -90,9 +90,8 @@ export function evaluateEarlyBonusPhase(admissionOrStart, sessionDate, category 
     return { phase: null, points: 0, label: '対象外', isEligible: false, endDateStr: '', remainingDays: null, shortLabel: '' };
   }
 
-  // 起算日当日を1日目とするため dayCount = diff + 1
   const dayCount = diff + 1;
-  const maxAllowedDays = REHA_RULES.EARLY_BONUS.PHASE_2.maxDays; // 14日
+  const maxAllowedDays = REHA_RULES.EARLY_BONUS.PHASE_2.maxDays;
   const endDateStr = addDays(admissionOrStart, maxAllowedDays - 1);
   const remainingDays = maxAllowedDays - dayCount;
 
@@ -193,6 +192,7 @@ export function calculatePatientDeadlines(patient, baseDate = new Date()) {
 
 /**
  * リハ総合計画評価料（4区分）の推奨選択肢を自動判定する純粋関数
+ * 患者マスターの planStatus（計画書2継続中固定など）を最優先に評価する
  * @param {Object} patient 患者マスター情報
  * @param {string} targetDateStr 算定対象日 (YYYY-MM-DD)
  * @param {boolean} hasPastPlan 過去（対象日より前）に算定実績があるか
@@ -203,10 +203,39 @@ export function evaluateRecommendedPlan(patient, targetDateStr, hasPastPlan = fa
     return { recommendedPlan: '', label: 'なし (算定しない)', points: 0, reason: '物療または患者未選択' };
   }
 
+  // A: 患者マスターで「計画書2継続中」が指定されている場合は、無条件で196点固定
+  if (patient.planStatus === 'PLAN_2_FOLLOW') {
+    return {
+      recommendedPlan: 'PLAN_2_FOLLOW',
+      label: '総合実施計画書2 (2回目以降: 196点)',
+      points: REHA_RULES.PLAN_POINTS.PLAN_2_FOLLOW,
+      reason: '患者台帳: 計画書2継続中 (196点固定)'
+    };
+  }
+
   const deadlines = calculatePatientDeadlines(patient, targetDateStr);
   const isPlan2 = deadlines.isPlan2Required;
-  const isFirst = !hasPastPlan;
 
+  // B: 患者マスターで「計画書1継続中」が指定されている場合
+  if (patient.planStatus === 'PLAN_1_FOLLOW') {
+    if (isPlan2) {
+      return {
+        recommendedPlan: 'PLAN_2_FOLLOW',
+        label: '総合実施計画書2 (2回目以降: 196点)',
+        points: REHA_RULES.PLAN_POINTS.PLAN_2_FOLLOW,
+        reason: '計画書2への移行日到達 (2回目以降)'
+      };
+    }
+    return {
+      recommendedPlan: 'PLAN_1_FOLLOW',
+      label: '総合実施計画書1 (2回目以降: 240点)',
+      points: REHA_RULES.PLAN_POINTS.PLAN_1_FOLLOW,
+      reason: '患者台帳: 計画書1継続中 (2回目以降)'
+    };
+  }
+
+  // C: 未算定（初回対象）または未設定の場合
+  const isFirst = !hasPastPlan;
   if (isPlan2) {
     return isFirst
       ? {
