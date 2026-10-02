@@ -1,19 +1,20 @@
 // js/views/scheduleView.js
-// VIEW 1: 当日時間割・消炎鎮痛マルチ来院・患者パレット・計画書4区分ロック制御層
+// VIEW 1: 当日時間割・消炎鎮痛来院・患者パレット・疾患タグ＆早期期限バッジ表示層
 
-import { TIME_SLOTS, THERAPISTS } from '../config/rules.js';
+import { TIME_SLOTS, THERAPISTS, REHA_RULES } from '../config/rules.js';
 import { sanitizeHtml, safeParseInt } from '../core/dataNormalizer.js';
 import { getPatientById, searchPatients, getAllPatients } from '../store/patientStore.js';
 import {
   getDailySchedule, setScheduleSlot, clearScheduleSlot, getDailyStats,
   findPatientMonthlyPlanDate, addAnalgesiaPatient, removeAnalgesiaPatient, getAnalgesiaSlotPatients
 } from '../store/scheduleStore.js';
+import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
 import { validateTimeConflict, validateDailyLimit, validateTherapistWorkload, validateMonthlyPlanLimit } from '../core/validator.js';
 import { showToast } from './exportView.js';
 
 let currentDateStr = new Date().toISOString().split('T')[0];
 let paletteCategory = 'ALL';
-let activeModalSlot = null; // { therapistId, slotId, currentItem }
+let activeModalSlot = null;
 let activeAnalgesiaSlotId = null;
 
 export function initScheduleView() {
@@ -23,10 +24,7 @@ export function initScheduleView() {
 
   if (dateInput) {
     dateInput.value = currentDateStr;
-    dateInput.addEventListener('change', (e) => {
-      currentDateStr = e.target.value;
-      renderScheduleView();
-    });
+    dateInput.addEventListener('change', (e) => { currentDateStr = e.target.value; renderScheduleView(); });
   }
   if (btnToday) {
     btnToday.addEventListener('click', () => {
@@ -85,11 +83,14 @@ function renderPatientPalette() {
   listEl.innerHTML = patients.map((p) => {
     const isOut = p.category === 'OUTPATIENT';
     const borderCol = isOut ? 'var(--color-outpatient)' : 'var(--color-inpatient)';
+    const disRule = REHA_RULES.LIMIT_DAYS[p.diseaseType] || REHA_RULES.LIMIT_DAYS.ANALGESIA;
+    const tagHtml = `<span style="font-size:0.65rem; font-weight:700; background:${disRule.tagBg}; color:${disRule.tagColor}; border:1px solid ${disRule.tagBorder}; padding:1px 4px; border-radius:3px; margin-right:4px;">${disRule.tag}</span>`;
+
     return `
       <div class="patient-palette-card" draggable="true" data-patient-id="${p.id}"
            style="background:#fff; border:1px solid #e2e8f0; border-left:4px solid ${borderCol}; border-radius:4px; padding:6px 8px; cursor:grab; font-size:0.78rem;">
-        <div style="font-weight:700; display:flex; justify-content:space-between;">
-          <span>${sanitizeHtml(p.name)}</span>
+        <div style="font-weight:700; display:flex; justify-content:space-between; align-items:center;">
+          <div>${tagHtml}<span>${sanitizeHtml(p.name)}</span></div>
           <span style="font-size:0.7rem; color:#64748b;">${p.id}</span>
         </div>
         <div style="font-size:0.7rem; color:#64748b; margin-top:2px;">${sanitizeHtml(p.diseaseName || '')}</div>
@@ -99,6 +100,55 @@ function renderPatientPalette() {
   listEl.querySelectorAll('.patient-palette-card').forEach((card) => {
     card.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', e.currentTarget.dataset.patientId));
   });
+}
+
+function buildSlotCardHtml(p, u, cellData, tId, slotId) {
+  const isOut = p.category === 'OUTPATIENT';
+  const cardClass = isOut ? 'card-outpatient' : 'card-inpatient';
+
+  // 1. 疾患別タグ（運・脳・廃・消）
+  const disRule = REHA_RULES.LIMIT_DAYS[p.diseaseType] || REHA_RULES.LIMIT_DAYS.ANALGESIA;
+  const diseaseTag = `<span style="font-size:0.65rem; font-weight:700; background:${disRule.tagBg}; color:${disRule.tagColor}; border:1px solid ${disRule.tagBorder}; padding:1px 3px; border-radius:3px; margin-right:4px;">${disRule.tag}</span>`;
+
+  // 2. 計画書バッジ
+  let planBadge = '';
+  if (cellData.billingPlan) {
+    const lbl = String(cellData.billingPlan).includes('PLAN_2') ? '📝計2' : '📝計画書';
+    planBadge = `<span class="badge-plan" style="margin-left:2px;">${lbl}</span>`;
+  }
+
+  // 3. 早期加算期限バッジ（入院患者かつ算定対象期間）
+  let earlyBadge = '';
+  if (!isOut) {
+    const deadlines = calculatePatientDeadlines(p, currentDateStr);
+    if (deadlines.earlyBonus?.isEligible && deadlines.earlyBonus.shortLabel) {
+      const isUrgent = deadlines.earlyBonus.remainingDays !== null && deadlines.earlyBonus.remainingDays <= 3;
+      const bBg = isUrgent ? '#fef3c7' : '#ecfdf5';
+      const bCol = isUrgent ? '#b45309' : '#047857';
+      const bBorder = isUrgent ? '#f59e0b' : '#10b981';
+      earlyBadge = `<span style="font-size:0.63rem; font-weight:700; background:${bBg}; color:${bCol}; border:1px solid ${bBorder}; padding:1px 4px; border-radius:3px; margin-left:3px;" title="${deadlines.earlyBonus.label}">${deadlines.earlyBonus.shortLabel}</span>`;
+    }
+  }
+
+  return `
+    <div class="cell-slot">
+      <div class="reha-slot-card ${cardClass} card-unit-${u}" data-therapist="${tId}" data-slot="${slotId}">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; align-items:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+            ${diseaseTag}
+            <span style="font-weight:700; font-size:0.8rem;">${sanitizeHtml(p.name)}</span>
+          </div>
+          <div style="display:flex; align-items:center; flex-shrink:0;">
+            <span class="badge-unit badge-unit-${u}">${u}単位</span>
+            ${planBadge}
+            ${earlyBadge}
+          </div>
+        </div>
+        <div style="font-size:0.68rem; color:#475569; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px;">
+          ${sanitizeHtml(cellData.note || p.diseaseName || '')}
+        </div>
+      </div>
+    </div>`;
 }
 
 function renderTimetableGrid() {
@@ -124,34 +174,10 @@ function renderTimetableGrid() {
       }
 
       if (cellData && cellData.patientId) {
-        const p = getPatientById(cellData.patientId) || { name: '未登録', category: 'OUTPATIENT' };
+        const p = getPatientById(cellData.patientId) || { name: '未登録', category: 'OUTPATIENT', diseaseType: 'LOCOMOTIVE' };
         const u = Math.min(4, Math.max(1, safeParseInt(cellData.units, 1)));
         coveredUntil[tId] = index + u;
-        const isOut = p.category === 'OUTPATIENT';
-        const cardClass = isOut ? 'card-outpatient' : 'card-inpatient';
-
-        let planBadge = '';
-        if (cellData.billingPlan) {
-          const pStr = String(cellData.billingPlan);
-          const lbl = pStr.includes('PLAN_2') ? '📝計2' : '📝計画書';
-          planBadge = `<span class="badge-plan">${lbl}</span>`;
-        }
-
-        html += `
-          <div class="cell-slot">
-            <div class="reha-slot-card ${cardClass} card-unit-${u}" data-therapist="${tId}" data-slot="${slot.id}">
-              <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                <span style="font-weight:700; font-size:0.8rem;">${sanitizeHtml(p.name)}</span>
-                <div>
-                  <span class="badge-unit badge-unit-${u}">${u}単位</span>
-                  ${planBadge}
-                </div>
-              </div>
-              <div style="font-size:0.7rem; color:#475569; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                ${sanitizeHtml(cellData.note || p.diseaseName || '')}
-              </div>
-            </div>
-          </div>`;
+        html += buildSlotCardHtml(p, u, cellData, tId, slot.id);
       } else {
         html += `
           <div class="cell-slot" data-therapist="${tId}" data-slot="${slot.id}">
@@ -162,19 +188,15 @@ function renderTimetableGrid() {
 
     const analgesiaPatients = getAnalgesiaSlotPatients(currentDateStr, slot.id);
     const aCount = analgesiaPatients.length;
-    let badgeHtml = '';
+    let badgeHtml = `<button class="badge-analgesia-count" data-analgesia-slot="${slot.id}" style="color:#94a3b8; font-size:0.75rem;">＋</button>`;
     if (aCount > 0) {
       const inCount = analgesiaPatients.filter((p) => p.category === 'INPATIENT').length;
-      const outCount = aCount - inCount;
       badgeHtml = `
         <button class="badge-analgesia-count has-patients" data-analgesia-slot="${slot.id}">
           <span style="font-weight:800; font-size:0.85rem; color:#15803d;">${aCount}名</span>
-          <span style="font-size:0.65rem; color:#166534;">(入${inCount}/外${outCount})</span>
+          <span style="font-size:0.65rem; color:#166534;">(入${inCount}/外${aCount - inCount})</span>
         </button>`;
-    } else {
-      badgeHtml = `<button class="badge-analgesia-count" data-analgesia-slot="${slot.id}" style="color:#94a3b8; font-size:0.75rem;">＋</button>`;
     }
-
     html += `<div class="cell-slot analgesia-slot-cell" data-analgesia-drop="${slot.id}">${badgeHtml}</div></div>`;
   });
 
@@ -184,10 +206,7 @@ function renderTimetableGrid() {
 
 function attachGridEventListeners(gridEl) {
   gridEl.querySelectorAll('.empty-slot-btn').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openSlotModal(btn.dataset.therapist, btn.dataset.slot, null);
-    });
+    btn.addEventListener('click', (e) => { e.stopPropagation(); openSlotModal(btn.dataset.therapist, btn.dataset.slot, null); });
   });
 
   gridEl.querySelectorAll('.reha-slot-card').forEach((card) => {
@@ -195,8 +214,7 @@ function attachGridEventListeners(gridEl) {
       e.stopPropagation();
       const tId = card.dataset.therapist;
       const sId = card.dataset.slot;
-      const cur = getDailySchedule(currentDateStr)[tId]?.[sId];
-      openSlotModal(tId, sId, cur);
+      openSlotModal(tId, sId, getDailySchedule(currentDateStr)[tId]?.[sId]);
     });
   });
 
@@ -212,10 +230,7 @@ function attachGridEventListeners(gridEl) {
   });
 
   gridEl.querySelectorAll('.badge-analgesia-count').forEach((badge) => {
-    badge.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openAnalgesiaModal(badge.dataset.analgesiaSlot);
-    });
+    badge.addEventListener('click', (e) => { e.stopPropagation(); openAnalgesiaModal(badge.dataset.analgesiaSlot); });
   });
 
   gridEl.querySelectorAll('.cell-slot[data-analgesia-drop]').forEach((cell) => {
@@ -266,10 +281,7 @@ function setupSlotModalListeners() {
     const planSelect = document.getElementById('slotBillingPlanSelect');
     const billingPlan = planSelect ? planSelect.value : '';
 
-    if (!patientId) {
-      showToast('患者が選択されていません', 'error');
-      return;
-    }
+    if (!patientId) { showToast('患者が選択されていません', 'error'); return; }
 
     const dailySchedule = getDailySchedule(currentDateStr);
     const currentUnits = activeModalSlot.currentItem ? activeModalSlot.currentItem.units : 0;
@@ -319,7 +331,7 @@ function openSlotModal(therapistId, slotId, currentItem) {
   document.getElementById('slotPatientId').value = pId;
   document.getElementById('slotTherapistId').value = therapistId;
   document.getElementById('slotId').value = slotId;
-  patientInfoEl.textContent = patient ? `患者: ${patient.name} (${patient.id}) / ${patient.diseaseName || ''}` : '患者が未選択です（パレットからドラッグ＆ドロップしてください）';
+  patientInfoEl.textContent = patient ? `患者: ${patient.name} (${patient.id}) / ${patient.diseaseName || ''}` : '患者が未選択です';
 
   const units = currentItem?.units || 1;
   document.getElementById('slotUnitsInput').value = units;
@@ -328,7 +340,6 @@ function openSlotModal(therapistId, slotId, currentItem) {
   });
 
   if (!planSelect) return;
-
   if (!pId) {
     planSelect.value = '';
     planSelect.disabled = true;
@@ -340,17 +351,11 @@ function openSlotModal(therapistId, slotId, currentItem) {
     if (existingDate) {
       planSelect.value = '';
       planSelect.disabled = true;
-      patientInfoEl.innerHTML += `<div style="color:#e11d48; font-size:0.75rem; margin-top:4px; font-weight:700;">⚠️ 総合計画評価料は当月 ${existingDate} に算定済みのため選択できません（月1回のみ）</div>`;
+      patientInfoEl.innerHTML += `<div style="color:#e11d48; font-size:0.75rem; margin-top:4px; font-weight:700;">⚠️ 総合計画評価料は当月 ${existingDate} に算定済みのため選択できません</div>`;
     } else {
       planSelect.disabled = false;
       const rawPlan = currentItem?.billingPlan;
-      if (!rawPlan) {
-        planSelect.value = '';
-      } else if (rawPlan === true) {
-        planSelect.value = 'PLAN_1_FIRST';
-      } else {
-        planSelect.value = String(rawPlan);
-      }
+      planSelect.value = rawPlan ? (rawPlan === true ? 'PLAN_1_FIRST' : String(rawPlan)) : '';
     }
   }
 
@@ -364,7 +369,6 @@ function setupAnalgesiaModalListeners() {
   const btnAdd = document.getElementById('btnConfirmAddAnalgesia');
 
   btnClose?.addEventListener('click', () => modal.classList.remove('active'));
-
   btnAdd?.addEventListener('click', () => {
     const select = document.getElementById('analgesiaAddPatientSelect');
     const pId = select?.value;
@@ -382,7 +386,7 @@ function openAnalgesiaModal(slotId) {
   const modal = document.getElementById('modalAnalgesiaSlot');
   const slotObj = TIME_SLOTS.find((s) => s.id === slotId);
   const titleEl = document.getElementById('analgesiaModalTitle');
-  if (titleEl) titleEl.textContent = `消炎鎮痛（物療）来院一覧 [${slotObj?.label || slotId}]`;
+  if (titleEl) titleEl.textContent = `消炎鎮痛来院一覧 [${slotObj?.label || slotId}]`;
 
   const select = document.getElementById('analgesiaAddPatientSelect');
   if (select) {
@@ -393,7 +397,6 @@ function openAnalgesiaModal(slotId) {
         return `<option value="${p.id}">${p.id} - ${sanitizeHtml(p.name)} (${cat} / ${sanitizeHtml(p.diseaseName || '')})</option>`;
       }).join('');
   }
-
   renderAnalgesiaModalList();
   modal.classList.add('active');
 }
@@ -409,8 +412,7 @@ function renderAnalgesiaModalList() {
   }
 
   listEl.innerHTML = patients.map((p) => {
-    const isIn = p.category === 'INPATIENT';
-    const catBadge = isIn
+    const catBadge = p.category === 'INPATIENT'
       ? '<span style="background:#fef3c7; color:#b45309; padding:2px 6px; border-radius:3px; font-weight:700; font-size:0.7rem;">入院</span>'
       : '<span style="background:#eff6ff; color:#1d4ed8; padding:2px 6px; border-radius:3px; font-weight:700; font-size:0.7rem;">外来</span>';
 
@@ -429,8 +431,7 @@ function renderAnalgesiaModalList() {
 
   listEl.querySelectorAll('.btn-remove-analgesia').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const pId = btn.dataset.patientId;
-      removeAnalgesiaPatient(currentDateStr, activeAnalgesiaSlotId, pId);
+      removeAnalgesiaPatient(currentDateStr, activeAnalgesiaSlotId, btn.dataset.patientId);
       showToast('消炎鎮痛から患者を解除しました', 'warn');
       renderAnalgesiaModalList();
       renderScheduleView();
