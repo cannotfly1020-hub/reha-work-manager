@@ -1,5 +1,5 @@
 // js/views/monthlyView.js
-// VIEW 2: 月間単位表・収益ダッシュボード・消炎鎮痛35点加算・3種ソート制御層（200行制限準拠）
+// VIEW 2: 月間単位表・収益ダッシュボード・消炎鎮痛35点加算・計画書4区分・内訳ポップアップ制御層
 
 import { REHA_RULES } from '../config/rules.js';
 import { safeParseInt, sanitizeHtml, normalizeToKatakana } from '../core/dataNormalizer.js';
@@ -9,6 +9,7 @@ import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
 let currentYear = new Date().getFullYear();
 let currentMonth = new Date().getMonth() + 1;
 let currentSortKey = 'CATEGORY'; // 'CATEGORY' | 'KANA' | 'ID'
+let lastAggregated = null;
 
 function getLocalTodayString() {
   const now = new Date();
@@ -18,11 +19,21 @@ function getLocalTodayString() {
   return `${y}-${m}-${d}`;
 }
 
+function getPlanPoints(planKey) {
+  if (!planKey) return 0;
+  if (typeof planKey === 'string' && REHA_RULES.PLAN_POINTS[planKey]) {
+    return REHA_RULES.PLAN_POINTS[planKey];
+  }
+  // 過去データの互換フォールバック
+  return REHA_RULES.PLAN_POINTS.PLAN_1_FIRST || 300;
+}
+
 export function initMonthlyView() {
   const monthInput = document.getElementById('monthlyMonthInput');
   const btnPrev = document.getElementById('btnPrevMonth');
   const btnNext = document.getElementById('btnNextMonth');
   const sortSelect = document.getElementById('monthlySortSelect');
+  const todayCard = document.getElementById('kpiTodayRevenueCard');
 
   if (monthInput) {
     monthInput.value = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
@@ -54,6 +65,12 @@ export function initMonthlyView() {
     currentSortKey = e.target.value;
     renderMonthlyView();
   });
+
+  todayCard?.addEventListener('click', () => {
+    openRevenueBreakdownModal();
+  });
+
+  setupRevenueBreakdownModalListeners();
 }
 
 function syncMonthInput() {
@@ -62,10 +79,10 @@ function syncMonthInput() {
 }
 
 export function renderMonthlyView() {
-  const aggregated = aggregateFromAppSchedule(currentYear, currentMonth);
-  renderRevenueDashboard(aggregated);
-  renderMonthlyUnitsTable(aggregated);
-  renderDailyDiaryPreview(aggregated);
+  lastAggregated = aggregateFromAppSchedule(currentYear, currentMonth);
+  renderRevenueDashboard(lastAggregated);
+  renderMonthlyUnitsTable(lastAggregated);
+  renderDailyDiaryPreview(lastAggregated);
 }
 
 function renderRevenueDashboard(aggregated) {
@@ -96,7 +113,9 @@ function renderRevenueDashboard(aggregated) {
       const earlyBonusPerUnit = (deadlines.earlyBonus && deadlines.earlyBonus.points > 0) ? deadlines.earlyBonus.points : 0;
 
       let slotPoints = (basePoint + earlyBonusPerUnit) * s.units;
-      if (s.billingPlan) slotPoints += REHA_RULES.PLAN_POINTS.PLAN_1;
+      if (s.billingPlan) {
+        slotPoints += getPlanPoints(s.billingPlan);
+      }
 
       const slotYen = slotPoints * REHA_RULES.POINT_RATE;
       monthUnits += s.units;
@@ -291,4 +310,131 @@ function renderDailyDiaryPreview(aggregated) {
       </div>
     </div>
   `;
+}
+
+function setupRevenueBreakdownModalListeners() {
+  const modal = document.getElementById('modalRevenueBreakdown');
+  const btnClose = document.getElementById('btnCloseRevenueModal');
+  const btnCloseX = document.getElementById('btnCloseRevenueModalX');
+
+  btnClose?.addEventListener('click', () => modal?.classList.remove('active'));
+  btnCloseX?.addEventListener('click', () => modal?.classList.remove('active'));
+}
+
+function openRevenueBreakdownModal() {
+  const modal = document.getElementById('modalRevenueBreakdown');
+  const tbody = document.getElementById('revenueBreakdownTbody');
+  const totalUnitsCell = document.getElementById('breakdownTotalUnitsCell');
+  const totalAmountCell = document.getElementById('breakdownTotalAmountCell');
+  const titleEl = document.getElementById('revenueBreakdownTitle');
+
+  if (!modal || !tbody || !lastAggregated) return;
+
+  const todayStr = getLocalTodayString();
+  if (titleEl) {
+    titleEl.textContent = `📊 本日リハビリ収益 内訳明細 (${todayStr})`;
+  }
+
+  // 9項目の集計カウンタ定義
+  const breakdown = {
+    LOCO_STD: { name: '運動器リハ(Ⅱ)', units: 0, points: 170, amount: 0, unitLabel: '単位' },
+    LOCO_MAINT: { name: '運動器リハ(Ⅱ) 【維持期減算】', units: 0, points: 102, amount: 0, unitLabel: '単位' },
+    CEREBRO_STD: { name: '脳血管等リハ(Ⅲ)', units: 0, points: 100, amount: 0, unitLabel: '単位' },
+    CEREBRO_MAINT: { name: '脳血管等リハ(Ⅲ)【維持期減算】', units: 0, points: 60, amount: 0, unitLabel: '単位' },
+    DISUSE_STD: { name: '廃用症候群リハ(Ⅲ)', units: 0, points: 77, amount: 0, unitLabel: '単位' },
+    DISUSE_MAINT: { name: '廃用症候群リハ(Ⅲ)【維持期減算】', units: 0, points: 46, amount: 0, unitLabel: '単位' },
+    ANALGESIA: { name: '消炎鎮痛等処置 (物療)', units: 0, points: 35, amount: 0, unitLabel: '件' },
+    EARLY_P1: { name: '早期加算 (入院4日以内)', units: 0, points: 60, amount: 0, unitLabel: '単位' },
+    EARLY_P2: { name: '早期加算 (入院14日以内)', units: 0, points: 25, amount: 0, unitLabel: '単位' },
+    PLAN_1_FIRST: { name: '総合実施計画書1 (初回)', units: 0, points: 300, amount: 0, unitLabel: '件' },
+    PLAN_1_FOLLOW: { name: '総合実施計画書1 (2回目以降)', units: 0, points: 240, amount: 0, unitLabel: '件' },
+    PLAN_2_FIRST: { name: '総合実施計画書2 (初回)', units: 0, points: 240, amount: 0, unitLabel: '件' },
+    PLAN_2_FOLLOW: { name: '総合実施計画書2 (2回目以降)', units: 0, points: 196, amount: 0, unitLabel: '件' }
+  };
+
+  let totalRehaUnits = 0;
+  let grandTotalYen = 0;
+
+  Object.values(lastAggregated.patientMap).forEach((item) => {
+    const p = item.patient;
+
+    item.slots.forEach((s) => {
+      if (s.date !== todayStr) return;
+
+      if (s.isAnalgesia) {
+        breakdown.ANALGESIA.units += 1;
+        breakdown.ANALGESIA.amount += 35 * REHA_RULES.POINT_RATE;
+        grandTotalYen += 35 * REHA_RULES.POINT_RATE;
+        return;
+      }
+
+      totalRehaUnits += s.units;
+      const deadlines = calculatePatientDeadlines(p, s.date);
+      const isMaint = deadlines.isMaintenanceReduction;
+
+      // 疾患別基本料
+      if (p.diseaseType === 'LOCOMOTIVE') {
+        const target = isMaint ? breakdown.LOCO_MAINT : breakdown.LOCO_STD;
+        target.units += s.units;
+        const yen = target.points * s.units * REHA_RULES.POINT_RATE;
+        target.amount += yen;
+        grandTotalYen += yen;
+      } else if (p.diseaseType === 'CEREBROVASCULAR') {
+        const target = isMaint ? breakdown.CEREBRO_MAINT : breakdown.CEREBRO_STD;
+        target.units += s.units;
+        const yen = target.points * s.units * REHA_RULES.POINT_RATE;
+        target.amount += yen;
+        grandTotalYen += yen;
+      } else if (p.diseaseType === 'DISUSE') {
+        const target = isMaint ? breakdown.DISUSE_MAINT : breakdown.DISUSE_STD;
+        target.units += s.units;
+        const yen = target.points * s.units * REHA_RULES.POINT_RATE;
+        target.amount += yen;
+        grandTotalYen += yen;
+      }
+
+      // 早期加算判定
+      if (deadlines.earlyBonus?.points > 0) {
+        const isPhase1 = deadlines.earlyBonus.phase === 'PHASE_1';
+        const target = isPhase1 ? breakdown.EARLY_P1 : breakdown.EARLY_P2;
+        target.units += s.units;
+        const bonusYen = target.points * s.units * REHA_RULES.POINT_RATE;
+        target.amount += bonusYen;
+        grandTotalYen += bonusYen;
+      }
+
+      // 計画書4区分判定
+      if (s.billingPlan) {
+        const pKey = String(s.billingPlan);
+        const target = breakdown[pKey] || breakdown.PLAN_1_FIRST;
+        target.units += 1;
+        const planYen = target.points * REHA_RULES.POINT_RATE;
+        target.amount += planYen;
+        grandTotalYen += planYen;
+      }
+    });
+  });
+
+  // テーブルHTML生成
+  let rowsHtml = '';
+  Object.values(breakdown).forEach((row) => {
+    const isZero = row.units === 0;
+    const rowStyle = isZero ? 'color:#94a3b8;' : 'font-weight:600; color:#0f172a;';
+    const amountStyle = isZero ? 'color:#94a3b8;' : 'font-weight:700; color:#0369a1;';
+
+    rowsHtml += `
+      <tr style="${rowStyle}">
+        <td style="padding:6px 10px;">${row.name}</td>
+        <td style="padding:6px 8px; text-align:center;">${row.units} ${row.unitLabel}</td>
+        <td style="padding:6px 8px; text-align:right;">${row.points} 点</td>
+        <td style="padding:6px 10px; text-align:right; ${amountStyle}">¥${row.amount.toLocaleString()}</td>
+      </tr>
+    `;
+  });
+
+  tbody.innerHTML = rowsHtml;
+  if (totalUnitsCell) totalUnitsCell.textContent = `${totalRehaUnits} 単位`;
+  if (totalAmountCell) totalAmountCell.textContent = `¥${grandTotalYen.toLocaleString()}`;
+
+  modal.classList.add('active');
 }
