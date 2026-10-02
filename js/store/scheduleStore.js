@@ -95,7 +95,7 @@ export function removeAnalgesiaPatient(dateStr, slotId, patientId) {
 export function getAnalgesiaSlotPatients(dateStr, slotId) {
   const schedule = getDailySchedule(dateStr);
   const patientIds = schedule.analgesia?.[slotId] || [];
-  return patientIds.map((id) => getPatientById(id) || { id, name: '未登録患者', category: 'OUTPATIENT' });
+  return patientIds.map((id) => getPatientById(id) || { id, name: '未登録患者', category: 'OUTPATIENT', diseaseType: 'ANALGESIA' });
 }
 
 export function getDailyStats(dateStr) {
@@ -205,7 +205,9 @@ export function aggregateFromAppSchedule(year, month) {
       });
     });
 
+    // 消炎鎮痛来院患者の月間集計統合（同一日の重複来院は1日1回として算定）
     const aSlots = schedule.analgesia || {};
+    const daySeen = new Set();
     Object.values(aSlots).forEach((pIds) => {
       if (Array.isArray(pIds)) {
         pIds.forEach((pId) => {
@@ -213,6 +215,22 @@ export function aggregateFromAppSchedule(year, month) {
           const p = getPatientById(pId);
           if (p?.category === 'INPATIENT') dailyBreakdown[day].analgesiaInpatients += 1;
           else dailyBreakdown[day].analgesiaOutpatients += 1;
+
+          if (!daySeen.has(pId)) {
+            daySeen.add(pId);
+            const patient = p || { id: pId, name: '未登録患者', category: 'OUTPATIENT', diseaseType: 'ANALGESIA' };
+            if (!patientMap[pId]) {
+              patientMap[pId] = {
+                patient, totalUnits: 0, planCount: 0, earlyBonusCount: 0, totalEarlyUnits: 0,
+                dailyUnits: Array(daysInMonth + 1).fill(0), dailyEarlyUnits: Array(daysInMonth + 1).fill(0), slots: []
+              };
+            }
+            if (patient.diseaseType === 'ANALGESIA') {
+              patientMap[pId].dailyUnits[day] = 1;
+              patientMap[pId].totalUnits += 1;
+            }
+            patientMap[pId].slots.push({ date: dayStr, isAnalgesia: true, points: 35, units: 0 });
+          }
         });
       }
     });
