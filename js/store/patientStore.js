@@ -1,5 +1,5 @@
 // js/store/patientStore.js
-// 患者マスターCRUD・LocalStorage永続化・介護認定・疾患名・消炎鎮痛フィルタリング制御層（200行制限準拠）
+// 患者マスターCRUD・LocalStorage永続化・計画書ステータス管理・消炎鎮痛制御層（200行制限準拠）
 
 import { normalizeString, normalizePatientId, normalizeDateString } from '../core/dataNormalizer.js';
 
@@ -17,6 +17,7 @@ const DEFAULT_PATIENTS = [
     category: 'INPATIENT',
     diseaseType: 'LOCOMOTIVE',
     careInsuranceType: 'CARE',
+    planStatus: 'PLAN_2_FOLLOW', // 計画書2 2回目以降(196点)固定サンプル
     admissionDate: '2026-09-01',
     earlyBonusStartDate: '2026-09-01',
     onsetDate: '2026-08-28',
@@ -30,6 +31,7 @@ const DEFAULT_PATIENTS = [
     category: 'INPATIENT',
     diseaseType: 'CEREBROVASCULAR',
     careInsuranceType: 'NONE',
+    planStatus: 'NOT_YET',
     admissionDate: '2026-09-15',
     earlyBonusStartDate: '2026-09-15',
     onsetDate: '2026-09-10',
@@ -43,6 +45,7 @@ const DEFAULT_PATIENTS = [
     category: 'OUTPATIENT',
     diseaseType: 'LOCOMOTIVE',
     careInsuranceType: 'SUPPORT',
+    planStatus: 'PLAN_1_FOLLOW',
     admissionDate: '',
     earlyBonusStartDate: '',
     onsetDate: '2026-06-01',
@@ -56,6 +59,7 @@ const DEFAULT_PATIENTS = [
     category: 'OUTPATIENT',
     diseaseType: 'ANALGESIA',
     careInsuranceType: 'NONE',
+    planStatus: 'NOT_YET',
     admissionDate: '',
     earlyBonusStartDate: '',
     onsetDate: '2026-09-01',
@@ -69,6 +73,7 @@ const DEFAULT_PATIENTS = [
     category: 'INPATIENT',
     diseaseType: 'ANALGESIA',
     careInsuranceType: 'NONE',
+    planStatus: 'NOT_YET',
     admissionDate: '2026-09-20',
     earlyBonusStartDate: '2026-09-20',
     onsetDate: '2026-09-15',
@@ -76,10 +81,6 @@ const DEFAULT_PATIENTS = [
   }
 ];
 
-/**
- * LocalStorageから全患者レコードを取得する（存在しない場合は初期データを保存）
- * @returns {Array<Object>} 患者配列
- */
 export function getAllPatients() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -90,16 +91,11 @@ export function getAllPatients() {
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
   } catch (error) {
-    console.error('getAllPatients failed to parse LocalStorage data:', error);
+    console.error('getAllPatients error:', error);
     return [];
   }
 }
 
-/**
- * IDを指定して単一患者レコードを取得する
- * @param {string} id 患者ID
- * @returns {Object|null}
- */
 export function getPatientById(id) {
   if (!id) return null;
   const targetId = normalizePatientId(id);
@@ -107,34 +103,23 @@ export function getPatientById(id) {
   return patients.find((p) => p.id === targetId) || null;
 }
 
-/**
- * 全患者配列をLocalStorageに一括保存する
- * @param {Array<Object>} patients 
- * @returns {boolean} 成功成否
- */
 export function saveAllPatients(patients) {
   try {
     if (!Array.isArray(patients)) return false;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(patients));
     return true;
   } catch (error) {
-    console.error('saveAllPatients failed to write to LocalStorage:', error);
+    console.error('saveAllPatients error:', error);
     return false;
   }
 }
 
-/**
- * 単一患者レコードを新規作成または更新（Upsert）する
- * @param {Object} rawData 入力フォームデータ
- * @returns {{ success: boolean, patient?: Object, message?: string }}
- */
 export function upsertPatient(rawData) {
   if (!rawData) return { success: false, message: '入力データが空です。' };
 
   const id = normalizePatientId(rawData.id);
   const name = normalizeString(rawData.name);
-
-  if (!id) return { success: false, message: '患者ID（記号）は必須です。' };
+  if (!id) return { success: false, message: '患者IDは必須です。' };
   if (!name) return { success: false, message: '患者氏名は必須です。' };
 
   const cleanPatient = {
@@ -144,11 +129,11 @@ export function upsertPatient(rawData) {
     diseaseName: normalizeString(rawData.diseaseName || '未記入'),
     category: rawData.category === 'OUTPATIENT' ? 'OUTPATIENT' : 'INPATIENT',
     diseaseType: ['LOCOMOTIVE', 'CEREBROVASCULAR', 'DISUSE', 'ANALGESIA'].includes(rawData.diseaseType)
-      ? rawData.diseaseType
-      : 'LOCOMOTIVE',
+      ? rawData.diseaseType : 'LOCOMOTIVE',
     careInsuranceType: ['NONE', 'SUPPORT', 'CARE'].includes(rawData.careInsuranceType)
-      ? rawData.careInsuranceType
-      : 'NONE',
+      ? rawData.careInsuranceType : 'NONE',
+    planStatus: ['NOT_YET', 'PLAN_1_FOLLOW', 'PLAN_2_FOLLOW'].includes(rawData.planStatus)
+      ? rawData.planStatus : 'NOT_YET',
     admissionDate: normalizeDateString(rawData.admissionDate),
     earlyBonusStartDate: normalizeDateString(rawData.earlyBonusStartDate || rawData.admissionDate),
     onsetDate: normalizeDateString(rawData.onsetDate),
@@ -158,25 +143,40 @@ export function upsertPatient(rawData) {
 
   const list = getAllPatients();
   const existingIndex = list.findIndex((p) => p.id === id);
-
-  if (existingIndex >= 0) {
-    list[existingIndex] = cleanPatient;
-  } else {
-    list.push(cleanPatient);
-  }
+  if (existingIndex >= 0) list[existingIndex] = cleanPatient;
+  else list.push(cleanPatient);
 
   const saved = saveAllPatients(list);
-  if (!saved) {
-    return { success: false, message: 'ストレージへの保存に失敗しました。' };
-  }
+  if (!saved) return { success: false, message: 'ストレージへの保存に失敗しました。' };
   return { success: true, patient: cleanPatient };
 }
 
 /**
- * IDを指定して患者レコードを削除する
- * @param {string} id 患者ID
- * @returns {boolean}
+ * 時間割等からの計画書算定実績確定に伴い、患者の計画書ステータスを更新する
  */
+export function updatePatientPlanStatus(patientId, planType) {
+  const patient = getPatientById(patientId);
+  if (!patient) return false;
+
+  let newStatus = patient.planStatus || 'NOT_YET';
+  if (String(planType).includes('PLAN_2')) {
+    newStatus = 'PLAN_2_FOLLOW'; // 計画書2を一度でも算定したら今後は2回目以降固定
+  } else if (String(planType).includes('PLAN_1')) {
+    if (newStatus !== 'PLAN_2_FOLLOW') newStatus = 'PLAN_1_FOLLOW';
+  }
+
+  if (patient.planStatus !== newStatus) {
+    patient.planStatus = newStatus;
+    const list = getAllPatients();
+    const idx = list.findIndex((p) => p.id === patient.id);
+    if (idx >= 0) {
+      list[idx] = patient;
+      return saveAllPatients(list);
+    }
+  }
+  return true;
+}
+
 export function deletePatient(id) {
   if (!id) return false;
   const targetId = normalizePatientId(id);
@@ -186,31 +186,20 @@ export function deletePatient(id) {
   return saveAllPatients(filtered);
 }
 
-/**
- * 検索キーワードや区分で患者リストを絞り込む
- * @param {string} keyword 氏名・ID・病名・カナあいまい検索
- * @param {'ALL'|'INPATIENT'|'OUTPATIENT'|'ANALGESIA'} category 絞り込み区分
- * @returns {Array<Object>} 絞り込み済み患者配列
- */
 export function searchPatients(keyword = '', category = 'ALL') {
   let list = getAllPatients();
-
   if (category === 'ANALGESIA') {
-    // 消炎鎮痛モード: 入院・外来問わず疾患区分が ANALGESIA の患者を抽出
     list = list.filter((p) => p.diseaseType === 'ANALGESIA');
   } else if (category && category !== 'ALL') {
-    // 入院または外来モード
     list = list.filter((p) => p.category === category);
   }
 
   if (!keyword || !keyword.trim()) return list;
-
   const q = normalizeString(keyword).toLowerCase();
   return list.filter((p) => {
-    const idMatch = p.id.toLowerCase().includes(q);
-    const nameMatch = p.name.toLowerCase().includes(q);
-    const kanaMatch = (p.nameKana || '').toLowerCase().includes(q);
-    const diseaseMatch = (p.diseaseName || '').toLowerCase().includes(q);
-    return idMatch || nameMatch || kanaMatch || diseaseMatch;
+    return p.id.toLowerCase().includes(q) ||
+      p.name.toLowerCase().includes(q) ||
+      (p.nameKana || '').toLowerCase().includes(q) ||
+      (p.diseaseName || '').toLowerCase().includes(q);
   });
 }
