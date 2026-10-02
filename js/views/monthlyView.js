@@ -9,9 +9,6 @@ import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
 let currentYear = new Date().getFullYear();
 let currentMonth = new Date().getMonth() + 1;
 
-/**
- * 日本時間ローカルの YYYY-MM-DD 文字列を取得する（時差バグ完全防止）
- */
 function getLocalTodayString() {
   const now = new Date();
   const y = now.getFullYear();
@@ -78,27 +75,13 @@ function renderRevenueDashboard(aggregated) {
     item.slots.forEach((s) => {
       const isToday = s.date === todayStr;
       const deadlines = calculatePatientDeadlines(p, s.date);
-      // 維持期（100分の60）減算対象判定
       const basePoint = deadlines.isMaintenanceReduction ? disease.maintPoints : disease.defaultPoints;
+      const earlyBonusPerUnit = (deadlines.earlyBonus && deadlines.earlyBonus.points > 0) ? deadlines.earlyBonus.points : 0;
 
-      // 早期加算（1単位につき60点 または 25点）
-      const earlyBonusPerUnit = (deadlines.earlyBonus && deadlines.earlyBonus.points > 0)
-        ? deadlines.earlyBonus.points
-        : 0;
-
-      // 1単位あたりの合計点数 ＝ (基本点数 ＋ 早期加算点数)
-      const unitPoints = basePoint + earlyBonusPerUnit;
-
-      // スロットの合計点数 ＝ 1単位あたり点数 × 単位数
-      let slotPoints = unitPoints * s.units;
-
-      // 当該スロットで計画書を算定している場合のみ計画書料（240点）を加算
-      if (s.billingPlan) {
-        slotPoints += REHA_RULES.PLAN_POINTS.PLAN_1;
-      }
+      let slotPoints = (basePoint + earlyBonusPerUnit) * s.units;
+      if (s.billingPlan) slotPoints += REHA_RULES.PLAN_POINTS.PLAN_1;
 
       const slotYen = slotPoints * REHA_RULES.POINT_RATE;
-
       monthUnits += s.units;
       monthRevenue += slotYen;
 
@@ -133,16 +116,17 @@ function renderMonthlyUnitsTable(aggregated) {
   }
 
   let html = `
-    <table class="modern-table">
+    <table class="modern-table table-monthly">
       <thead>
         <tr>
-          <th style="min-width:70px;">ID</th>
-          <th style="min-width:110px;">氏名</th>
-          <th style="min-width:60px;">区分</th>
-          <th style="min-width:80px; text-align:right;">当月計</th>
+          <th class="col-fixed" style="width:42px;">ID</th>
+          <th class="col-fixed" style="width:90px;">氏名</th>
+          <th style="width:40px;">区分</th>
+          <th style="width:50px;">当月計</th>
+          <th style="width:46px;">計画書</th>
   `;
   for (let d = 1; d <= daysInMonth; d++) {
-    html += `<th style="min-width:32px; padding:6px 2px; text-align:center;">${d}</th>`;
+    html += `<th>${d}</th>`;
   }
   html += `</tr></thead><tbody>`;
 
@@ -153,32 +137,54 @@ function renderMonthlyUnitsTable(aggregated) {
       ? '<span style="color:#2563eb; font-weight:700;">外来</span>'
       : '<span style="color:#d97706; font-weight:700;">入院</span>';
 
-    // 要介護・維持期の13単位制限アラート
+    // 13単位制限判定
     const is13Target = p.careInsuranceType === 'CARE' || p.careInsuranceType === 'SUPPORT' || p.force13Limit;
     const isExceeded = is13Target && item.totalUnits > 13;
     const isNearLimit = is13Target && item.totalUnits >= 11 && item.totalUnits <= 13;
 
     let totalBadge = `<strong>${item.totalUnits}</strong>u`;
     if (isExceeded) {
-      totalBadge = `<span style="background:#ffe4e6; color:#e11d48; padding:2px 6px; border-radius:4px; font-weight:700;">${item.totalUnits}u (超過)</span>`;
+      totalBadge = `<span style="background:#ffe4e6; color:#e11d48; padding:1px 3px; border-radius:3px; font-weight:700;">${item.totalUnits}u!</span>`;
     } else if (isNearLimit) {
-      totalBadge = `<span style="background:#fef3c7; color:#b45309; padding:2px 6px; border-radius:4px; font-weight:700;">${item.totalUnits}u (注意)</span>`;
+      totalBadge = `<span style="background:#fef3c7; color:#b45309; padding:1px 3px; border-radius:3px; font-weight:700;">${item.totalUnits}u</span>`;
     }
 
+    // 計画書バッジ (済 / 未)
+    const planBadge = item.planCount > 0
+      ? '<span style="background:#e0f2fe; color:#0369a1; padding:1px 4px; border-radius:3px; font-weight:700;">済</span>'
+      : '<span style="color:#cbd5e1;">未</span>';
+
+    // メイン行（通常単位）
     html += `
       <tr>
-        <td>${p.id}</td>
-        <td><strong>${sanitizeHtml(p.name)}</strong></td>
+        <td class="col-fixed">${p.id}</td>
+        <td class="col-fixed"><strong>${sanitizeHtml(p.name)}</strong></td>
         <td>${catBadge}</td>
-        <td style="text-align:right;">${totalBadge}</td>
+        <td>${totalBadge}</td>
+        <td>${planBadge}</td>
     `;
-
     for (let d = 1; d <= daysInMonth; d++) {
       const u = item.dailyUnits[d] || 0;
-      const cellVal = u > 0 ? `<span style="font-weight:600; color:#0f172a;">${u}</span>` : '<span style="color:#cbd5e1;">-</span>';
-      html += `<td style="text-align:center; padding:6px 2px;">${cellVal}</td>`;
+      html += `<td>${u > 0 ? `<span style="font-weight:700; color:#0f172a;">${u}</span>` : '<span style="color:#e2e8f0;">-</span>'}</td>`;
     }
     html += `</tr>`;
+
+    // 早期加算サブ行（当月に早期加算が1単位以上ある場合のみ展開）
+    if (item.totalEarlyUnits > 0) {
+      html += `
+        <tr class="sub-row-early">
+          <td class="col-fixed"></td>
+          <td class="col-fixed" style="font-size:0.7rem; color:#7c3aed;">↳ 早期加算</td>
+          <td style="font-size:0.7rem;">加算</td>
+          <td style="font-weight:700; color:#7c3aed;">${item.totalEarlyUnits}u</td>
+          <td style="color:#cbd5e1;">-</td>
+      `;
+      for (let d = 1; d <= daysInMonth; d++) {
+        const eu = item.dailyEarlyUnits[d] || 0;
+        html += `<td>${eu > 0 ? `<span style="font-weight:700; color:#7c3aed;">${eu}</span>` : '<span style="color:#e2e8f0;">-</span>'}</td>`;
+      }
+      html += `</tr>`;
+    }
   });
 
   html += `</tbody></table>`;
@@ -190,33 +196,30 @@ function renderDailyDiaryPreview(aggregated) {
   if (!container) return;
 
   const today = new Date();
-  const day = (currentYear === today.getFullYear() && currentMonth === (today.getMonth() + 1))
-    ? today.getDate()
-    : 1;
-
+  const day = (currentYear === today.getFullYear() && currentMonth === (today.getMonth() + 1)) ? today.getDate() : 1;
   const dayData = aggregated.dailyBreakdown[day] || { totalUnits: 0, inpatients: 0, outpatients: 0, planCount: 0 };
 
   container.innerHTML = `
-    <div style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:16px; font-size:0.85rem;">
-      <div style="font-weight:700; color:#0f172a; margin-bottom:8px;">
+    <div style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:12px 16px; font-size:0.85rem;">
+      <div style="font-weight:700; color:#0f172a; margin-bottom:6px;">
         📅 ${currentYear}年${currentMonth}月${day}日 業務日誌集計プレビュー (24列目連携)
       </div>
-      <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:12px; text-align:center;">
-        <div style="background:#f8fafc; padding:10px; border-radius:6px;">
-          <div style="color:#64748b; font-size:0.75rem;">当日総単位</div>
-          <div style="font-size:1.1rem; font-weight:700; color:#0369a1;">${dayData.totalUnits} u</div>
+      <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; text-align:center;">
+        <div style="background:#f8fafc; padding:8px; border-radius:6px;">
+          <div style="color:#64748b; font-size:0.72rem;">当日総単位</div>
+          <div style="font-size:1.05rem; font-weight:700; color:#0369a1;">${dayData.totalUnits} u</div>
         </div>
-        <div style="background:#f8fafc; padding:10px; border-radius:6px;">
-          <div style="color:#64748b; font-size:0.75rem;">入院実施単位</div>
-          <div style="font-size:1.1rem; font-weight:700; color:#d97706;">${dayData.inpatients} u</div>
+        <div style="background:#f8fafc; padding:8px; border-radius:6px;">
+          <div style="color:#64748b; font-size:0.72rem;">入院実施単位</div>
+          <div style="font-size:1.05rem; font-weight:700; color:#d97706;">${dayData.inpatients} u</div>
         </div>
-        <div style="background:#f8fafc; padding:10px; border-radius:6px;">
-          <div style="color:#64748b; font-size:0.75rem;">外来実施単位</div>
-          <div style="font-size:1.1rem; font-weight:700; color:#2563eb;">${dayData.outpatients} u</div>
+        <div style="background:#f8fafc; padding:8px; border-radius:6px;">
+          <div style="color:#64748b; font-size:0.72rem;">外来実施単位</div>
+          <div style="font-size:1.05rem; font-weight:700; color:#2563eb;">${dayData.outpatients} u</div>
         </div>
-        <div style="background:#f8fafc; padding:10px; border-radius:6px;">
-          <div style="color:#64748b; font-size:0.75rem;">計画書算定</div>
-          <div style="font-size:1.1rem; font-weight:700; color:#854d0e;">${dayData.planCount} 件</div>
+        <div style="background:#f8fafc; padding:8px; border-radius:6px;">
+          <div style="color:#64748b; font-size:0.72rem;">計画書算定</div>
+          <div style="font-size:1.05rem; font-weight:700; color:#854d0e;">${dayData.planCount} 件</div>
         </div>
       </div>
     </div>
