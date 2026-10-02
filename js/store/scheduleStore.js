@@ -1,5 +1,5 @@
 // js/store/scheduleStore.js
-// 時間割コマCRUD・消炎鎮痛マルチ患者CRUD・LocalStorage永続化・月間集計層（200行制限準拠）
+// 時間割コマCRUD・コマ移動・消炎鎮痛マルチ患者CRUD・LocalStorage永続化・月間集計層（200行制限準拠）
 
 import { normalizeDateString, safeParseInt } from '../core/dataNormalizer.js';
 import { getPatientById } from './patientStore.js';
@@ -68,6 +68,27 @@ export function clearScheduleSlot(dateStr, therapistId, slotId) {
     return saveDailySchedule(dateStr, current);
   }
   return true;
+}
+
+export function moveScheduleSlot(dateStr, fromTherapistId, fromSlotId, toTherapistId, toSlotId) {
+  const current = getDailySchedule(dateStr);
+  const sourceSlot = current[fromTherapistId]?.[fromSlotId];
+  if (!sourceSlot) return false;
+
+  // 移動元と移動先が完全に同一の場合は何もしない
+  if (fromTherapistId === toTherapistId && fromSlotId === toSlotId) return true;
+
+  if (!current[toTherapistId]) current[toTherapistId] = {};
+  
+  // 移動先にデータをコピー
+  current[toTherapistId][toSlotId] = {
+    ...sourceSlot,
+    updatedAt: new Date().toISOString()
+  };
+
+  // 移動元のコマを削除
+  delete current[fromTherapistId][fromSlotId];
+  return saveDailySchedule(dateStr, current);
 }
 
 export function addAnalgesiaPatient(dateStr, slotId, patientId) {
