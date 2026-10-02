@@ -41,6 +41,7 @@
           <button class="palette-cat-btn active" data-cat="ALL" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">全て</button>
           <button class="palette-cat-btn" data-cat="INPATIENT" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">入院</button>
           <button class="palette-cat-btn" data-cat="OUTPATIENT" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">外来</button>
+          <button class="palette-cat-btn" data-cat="ANALGESIA" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">消炎</button>
         </div>
         <div id="palettePatientList" style="display:flex; flex-direction:column; gap:6px; margin-top:4px;"></div>
       </aside>
@@ -311,6 +312,28 @@
           <button type="submit" style="padding:6px 16px; background:#0284c7; color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:700;">登録</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- モーダル 4: 消炎鎮痛（物療）患者一覧・追加 -->
+  <div id="modalAnalgesiaSlot" class="modal-overlay">
+    <div class="modal-card">
+      <h3 id="analgesiaModalTitle" style="font-size:1rem; font-weight:700; margin-bottom:8px;">消炎鎮痛（物療）来院一覧</h3>
+      <p style="font-size:0.75rem; color:#64748b; margin-bottom:12px;">当コマに登録されている患者一覧です。患者の追加や取り消しができます。</p>
+      
+      <div id="analgesiaPatientList" style="max-height:220px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; margin-bottom:16px; border:1px solid #e2e8f0; border-radius:6px; padding:8px; background:#f8fafc;"></div>
+
+      <div style="background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:10px; margin-bottom:12px;">
+        <label style="font-size:0.78rem; font-weight:700; display:block; margin-bottom:6px;">＋ 患者を追加</label>
+        <div style="display:flex; gap:6px;">
+          <select id="analgesiaAddPatientSelect" style="flex:1; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem;"></select>
+          <button type="button" id="btnConfirmAddAnalgesia" style="padding:6px 12px; background:#0284c7; color:#fff; border:none; border-radius:4px; font-size:0.8rem; font-weight:700; cursor:pointer;">追加</button>
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:flex-end;">
+        <button type="button" id="btnCloseAnalgesiaModal" style="padding:6px 16px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; cursor:pointer;">閉じる</button>
+      </div>
     </div>
   </div>
 
