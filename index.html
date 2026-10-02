@@ -156,6 +156,21 @@
         <input type="hidden" id="slotId">
         <input type="hidden" id="slotPatientId">
         <input type="hidden" id="slotUnitsInput" value="1">
+        <div style="display:grid; grid-template-columns: 1fr 1.6fr; gap:8px;">
+          <div>
+            <label for="slotModalTherapistSelect" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">担当セラピスト</label>
+            <select id="slotModalTherapistSelect" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff; font-weight:600;">
+              <option value="A">PT A</option>
+              <option value="B">PT B</option>
+              <option value="C">PT C</option>
+            </select>
+          </div>
+          <div>
+            <label for="slotModalSlotSelect" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">時間帯</label>
+            <select id="slotModalSlotSelect" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff; font-weight:600;"></select>
+          </div>
+        </div>
+
         <div>
           <label style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">単位数選択</label>
           <div style="display:flex; gap:6px;">
