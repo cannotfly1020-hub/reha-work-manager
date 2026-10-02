@@ -10,7 +10,11 @@ export const REHA_RULES = {
       maintPoints: 102,
       shortLabel: '運動器Ⅱ',
       fullName: '運動器リハビリテーション料(Ⅱ)',
-      oneThirdDays: 50
+      oneThirdDays: 50,
+      tag: '運',
+      tagBg: '#ecfdf5',
+      tagColor: '#065f46',
+      tagBorder: '#10b981'
     },
     CEREBROVASCULAR: {
       days: 180,
@@ -18,7 +22,11 @@ export const REHA_RULES = {
       maintPoints: 60,
       shortLabel: '脳血管Ⅲ',
       fullName: '脳血管疾患等リハビリテーション料(Ⅲ)',
-      oneThirdDays: 60
+      oneThirdDays: 60,
+      tag: '脳',
+      tagBg: '#f5f3ff',
+      tagColor: '#5b21b6',
+      tagBorder: '#8b5cf6'
     },
     DISUSE: {
       days: 120,
@@ -26,7 +34,11 @@ export const REHA_RULES = {
       maintPoints: 46,
       shortLabel: '廃用Ⅲ',
       fullName: '廃用症候群リハビリテーション料(Ⅲ)',
-      oneThirdDays: 40
+      oneThirdDays: 40,
+      tag: '廃',
+      tagBg: '#fffbeb',
+      tagColor: '#92400e',
+      tagBorder: '#f59e0b'
     },
     ANALGESIA: {
       days: 9999,
@@ -34,7 +46,11 @@ export const REHA_RULES = {
       maintPoints: 35,
       shortLabel: '消炎鎮痛',
       fullName: '消炎鎮痛等処置',
-      oneThirdDays: 9999
+      oneThirdDays: 9999,
+      tag: '消',
+      tagBg: '#f1f5f9',
+      tagColor: '#334155',
+      tagBorder: '#94a3b8'
     }
   },
 
