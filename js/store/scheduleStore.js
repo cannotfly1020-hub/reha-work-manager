@@ -1,5 +1,5 @@
 // js/store/scheduleStore.js
-// 時間割コマCRUD・コマ移動・消炎鎮痛マルチ患者CRUD・LocalStorage永続化・月間集計層（200行制限準拠）
+// 時間割コマCRUD・コマ移動・消炎鎮痛CRUD・LocalStorage永続化・月間集計・過去計画書履歴判定層（200行制限準拠）
 
 import { normalizeDateString, safeParseInt } from '../core/dataNormalizer.js';
 import { getPatientById } from './patientStore.js';
@@ -75,18 +75,10 @@ export function moveScheduleSlot(dateStr, fromTherapistId, fromSlotId, toTherapi
   const sourceSlot = current[fromTherapistId]?.[fromSlotId];
   if (!sourceSlot) return false;
 
-  // 移動元と移動先が完全に同一の場合は何もしない
   if (fromTherapistId === toTherapistId && fromSlotId === toSlotId) return true;
-
   if (!current[toTherapistId]) current[toTherapistId] = {};
   
-  // 移動先にデータをコピー
-  current[toTherapistId][toSlotId] = {
-    ...sourceSlot,
-    updatedAt: new Date().toISOString()
-  };
-
-  // 移動元のコマを削除
+  current[toTherapistId][toSlotId] = { ...sourceSlot, updatedAt: new Date().toISOString() };
   delete current[fromTherapistId][fromSlotId];
   return saveDailySchedule(dateStr, current);
 }
@@ -110,9 +102,7 @@ export function removeAnalgesiaPatient(dateStr, slotId, patientId) {
   if (!current.analgesia?.[slotId]) return true;
 
   current.analgesia[slotId] = current.analgesia[slotId].filter((id) => id !== patientId);
-  if (current.analgesia[slotId].length === 0) {
-    delete current.analgesia[slotId];
-  }
+  if (current.analgesia[slotId].length === 0) delete current.analgesia[slotId];
   return saveDailySchedule(dateStr, current);
 }
 
@@ -179,6 +169,32 @@ export function findPatientMonthlyPlanDate(patientId, year, month, excludeDate =
     }
   }
   return null;
+}
+
+/**
+ * 対象患者が指定日より過去に計画書を算定した実績があるか判定する
+ */
+export function hasPatientPastPlan(patientId, beforeDateStr) {
+  if (!patientId || !beforeDateStr) return false;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith(STORAGE_PREFIX)) continue;
+      const datePart = key.replace(STORAGE_PREFIX, '');
+      if (datePart >= beforeDateStr) continue; // 指定日当日以降は除外
+
+      const sched = JSON.parse(localStorage.getItem(key) || '{}');
+      for (const tId of ['A', 'B', 'C']) {
+        const slots = sched[tId] || {};
+        for (const item of Object.values(slots)) {
+          if (item?.patientId === patientId && item?.billingPlan) return true;
+        }
+      }
+    }
+  } catch (e) {
+    console.error('hasPatientPastPlan error:', e);
+  }
+  return false;
 }
 
 export function aggregateFromAppSchedule(year, month) {
