@@ -1,5 +1,5 @@
 // js/views/patientView.js
-// VIEW 3: 患者台帳・算定期限管理・患者登録編集モーダル制御層（200行制限準拠）
+// VIEW 3: 患者台帳・算定期限管理・計画書2行表示・患者登録編集モーダル制御層（200行制限準拠）
 
 import { sanitizeHtml } from '../core/dataNormalizer.js';
 import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
@@ -20,14 +20,26 @@ export function initPatientView() {
   setupPatientModalListeners();
 }
 
-function getPlanStatusBadge(status) {
-  if (status === 'PLAN_2_FOLLOW') {
-    return '<span style="color:#7c3aed; font-weight:800; background:#f5f3ff; border:1px solid #ddd6fe; padding:2px 5px; border-radius:3px; font-size:0.72rem;">計2継続(196点)</span>';
+function getPlanPhaseCellHtml(patient, deadlines) {
+  let badgeHtml = '<span style="color:#64748b; font-size:0.72rem;">未算定(初回)</span>';
+  if (patient.planStatus === 'PLAN_2_FOLLOW') {
+    badgeHtml = '<span style="color:#7c3aed; font-weight:800; background:#f5f3ff; border:1px solid #ddd6fe; padding:2px 5px; border-radius:3px; font-size:0.72rem;">計2継続(196点)</span>';
+  } else if (patient.planStatus === 'PLAN_1_FOLLOW') {
+    badgeHtml = '<span style="color:#0369a1; font-weight:700; background:#e0f2fe; padding:2px 5px; border-radius:3px; font-size:0.72rem;">計1継続(240点)</span>';
   }
-  if (status === 'PLAN_1_FOLLOW') {
-    return '<span style="color:#0369a1; font-weight:700; background:#e0f2fe; padding:2px 5px; border-radius:3px; font-size:0.72rem;">計1継続(240点)</span>';
+
+  // 要介護認定(CARE)で移行日が存在する場合のみ2行目に移行日を明記
+  let subTextHtml = '';
+  if (patient.careInsuranceType === 'CARE' && deadlines.plan2TransitionDateStr) {
+    if (deadlines.isPlan2Required || patient.planStatus === 'PLAN_2_FOLLOW') {
+      subTextHtml = `<div style="font-size:0.67rem; color:#7c3aed; font-weight:600; margin-top:2px;">移行: ${deadlines.plan2TransitionDateStr} (到達済)</div>`;
+    } else {
+      const remain = deadlines.plan2RemainingDays !== null ? ` (残${deadlines.plan2RemainingDays}日)` : '';
+      subTextHtml = `<div style="font-size:0.67rem; color:#0284c7; margin-top:2px;">移行: ${deadlines.plan2TransitionDateStr}${remain}</div>`;
+    }
   }
-  return '<span style="color:#64748b; font-size:0.72rem;">未算定(初回)</span>';
+
+  return `<div>${badgeHtml}${subTextHtml}</div>`;
 }
 
 export function renderPatientView() {
@@ -57,7 +69,7 @@ export function renderPatientView() {
           <th style="padding:6px 6px;">起算日</th>
           <th style="padding:6px 6px; text-align:center;">早期加算</th>
           <th style="padding:6px 6px;">上限日(残日)</th>
-          <th style="padding:6px 6px; text-align:center;">計画書フェーズ</th>
+          <th style="padding:6px 6px; text-align:center;">計画書フェーズ / 移行予定</th>
           <th style="padding:6px 6px; text-align:center; width:54px;">操作</th>
         </tr>
       </thead>
@@ -102,7 +114,7 @@ export function renderPatientView() {
         <td style="padding:6px 6px; font-size:0.75rem; white-space:nowrap;">${p.onsetDate || p.admissionDate || '-'}</td>
         <td style="padding:6px 6px; text-align:center;">${earlyBadge}</td>
         <td style="padding:6px 6px; font-size:0.75rem; white-space:nowrap;">${limitDisplay}</td>
-        <td style="padding:6px 6px; text-align:center;">${getPlanStatusBadge(p.planStatus)}</td>
+        <td style="padding:6px 6px; text-align:center; white-space:nowrap;">${getPlanPhaseCellHtml(p, dl)}</td>
         <td style="padding:6px 6px; text-align:center;">
           <button class="btn-edit-patient" data-id="${p.id}" style="padding:2px 6px; font-size:0.72rem; border:1px solid #cbd5e1; background:#fff; border-radius:4px; cursor:pointer;">編集</button>
         </td>
