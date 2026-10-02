@@ -52,11 +52,25 @@ export const REHA_RULES = {
     }
   },
 
-  // リハビリテーション総合計画評価料
+  // リハビリテーション総合計画評価料（令和8年度改定：4段階区分）
   PLAN_POINTS: {
-    PLAN_1: 240, // 計画書料1
-    PLAN_2: 240  // 計画書料2（要介護・3分の1経過後等）
+    PLAN_1_FIRST: 300,   // ・総合実施計画書1 (初回)
+    PLAN_1_FOLLOW: 240,  // ・総合実施計画書1 (2回目以降)
+    PLAN_2_FIRST: 240,   // ・総合実施計画書2 (初回)
+    PLAN_2_FOLLOW: 196,  // ・総合実施計画書2 (2回目以降)
+    // 既存コード互換用フォールバック
+    PLAN_1: 300,
+    PLAN_2: 240
   },
+
+  // 総合実施計画書の選択肢マスター（UIプルダウン用）
+  PLAN_OPTIONS: [
+    { value: '', label: 'なし (算定しない)', points: 0 },
+    { value: 'PLAN_1_FIRST', label: '総合実施計画書1 (初回: 300点)', points: 300 },
+    { value: 'PLAN_1_FOLLOW', label: '総合実施計画書1 (2回目以降: 240点)', points: 240 },
+    { value: 'PLAN_2_FIRST', label: '総合実施計画書2 (初回: 240点)', points: 240 },
+    { value: 'PLAN_2_FOLLOW', label: '総合実施計画書2 (2回目以降: 196点)', points: 196 }
+  ],
 
   // 介護保険認定区分
   CARE_INSURANCE: {
