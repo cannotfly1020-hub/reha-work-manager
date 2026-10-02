@@ -1,11 +1,11 @@
 // js/views/scheduleView.js
-// VIEW 1: 当日時間割・消炎鎮痛来院・患者パレット・疾患タグ＆早期期限バッジ表示層
+// VIEW 1: 当日時間割・コマ移動(D&D/モーダル)・消炎鎮痛来院・患者パレット・疾患タグ＆早期期限バッジ
 
 import { TIME_SLOTS, THERAPISTS, REHA_RULES } from '../config/rules.js';
 import { sanitizeHtml, safeParseInt } from '../core/dataNormalizer.js';
 import { getPatientById, searchPatients, getAllPatients } from '../store/patientStore.js';
 import {
-  getDailySchedule, setScheduleSlot, clearScheduleSlot, getDailyStats,
+  getDailySchedule, setScheduleSlot, clearScheduleSlot, moveScheduleSlot, getDailyStats,
   findPatientMonthlyPlanDate, addAnalgesiaPatient, removeAnalgesiaPatient, getAnalgesiaSlotPatients
 } from '../store/scheduleStore.js';
 import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
@@ -98,50 +98,46 @@ function renderPatientPalette() {
   }).join('');
 
   listEl.querySelectorAll('.patient-palette-card').forEach((card) => {
-    card.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', e.currentTarget.dataset.patientId));
+    card.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('application/json', JSON.stringify({ type: 'NEW_PATIENT', patientId: e.currentTarget.dataset.patientId }));
+      e.dataTransfer.setData('text/plain', e.currentTarget.dataset.patientId);
+    });
   });
 }
 
 function buildSlotCardHtml(p, u, cellData, tId, slotId) {
   const isOut = p.category === 'OUTPATIENT';
   const cardClass = isOut ? 'card-outpatient' : 'card-inpatient';
-
-  // 1. 疾患別タグ（運・脳・廃・消）
   const disRule = REHA_RULES.LIMIT_DAYS[p.diseaseType] || REHA_RULES.LIMIT_DAYS.ANALGESIA;
   const diseaseTag = `<span style="font-size:0.65rem; font-weight:700; background:${disRule.tagBg}; color:${disRule.tagColor}; border:1px solid ${disRule.tagBorder}; padding:1px 3px; border-radius:3px; margin-right:4px;">${disRule.tag}</span>`;
 
-  // 2. 計画書バッジ
   let planBadge = '';
   if (cellData.billingPlan) {
     const lbl = String(cellData.billingPlan).includes('PLAN_2') ? '📝計2' : '📝計画書';
     planBadge = `<span class="badge-plan" style="margin-left:2px;">${lbl}</span>`;
   }
 
-  // 3. 早期加算期限バッジ（入院患者かつ算定対象期間）
   let earlyBadge = '';
   if (!isOut) {
-    const deadlines = calculatePatientDeadlines(p, currentDateStr);
-    if (deadlines.earlyBonus?.isEligible && deadlines.earlyBonus.shortLabel) {
-      const isUrgent = deadlines.earlyBonus.remainingDays !== null && deadlines.earlyBonus.remainingDays <= 3;
+    const dl = calculatePatientDeadlines(p, currentDateStr);
+    if (dl.earlyBonus?.isEligible && dl.earlyBonus.shortLabel) {
+      const isUrgent = dl.earlyBonus.remainingDays !== null && dl.earlyBonus.remainingDays <= 3;
       const bBg = isUrgent ? '#fef3c7' : '#ecfdf5';
       const bCol = isUrgent ? '#b45309' : '#047857';
       const bBorder = isUrgent ? '#f59e0b' : '#10b981';
-      earlyBadge = `<span style="font-size:0.63rem; font-weight:700; background:${bBg}; color:${bCol}; border:1px solid ${bBorder}; padding:1px 4px; border-radius:3px; margin-left:3px;" title="${deadlines.earlyBonus.label}">${deadlines.earlyBonus.shortLabel}</span>`;
+      earlyBadge = `<span style="font-size:0.63rem; font-weight:700; background:${bBg}; color:${bCol}; border:1px solid ${bBorder}; padding:1px 4px; border-radius:3px; margin-left:3px;" title="${dl.earlyBonus.label}">${dl.earlyBonus.shortLabel}</span>`;
     }
   }
 
   return `
     <div class="cell-slot">
-      <div class="reha-slot-card ${cardClass} card-unit-${u}" data-therapist="${tId}" data-slot="${slotId}">
+      <div class="reha-slot-card ${cardClass} card-unit-${u}" draggable="true" data-therapist="${tId}" data-slot="${slotId}" style="cursor:grab;">
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <div style="display:flex; align-items:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-            ${diseaseTag}
-            <span style="font-weight:700; font-size:0.8rem;">${sanitizeHtml(p.name)}</span>
+            ${diseaseTag}<span style="font-weight:700; font-size:0.8rem;">${sanitizeHtml(p.name)}</span>
           </div>
           <div style="display:flex; align-items:center; flex-shrink:0;">
-            <span class="badge-unit badge-unit-${u}">${u}単位</span>
-            ${planBadge}
-            ${earlyBadge}
+            <span class="badge-unit badge-unit-${u}">${u}単位</span>${planBadge}${earlyBadge}
           </div>
         </div>
         <div style="font-size:0.68rem; color:#475569; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px;">
@@ -179,25 +175,18 @@ function renderTimetableGrid() {
         coveredUntil[tId] = index + u;
         html += buildSlotCardHtml(p, u, cellData, tId, slot.id);
       } else {
-        html += `
-          <div class="cell-slot" data-therapist="${tId}" data-slot="${slot.id}">
-            <button class="empty-slot-btn" data-therapist="${tId}" data-slot="${slot.id}">＋ 追加</button>
-          </div>`;
+        html += `<div class="cell-slot" data-therapist="${tId}" data-slot="${slot.id}"><button class="empty-slot-btn" data-therapist="${tId}" data-slot="${slot.id}">＋ 追加</button></div>`;
       }
     });
 
-    const analgesiaPatients = getAnalgesiaSlotPatients(currentDateStr, slot.id);
-    const aCount = analgesiaPatients.length;
-    let badgeHtml = `<button class="badge-analgesia-count" data-analgesia-slot="${slot.id}" style="color:#94a3b8; font-size:0.75rem;">＋</button>`;
+    const aPatients = getAnalgesiaSlotPatients(currentDateStr, slot.id);
+    const aCount = aPatients.length;
+    let bHtml = `<button class="badge-analgesia-count" data-analgesia-slot="${slot.id}" style="color:#94a3b8; font-size:0.75rem;">＋</button>`;
     if (aCount > 0) {
-      const inCount = analgesiaPatients.filter((p) => p.category === 'INPATIENT').length;
-      badgeHtml = `
-        <button class="badge-analgesia-count has-patients" data-analgesia-slot="${slot.id}">
-          <span style="font-weight:800; font-size:0.85rem; color:#15803d;">${aCount}名</span>
-          <span style="font-size:0.65rem; color:#166534;">(入${inCount}/外${aCount - inCount})</span>
-        </button>`;
+      const inC = aPatients.filter((p) => p.category === 'INPATIENT').length;
+      bHtml = `<button class="badge-analgesia-count has-patients" data-analgesia-slot="${slot.id}"><span style="font-weight:800; font-size:0.85rem; color:#15803d;">${aCount}名</span><span style="font-size:0.65rem; color:#166534;">(入${inC}/外${aCount - inC})</span></button>`;
     }
-    html += `<div class="cell-slot analgesia-slot-cell" data-analgesia-drop="${slot.id}">${badgeHtml}</div></div>`;
+    html += `<div class="cell-slot analgesia-slot-cell" data-analgesia-drop="${slot.id}">${bHtml}</div></div>`;
   });
 
   gridEl.innerHTML = html;
@@ -216,31 +205,70 @@ function attachGridEventListeners(gridEl) {
       const sId = card.dataset.slot;
       openSlotModal(tId, sId, getDailySchedule(currentDateStr)[tId]?.[sId]);
     });
+    card.addEventListener('dragstart', (e) => {
+      e.stopPropagation();
+      const moveData = { type: 'MOVE_SLOT', fromTherapist: card.dataset.therapist, fromSlot: card.dataset.slot };
+      e.dataTransfer.setData('application/json', JSON.stringify(moveData));
+      e.dataTransfer.setData('text/plain', card.dataset.therapist + ':' + card.dataset.slot);
+    });
   });
 
   gridEl.querySelectorAll('.cell-slot[data-therapist]').forEach((cell) => {
     cell.addEventListener('dragover', (e) => e.preventDefault());
     cell.addEventListener('drop', (e) => {
       e.preventDefault();
-      const patientId = e.dataTransfer.getData('text/plain');
-      const tId = cell.dataset.therapist;
-      const sId = cell.dataset.slot;
-      if (patientId && tId && sId) openSlotModal(tId, sId, { patientId, units: 1, note: '', billingPlan: '' });
+      const targetTId = cell.dataset.therapist;
+      const targetSId = cell.dataset.slot;
+      if (!targetTId || !targetSId) return;
+
+      let rawData = null;
+      try { rawData = JSON.parse(e.dataTransfer.getData('application/json')); } catch (_) {}
+
+      // A: コマ移動のドロップ処理
+      if (rawData?.type === 'MOVE_SLOT') {
+        const { fromTherapist, fromSlot } = rawData;
+        if (fromTherapist === targetTId && fromSlot === targetSId) return;
+
+        const sched = getDailySchedule(currentDateStr);
+        if (sched[targetTId]?.[targetSId]) {
+          showToast('移動先の時間枠にはすでに患者が配置されています', 'warn');
+          return;
+        }
+
+        const sourceItem = sched[fromTherapist]?.[fromSlot];
+        if (!sourceItem) return;
+
+        const units = sourceItem.units || 1;
+        const confCheck = validateTimeConflict(sched, targetTId, targetSId, sourceItem.patientId, units, fromSlot);
+        if (!confCheck.valid) { showToast(confCheck.message, 'error'); return; }
+
+        moveScheduleSlot(currentDateStr, fromTherapist, fromSlot, targetTId, targetSId);
+        showToast('コマを移動しました', 'success');
+        renderScheduleView();
+        return;
+      }
+
+      // B: 新規患者パレットからのドロップ
+      const patientId = rawData?.patientId || e.dataTransfer.getData('text/plain');
+      if (patientId && !patientId.includes(':')) {
+        openSlotModal(targetTId, targetSId, { patientId, units: 1, note: '', billingPlan: '' });
+      }
     });
   });
 
-  gridEl.querySelectorAll('.badge-analgesia-count').forEach((badge) => {
-    badge.addEventListener('click', (e) => { e.stopPropagation(); openAnalgesiaModal(badge.dataset.analgesiaSlot); });
+  gridEl.querySelectorAll('.badge-analgesia-count').forEach((b) => {
+    b.addEventListener('click', (e) => { e.stopPropagation(); openAnalgesiaModal(b.dataset.analgesiaSlot); });
   });
 
   gridEl.querySelectorAll('.cell-slot[data-analgesia-drop]').forEach((cell) => {
     cell.addEventListener('dragover', (e) => e.preventDefault());
     cell.addEventListener('drop', (e) => {
       e.preventDefault();
-      const patientId = e.dataTransfer.getData('text/plain');
-      const slotId = cell.dataset.analgesiaDrop;
-      if (patientId && slotId) {
-        addAnalgesiaPatient(currentDateStr, slotId, patientId);
+      let pId = e.dataTransfer.getData('text/plain');
+      try { const d = JSON.parse(e.dataTransfer.getData('application/json')); if (d?.patientId) pId = d.patientId; } catch (_) {}
+      const sId = cell.dataset.analgesiaDrop;
+      if (pId && sId && !pId.includes(':')) {
+        addAnalgesiaPatient(currentDateStr, sId, pId);
         showToast('消炎鎮痛に患者を追加しました', 'success');
         renderScheduleView();
       }
@@ -263,9 +291,9 @@ function setupSlotModalListeners() {
     renderScheduleView();
   });
 
-  document.querySelectorAll('.btn-unit-select').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      document.querySelectorAll('.btn-unit-select').forEach((b) => b.style.background = '#fff');
+  document.querySelectorAll('.btn-unit-select').forEach((b) => {
+    b.addEventListener('click', (e) => {
+      document.querySelectorAll('.btn-unit-select').forEach((x) => x.style.background = '#fff');
       e.target.style.background = '#e0f2fe';
       document.getElementById('slotUnitsInput').value = e.target.dataset.unit;
     });
@@ -281,13 +309,25 @@ function setupSlotModalListeners() {
     const planSelect = document.getElementById('slotBillingPlanSelect');
     const billingPlan = planSelect ? planSelect.value : '';
 
+    const newTherapistId = document.getElementById('slotModalTherapistSelect')?.value || activeModalSlot.therapistId;
+    const newSlotId = document.getElementById('slotModalSlotSelect')?.value || activeModalSlot.slotId;
+
     if (!patientId) { showToast('患者が選択されていません', 'error'); return; }
 
     const dailySchedule = getDailySchedule(currentDateStr);
+    const origTherapist = activeModalSlot.therapistId;
+    const origSlot = activeModalSlot.slotId;
+    const isRelocated = origTherapist !== newTherapistId || origSlot !== newSlotId;
+
+    if (isRelocated && dailySchedule[newTherapistId]?.[newSlotId]) {
+      showToast('変更先の時間枠にはすでに患者が配置されています', 'warn');
+      return;
+    }
+
     const currentUnits = activeModalSlot.currentItem ? activeModalSlot.currentItem.units : 0;
     const patient = getPatientById(patientId);
 
-    const conflictCheck = validateTimeConflict(dailySchedule, activeModalSlot.therapistId, activeModalSlot.slotId, patientId, units, activeModalSlot.slotId);
+    const conflictCheck = validateTimeConflict(dailySchedule, newTherapistId, newSlotId, patientId, units, origSlot);
     if (!conflictCheck.valid) { showToast(conflictCheck.message, 'error'); return; }
 
     if (patient) {
@@ -297,17 +337,21 @@ function setupSlotModalListeners() {
 
     if (billingPlan) {
       const [year, month] = currentDateStr.split('-').map(Number);
-      const excludeSlot = activeModalSlot.currentItem ? activeModalSlot.slotId : '';
+      const excludeSlot = activeModalSlot.currentItem ? origSlot : '';
       const existingDate = findPatientMonthlyPlanDate(patientId, year, month, currentDateStr, excludeSlot);
       const planCheck = validateMonthlyPlanLimit(billingPlan, existingDate);
       if (!planCheck.valid) { showToast(planCheck.message, 'error'); return; }
     }
 
-    const workloadCheck = validateTherapistWorkload(dailySchedule, activeModalSlot.therapistId, units, currentUnits);
+    const workloadCheck = validateTherapistWorkload(dailySchedule, newTherapistId, units, isRelocated ? 0 : currentUnits);
     if (!workloadCheck.valid) { showToast(workloadCheck.message, 'error'); return; }
     if (workloadCheck.message) showToast(workloadCheck.message, 'warn');
 
-    setScheduleSlot(currentDateStr, activeModalSlot.therapistId, activeModalSlot.slotId, { patientId, units, note, billingPlan });
+    if (isRelocated && activeModalSlot.currentItem) {
+      clearScheduleSlot(currentDateStr, origTherapist, origSlot);
+    }
+
+    setScheduleSlot(currentDateStr, newTherapistId, newSlotId, { patientId, units, note, billingPlan });
     modal.classList.remove('active');
     showToast('スケジュールを保存しました', 'success');
     renderScheduleView();
@@ -321,9 +365,17 @@ function openSlotModal(therapistId, slotId, currentItem) {
   const patientInfoEl = document.getElementById('slotPatientInfo');
   const btnDelete = document.getElementById('btnDeleteSlot');
   const planSelect = document.getElementById('slotBillingPlanSelect');
+  const therapistSelect = document.getElementById('slotModalTherapistSelect');
+  const slotSelect = document.getElementById('slotModalSlotSelect');
 
   titleEl.textContent = `コマ配置 (PT ${therapistId} / ${TIME_SLOTS.find((s) => s.id === slotId)?.label || slotId})`;
   btnDelete.style.display = currentItem ? 'block' : 'none';
+
+  if (therapistSelect) therapistSelect.value = therapistId;
+  if (slotSelect) {
+    slotSelect.innerHTML = TIME_SLOTS.map((s) => `<option value="${s.id}">${s.label}</option>`).join('');
+    slotSelect.value = slotId;
+  }
 
   const pId = currentItem?.patientId || '';
   const patient = pId ? getPatientById(pId) : null;
