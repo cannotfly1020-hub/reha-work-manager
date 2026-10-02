@@ -1,6 +1,6 @@
 // js/core/validator.js
-// 13単位制限・1日上限・人員基準・重複予約の4重バリデーションガード
-// DOM・Storageに非依存の純粋検証ロジック
+// 13単位制限・1日上限・人員基準・重複予約・計画書月1回算定の5重バリデーションガード
+// DOM・Storageに非依存の純粋検証ロジック（200行制限準拠）
 
 import { REHA_RULES, TIME_SLOTS } from '../config/rules.js';
 import { getDiffDays } from './deadlineCalc.js';
@@ -65,12 +65,6 @@ export function validateTimeConflict(dailySchedule, targetTherapist, targetSlotI
 /**
  * 2. 患者1日算定上限ガード
  * 原則6単位。発症/入院14日以内の脳血管/廃用は9単位まで特例許可
- * @param {Object} dailySchedule 
- * @param {Object} patient 
- * @param {string} currentDate YYYY-MM-DD
- * @param {number} newUnits 今回追加・変更する単位数
- * @param {number} currentSlotUnits 変更前スロットの単位数（新規時は0）
- * @returns {{ valid: boolean, message: string }}
  */
 export function validateDailyLimit(dailySchedule, patient, currentDate, newUnits, currentSlotUnits = 0) {
   let dailyTotal = 0;
@@ -106,13 +100,6 @@ export function validateDailyLimit(dailySchedule, patient, currentDate, newUnits
 
 /**
  * 3. 月13単位制限ガード
- * 日数上限超過、要介護、要支援、個別制限患者は月13単位を超過できない
- * @param {number} monthlyCurrentUnits 当該患者の当月累計取得単位数
- * @param {Object} patient 
- * @param {boolean} isLimitExceeded 標準算定日数超過フラグ
- * @param {number} newUnits 
- * @param {number} currentSlotUnits 
- * @returns {{ valid: boolean, message: string }}
  */
 export function validateMonthly13Limit(monthlyCurrentUnits, patient, isLimitExceeded, newUnits, currentSlotUnits = 0) {
   const isTarget = isLimitExceeded ||
@@ -135,14 +122,26 @@ export function validateMonthly13Limit(monthlyCurrentUnits, patient, isLimitExce
 }
 
 /**
- * 4. セラピスト人員基準ガード
+ * 4. 総合実施計画書料 月1回算定ガード
+ * 同一月内に同一患者ですでに計画書を算定している場合は重複算定をブロック
+ * @param {boolean} billingPlan 今回チェックが入っているか
+ * @param {string|null} existingPlanDate すでに当月内に算定されている日付（YYYY-MM-DD）または null
+ * @returns {{ valid: boolean, message: string }}
+ */
+export function validateMonthlyPlanLimit(billingPlan, existingPlanDate) {
+  if (!billingPlan) return { valid: true, message: '' };
+  if (existingPlanDate) {
+    return {
+      valid: false,
+      message: `総合計画評価料は月1回のみ算定可能です。（既に ${existingPlanDate} に算定済みです）`
+    };
+  }
+  return { valid: true, message: '' };
+}
+
+/**
+ * 5. セラピスト人員基準ガード
  * 1日標準18単位、最大特例24単位（24超は完全遮断）、週108単位
- * @param {Object} dailySchedule 
- * @param {string} therapistId A | B | C
- * @param {number} newUnits 
- * @param {number} currentSlotUnits 
- * @param {number} weeklyTotalBefore 
- * @returns {{ valid: boolean, level: 'OK'|'WARN'|'BLOCK', message: string }}
  */
 export function validateTherapistWorkload(dailySchedule, therapistId, newUnits, currentSlotUnits = 0, weeklyTotalBefore = 0) {
   let therapistDaily = 0;
@@ -154,7 +153,6 @@ export function validateTherapistWorkload(dailySchedule, therapistId, newUnits, 
   const nextDaily = therapistDaily - currentSlotUnits + newUnits;
   const nextWeekly = weeklyTotalBefore - currentSlotUnits + newUnits;
 
-  // 1日24単位超過は厳格ブロック
   if (nextDaily > REHA_RULES.LIMITS.THERAPIST_DAILY_MAX) {
     return {
       valid: false,
@@ -163,7 +161,6 @@ export function validateTherapistWorkload(dailySchedule, therapistId, newUnits, 
     };
   }
 
-  // 週108単位超過警告
   if (nextWeekly > REHA_RULES.LIMITS.THERAPIST_WEEKLY_MAX) {
     return {
       valid: true,
@@ -172,7 +169,6 @@ export function validateTherapistWorkload(dailySchedule, therapistId, newUnits, 
     };
   }
 
-  // 1日18単位超過注意喚起
   if (nextDaily > REHA_RULES.LIMITS.THERAPIST_DAILY_STANDARD) {
     return {
       valid: true,
