@@ -1,283 +1,155 @@
-// js/views/scheduleView.js
-// VIEW 1: 当日時間割・患者パレット・コマ編集・計画書月1回ガード連携（200行制限準拠）
+// js/store/scheduleStore.js
+// 時間割コマCRUD・LocalStorage永続化・月間集計・計画書算定履歴検索層（200行制限準拠）
 
-import { TIME_SLOTS, THERAPISTS } from '../config/rules.js';
-import { sanitizeHtml, safeParseInt } from '../core/dataNormalizer.js';
-import { getPatientById, searchPatients } from '../store/patientStore.js';
-import { getDailySchedule, setScheduleSlot, clearScheduleSlot, getDailyStats, findPatientMonthlyPlanDate } from '../store/scheduleStore.js';
-import { validateTimeConflict, validateDailyLimit, validateTherapistWorkload, validateMonthlyPlanLimit } from '../core/validator.js';
-import { showToast } from './exportView.js';
+import { normalizeDateString, safeParseInt } from '../core/dataNormalizer.js';
+import { getPatientById } from './patientStore.js';
+import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
 
-let currentDateStr = new Date().toISOString().split('T')[0];
-let paletteCategory = 'ALL';
-let activeModalSlot = null; // { therapistId, slotId, currentItem }
+const STORAGE_PREFIX = 'reha_schedule_';
 
-export function initScheduleView() {
-  const dateInput = document.getElementById('scheduleDateInput');
-  const btnToday = document.getElementById('btnTodaySchedule');
-  const searchInput = document.getElementById('paletteSearch');
+function getStorageKey(dateStr) {
+  return `${STORAGE_PREFIX}${normalizeDateString(dateStr)}`;
+}
 
-  if (dateInput) {
-    dateInput.value = currentDateStr;
-    dateInput.addEventListener('change', (e) => {
-      currentDateStr = e.target.value;
-      renderScheduleView();
-    });
+export function getDailySchedule(dateStr) {
+  const defaultSchedule = { A: {}, B: {}, C: {} };
+  const cleanDate = normalizeDateString(dateStr);
+  if (!cleanDate) return defaultSchedule;
+
+  try {
+    const raw = localStorage.getItem(getStorageKey(cleanDate));
+    if (!raw) return defaultSchedule;
+    const parsed = JSON.parse(raw);
+    return { A: parsed.A || {}, B: parsed.B || {}, C: parsed.C || {} };
+  } catch (error) {
+    console.error('getDailySchedule parse error:', error);
+    return defaultSchedule;
   }
-  if (btnToday) {
-    btnToday.addEventListener('click', () => {
-      currentDateStr = new Date().toISOString().split('T')[0];
-      if (dateInput) dateInput.value = currentDateStr;
-      renderScheduleView();
-    });
+}
+
+export function saveDailySchedule(dateStr, scheduleData) {
+  const cleanDate = normalizeDateString(dateStr);
+  if (!cleanDate || !scheduleData) return false;
+  try {
+    localStorage.setItem(getStorageKey(cleanDate), JSON.stringify(scheduleData));
+    return true;
+  } catch (error) {
+    console.error('saveDailySchedule error:', error);
+    return false;
   }
-  if (searchInput) searchInput.addEventListener('input', () => renderPatientPalette());
-
-  document.querySelectorAll('.palette-cat-btn').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      document.querySelectorAll('.palette-cat-btn').forEach((b) => b.classList.remove('active'));
-      e.target.classList.add('active');
-      paletteCategory = e.target.dataset.cat;
-      renderPatientPalette();
-    });
-  });
-
-  setupSlotModalListeners();
 }
 
-export function renderScheduleView() {
-  renderDailyKPIStrip();
-  renderPatientPalette();
-  renderTimetableGrid();
+export function setScheduleSlot(dateStr, therapistId, slotId, slotData) {
+  const current = getDailySchedule(dateStr);
+  if (!current[therapistId]) current[therapistId] = {};
+
+  current[therapistId][slotId] = {
+    patientId: slotData.patientId,
+    units: Math.max(1, safeParseInt(slotData.units, 1)),
+    note: slotData.note ? String(slotData.note).trim() : '',
+    billingPlan: Boolean(slotData.billingPlan),
+    updatedAt: new Date().toISOString()
+  };
+  return saveDailySchedule(dateStr, current);
 }
 
-function renderDailyKPIStrip() {
-  const container = document.getElementById('dailyKpiStrip');
-  if (!container) return;
-  const stats = getDailyStats(currentDateStr);
-  container.innerHTML = `
-    <span style="color:#0369a1;">本日総単位: <strong>${stats.totalUnits}</strong> 単位</span>
-    <span style="color:#059669;">患者数: <strong>${stats.totalPatients}</strong> 名</span>
-    <span style="color:#854d0e;">計画書: <strong>${stats.planCount}</strong> 件</span>
-    <span style="color:#64748b; font-size:0.8rem;">(A: ${stats.therapists.A.units}u / B: ${stats.therapists.B.units}u / C: ${stats.therapists.C.units}u)</span>
-  `;
-}
-
-function renderPatientPalette() {
-  const listEl = document.getElementById('palettePatientList');
-  const searchInput = document.getElementById('paletteSearch');
-  if (!listEl) return;
-
-  const keyword = searchInput ? searchInput.value : '';
-  const patients = searchPatients(keyword, paletteCategory);
-
-  if (patients.length === 0) {
-    listEl.innerHTML = '<div style="font-size:0.75rem; color:#94a3b8; text-align:center; padding:16px;">該当する患者がいません</div>';
-    return;
+export function clearScheduleSlot(dateStr, therapistId, slotId) {
+  const current = getDailySchedule(dateStr);
+  if (current[therapistId]?.[slotId]) {
+    delete current[therapistId][slotId];
+    return saveDailySchedule(dateStr, current);
   }
-
-  listEl.innerHTML = patients.map((p) => {
-    const isOut = p.category === 'OUTPATIENT';
-    const borderCol = isOut ? 'var(--color-outpatient)' : 'var(--color-inpatient)';
-    return `
-      <div class="patient-palette-card" draggable="true" data-patient-id="${p.id}"
-           style="background:#fff; border:1px solid #e2e8f0; border-left:4px solid ${borderCol}; border-radius:4px; padding:6px 8px; cursor:grab; font-size:0.78rem;">
-        <div style="font-weight:700; display:flex; justify-content:space-between;">
-          <span>${sanitizeHtml(p.name)}</span>
-          <span style="font-size:0.7rem; color:#64748b;">${p.id}</span>
-        </div>
-        <div style="font-size:0.7rem; color:#64748b; margin-top:2px;">${sanitizeHtml(p.diseaseName || '')}</div>
-      </div>
-    `;
-  }).join('');
-
-  listEl.querySelectorAll('.patient-palette-card').forEach((card) => {
-    card.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData('text/plain', e.currentTarget.dataset.patientId);
-    });
-  });
+  return true;
 }
 
-function renderTimetableGrid() {
-  const gridEl = document.getElementById('timetableGrid');
-  if (!gridEl) return;
+export function getDailyStats(dateStr) {
+  const schedule = getDailySchedule(dateStr);
+  const stats = {
+    totalUnits: 0, totalPatients: 0, planCount: 0,
+    therapists: { A: { units: 0, patients: 0 }, B: { units: 0, patients: 0 }, C: { units: 0, patients: 0 } }
+  };
+  const uniquePatients = new Set();
 
-  const schedule = getDailySchedule(currentDateStr);
-  let html = '<div class="timetable-header">時間帯</div>';
-  THERAPISTS.forEach((t) => { html += `<div class="timetable-header">${t.name}</div>`; });
-
-  const coveredUntil = { A: 0, B: 0, C: 0 };
-
-  TIME_SLOTS.forEach((slot, index) => {
-    html += `<div class="time-slot-row"><div class="time-col">${slot.label}</div>`;
-    THERAPISTS.forEach((t) => {
-      const tId = t.id;
-      const cellData = schedule[tId]?.[slot.id];
-
-      if (coveredUntil[tId] > index) {
-        html += `<div class="cell-slot slot-covered-placeholder"></div>`;
-        return;
-      }
-
-      if (cellData && cellData.patientId) {
-        const p = getPatientById(cellData.patientId) || { name: '未登録', category: 'OUTPATIENT' };
-        const u = Math.min(4, Math.max(1, safeParseInt(cellData.units, 1)));
-        coveredUntil[tId] = index + u;
-        const isOut = p.category === 'OUTPATIENT';
-        const cardClass = isOut ? 'card-outpatient' : 'card-inpatient';
-
-        html += `
-          <div class="cell-slot">
-            <div class="reha-slot-card ${cardClass} card-unit-${u}" data-therapist="${tId}" data-slot="${slot.id}">
-              <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                <span style="font-weight:700; font-size:0.8rem;">${sanitizeHtml(p.name)}</span>
-                <div>
-                  <span class="badge-unit badge-unit-${u}">${u}単位</span>
-                  ${cellData.billingPlan ? '<span class="badge-plan">📝計画書</span>' : ''}
-                </div>
-              </div>
-              <div style="font-size:0.7rem; color:#475569; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                ${sanitizeHtml(cellData.note || p.diseaseName || '')}
-              </div>
-            </div>
-          </div>`;
-      } else {
-        html += `
-          <div class="cell-slot" data-therapist="${tId}" data-slot="${slot.id}">
-            <button class="empty-slot-btn" data-therapist="${tId}" data-slot="${slot.id}">＋ 追加</button>
-          </div>`;
+  ['A', 'B', 'C'].forEach((tId) => {
+    const tSlots = schedule[tId] || {};
+    const tSet = new Set();
+    Object.values(tSlots).forEach((item) => {
+      if (item?.patientId) {
+        const u = safeParseInt(item.units, 1);
+        stats.therapists[tId].units += u;
+        stats.totalUnits += u;
+        tSet.add(item.patientId);
+        uniquePatients.add(item.patientId);
+        if (item.billingPlan) stats.planCount += 1;
       }
     });
-    html += `</div>`;
+    stats.therapists[tId].patients = tSet.size;
   });
-
-  gridEl.innerHTML = html;
-  attachGridEventListeners(gridEl);
+  stats.totalPatients = uniquePatients.size;
+  return stats;
 }
 
-function attachGridEventListeners(gridEl) {
-  gridEl.querySelectorAll('.empty-slot-btn').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openSlotModal(btn.dataset.therapist, btn.dataset.slot, null);
-    });
-  });
-
-  gridEl.querySelectorAll('.reha-slot-card').forEach((card) => {
-    card.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const tId = card.dataset.therapist;
-      const sId = card.dataset.slot;
-      const cur = getDailySchedule(currentDateStr)[tId]?.[sId];
-      openSlotModal(tId, sId, cur);
-    });
-  });
-
-  gridEl.querySelectorAll('.cell-slot:not(.slot-covered-placeholder)').forEach((cell) => {
-    cell.addEventListener('dragover', (e) => e.preventDefault());
-    cell.addEventListener('drop', (e) => {
-      e.preventDefault();
-      const patientId = e.dataTransfer.getData('text/plain');
-      const tId = cell.dataset.therapist;
-      const sId = cell.dataset.slot;
-      if (patientId && tId && sId) openSlotModal(tId, sId, { patientId, units: 1, note: '', billingPlan: false });
-    });
-  });
-}
-
-function setupSlotModalListeners() {
-  const modal = document.getElementById('modalSlotEdit');
-  const btnClose = document.getElementById('btnCloseSlotModal');
-  const btnDelete = document.getElementById('btnDeleteSlot');
-  const form = document.getElementById('slotEditForm');
-
-  btnClose?.addEventListener('click', () => modal.classList.remove('active'));
-  btnDelete?.addEventListener('click', () => {
-    if (!activeModalSlot) return;
-    clearScheduleSlot(currentDateStr, activeModalSlot.therapistId, activeModalSlot.slotId);
-    modal.classList.remove('active');
-    showToast('コマの配置を解除しました', 'warn');
-    renderScheduleView();
-  });
-
-  document.querySelectorAll('.btn-unit-select').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      document.querySelectorAll('.btn-unit-select').forEach((b) => b.style.background = '#fff');
-      e.target.style.background = '#e0f2fe';
-      document.getElementById('slotUnitsInput').value = e.target.dataset.unit;
-    });
-  });
-
-  form?.addEventListener('submit', (e) => {
-    e.preventDefault();
-    if (!activeModalSlot) return;
-
-    const patientId = document.getElementById('slotPatientId').value;
-    const units = safeParseInt(document.getElementById('slotUnitsInput').value, 1);
-    const note = document.getElementById('slotNoteInput').value;
-    const billingPlan = document.getElementById('slotBillingPlanInput').checked;
-
-    const dailySchedule = getDailySchedule(currentDateStr);
-    const currentUnits = activeModalSlot.currentItem ? activeModalSlot.currentItem.units : 0;
-    const patient = getPatientById(patientId);
-
-    // 1. 重複ガード
-    const conflictCheck = validateTimeConflict(dailySchedule, activeModalSlot.therapistId, activeModalSlot.slotId, patientId, units, activeModalSlot.slotId);
-    if (!conflictCheck.valid) { showToast(conflictCheck.message, 'error'); return; }
-
-    // 2. 患者1日上限ガード
-    if (patient) {
-      const dailyLimitCheck = validateDailyLimit(dailySchedule, patient, currentDateStr, units, currentUnits);
-      if (!dailyLimitCheck.valid) { showToast(dailyLimitCheck.message, 'error'); return; }
+/**
+ * 当月内に同一患者が既に計画書料を算定している日付を走査・検出する
+ */
+export function findPatientMonthlyPlanDate(patientId, year, month, excludeDate = '', excludeSlotId = '') {
+  const daysInMonth = new Date(year, month, 0).getDate();
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const schedule = getDailySchedule(dStr);
+    for (const tId of ['A', 'B', 'C']) {
+      const slots = schedule[tId] || {};
+      for (const [sId, item] of Object.entries(slots)) {
+        if (!item || item.patientId !== patientId || !item.billingPlan) continue;
+        if (dStr === excludeDate && sId === excludeSlotId) continue;
+        return dStr; // 算定日を発見
+      }
     }
-
-    // 3. 総合実施計画書料 月1回算定ガード
-    if (billingPlan) {
-      const [year, month] = currentDateStr.split('-').map(Number);
-      const excludeSlot = activeModalSlot.currentItem ? activeModalSlot.slotId : '';
-      const existingDate = findPatientMonthlyPlanDate(patientId, year, month, currentDateStr, excludeSlot);
-      const planCheck = validateMonthlyPlanLimit(billingPlan, existingDate);
-      if (!planCheck.valid) { showToast(planCheck.message, 'error'); return; }
-    }
-
-    // 4. セラピスト人員基準ガード
-    const workloadCheck = validateTherapistWorkload(dailySchedule, activeModalSlot.therapistId, units, currentUnits);
-    if (!workloadCheck.valid) { showToast(workloadCheck.message, 'error'); return; }
-    if (workloadCheck.message) showToast(workloadCheck.message, 'warn');
-
-    setScheduleSlot(currentDateStr, activeModalSlot.therapistId, activeModalSlot.slotId, { patientId, units, note, billingPlan });
-    modal.classList.remove('active');
-    showToast('スケジュールを保存しました', 'success');
-    renderScheduleView();
-  });
+  }
+  return null;
 }
 
-function openSlotModal(therapistId, slotId, currentItem) {
-  activeModalSlot = { therapistId, slotId, currentItem };
-  const modal = document.getElementById('modalSlotEdit');
-  const titleEl = document.getElementById('slotModalTitle');
-  const patientInfoEl = document.getElementById('slotPatientInfo');
-  const btnDelete = document.getElementById('btnDeleteSlot');
+export function aggregateFromAppSchedule(year, month) {
+  const y = safeParseInt(year);
+  const m = safeParseInt(month);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const patientMap = {};
+  const dailyBreakdown = {};
 
-  titleEl.textContent = `コマ配置 (PT ${therapistId} / ${TIME_SLOTS.find((s) => s.id === slotId)?.label || slotId})`;
-  btnDelete.style.display = currentItem ? 'block' : 'none';
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dayStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const schedule = getDailySchedule(dayStr);
+    dailyBreakdown[day] = { totalUnits: 0, inpatients: 0, outpatients: 0, planCount: 0 };
 
-  const pId = currentItem?.patientId || document.querySelector('.patient-palette-card')?.dataset.patientId || '';
-  const patient = getPatientById(pId);
+    ['A', 'B', 'C'].forEach((tId) => {
+      const tSlots = schedule[tId] || {};
+      Object.entries(tSlots).forEach(([slotId, item]) => {
+        if (!item?.patientId) return;
+        const pId = item.patientId;
+        const u = safeParseInt(item.units, 1);
+        const patient = getPatientById(pId) || { id: pId, name: '未登録患者', category: 'OUTPATIENT', diseaseType: 'LOCOMOTIVE' };
 
-  document.getElementById('slotPatientId').value = pId;
-  document.getElementById('slotTherapistId').value = therapistId;
-  document.getElementById('slotId').value = slotId;
-  patientInfoEl.textContent = patient ? `患者: ${patient.name} (${patient.id}) / ${patient.diseaseName || ''}` : '患者が選択されていません';
+        if (!patientMap[pId]) {
+          patientMap[pId] = {
+            patient, totalUnits: 0, planCount: 0, earlyBonusCount: 0,
+            dailyUnits: Array(daysInMonth + 1).fill(0), slots: []
+          };
+        }
+        patientMap[pId].totalUnits += u;
+        patientMap[pId].dailyUnits[day] += u;
+        if (item.billingPlan) {
+          patientMap[pId].planCount += 1;
+          dailyBreakdown[day].planCount += 1;
+        }
+        const deadline = calculatePatientDeadlines(patient, dayStr);
+        if (deadline.earlyBonus?.points > 0) patientMap[pId].earlyBonusCount += 1;
 
-  const units = currentItem?.units || 1;
-  document.getElementById('slotUnitsInput').value = units;
-  document.querySelectorAll('.btn-unit-select').forEach((b) => {
-    b.style.background = b.dataset.unit == units ? '#e0f2fe' : '#fff';
-  });
-
-  document.getElementById('slotBillingPlanInput').checked = Boolean(currentItem?.billingPlan);
-  document.getElementById('slotNoteInput').value = currentItem?.note || '';
-
-  modal.classList.add('active');
+        patientMap[pId].slots.push({ date: dayStr, therapist: tId, slotId, units: u, billingPlan: item.billingPlan });
+        dailyBreakdown[day].totalUnits += u;
+        if (patient.category === 'INPATIENT') dailyBreakdown[day].inpatients += u;
+        else dailyBreakdown[day].outpatients += u;
+      });
+    });
+  }
+  return { year: y, month: m, daysInMonth, patientMap, dailyBreakdown };
 }
