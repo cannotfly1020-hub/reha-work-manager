@@ -9,6 +9,17 @@ import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
 let currentYear = new Date().getFullYear();
 let currentMonth = new Date().getMonth() + 1;
 
+/**
+ * 日本時間ローカルの YYYY-MM-DD 文字列を取得する（時差バグ完全防止）
+ */
+function getLocalTodayString() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 export function initMonthlyView() {
   const monthInput = document.getElementById('monthlyMonthInput');
   const btnPrev = document.getElementById('btnPrevMonth');
@@ -54,7 +65,7 @@ export function renderMonthlyView() {
 }
 
 function renderRevenueDashboard(aggregated) {
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getLocalTodayString();
   let todayUnits = 0;
   let todayRevenue = 0;
   let monthUnits = 0;
@@ -63,18 +74,29 @@ function renderRevenueDashboard(aggregated) {
   Object.values(aggregated.patientMap).forEach((item) => {
     const p = item.patient;
     const disease = REHA_RULES.LIMIT_DAYS[p.diseaseType] || REHA_RULES.LIMIT_DAYS.ANALGESIA;
-    
-    // スロット単位の収益計算
+
     item.slots.forEach((s) => {
       const isToday = s.date === todayStr;
       const deadlines = calculatePatientDeadlines(p, s.date);
+      // 維持期（100分の60）減算対象判定
       const basePoint = deadlines.isMaintenanceReduction ? disease.maintPoints : disease.defaultPoints;
-      
-      let slotPoints = basePoint * s.units;
-      if (s.billingPlan) slotPoints += REHA_RULES.PLAN_POINTS.PLAN_1;
-      if (deadlines.earlyBonus && deadlines.earlyBonus.points > 0) {
-        slotPoints += deadlines.earlyBonus.points;
+
+      // 早期加算（1単位につき60点 または 25点）
+      const earlyBonusPerUnit = (deadlines.earlyBonus && deadlines.earlyBonus.points > 0)
+        ? deadlines.earlyBonus.points
+        : 0;
+
+      // 1単位あたりの合計点数 ＝ (基本点数 ＋ 早期加算点数)
+      const unitPoints = basePoint + earlyBonusPerUnit;
+
+      // スロットの合計点数 ＝ 1単位あたり点数 × 単位数
+      let slotPoints = unitPoints * s.units;
+
+      // 当該スロットで計画書を算定している場合のみ計画書料（240点）を加算
+      if (s.billingPlan) {
+        slotPoints += REHA_RULES.PLAN_POINTS.PLAN_1;
       }
+
       const slotYen = slotPoints * REHA_RULES.POINT_RATE;
 
       monthUnits += s.units;
@@ -131,7 +153,7 @@ function renderMonthlyUnitsTable(aggregated) {
       ? '<span style="color:#2563eb; font-weight:700;">外来</span>'
       : '<span style="color:#d97706; font-weight:700;">入院</span>';
 
-    // 13単位制限アラート判定
+    // 要介護・維持期の13単位制限アラート
     const is13Target = p.careInsuranceType === 'CARE' || p.careInsuranceType === 'SUPPORT' || p.force13Limit;
     const isExceeded = is13Target && item.totalUnits > 13;
     const isNearLimit = is13Target && item.totalUnits >= 11 && item.totalUnits <= 13;
