@@ -131,8 +131,14 @@ export function aggregateFromAppSchedule(year, month) {
 
         if (!patientMap[pId]) {
           patientMap[pId] = {
-            patient, totalUnits: 0, planCount: 0, earlyBonusCount: 0,
-            dailyUnits: Array(daysInMonth + 1).fill(0), slots: []
+            patient,
+            totalUnits: 0,
+            planCount: 0,
+            earlyBonusCount: 0,
+            totalEarlyUnits: 0,
+            dailyUnits: Array(daysInMonth + 1).fill(0),
+            dailyEarlyUnits: Array(daysInMonth + 1).fill(0),
+            slots: []
           };
         }
         patientMap[pId].totalUnits += u;
@@ -142,7 +148,11 @@ export function aggregateFromAppSchedule(year, month) {
           dailyBreakdown[day].planCount += 1;
         }
         const deadline = calculatePatientDeadlines(patient, dayStr);
-        if (deadline.earlyBonus?.points > 0) patientMap[pId].earlyBonusCount += 1;
+        if (deadline.earlyBonus?.points > 0) {
+          patientMap[pId].earlyBonusCount += 1;
+          patientMap[pId].totalEarlyUnits += u;
+          patientMap[pId].dailyEarlyUnits[day] += u;
+        }
 
         patientMap[pId].slots.push({ date: dayStr, therapist: tId, slotId, units: u, billingPlan: item.billingPlan });
         dailyBreakdown[day].totalUnits += u;
