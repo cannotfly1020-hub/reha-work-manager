@@ -19,7 +19,11 @@
 
 /* STREAMING_CHUNK:Resetting elements and defining base layout... */
 
-{ box-sizing: border-box; margin: 0; padding: 0; }
+{
+box-sizing: border-box;
+margin: 0;
+padding: 0;
+}
 body {
 font-family: var(--font-base);
 background-color: var(--color-bg);
@@ -38,7 +42,10 @@ position: sticky;
 top: 0;
 z-index: 40;
 }
-.nav-tab-group { display: flex; gap: 8px; }
+.nav-tab-group {
+display: flex;
+gap: 8px;
+}
 .nav-tab {
 padding: 8px 16px;
 border-radius: var(--radius-sm);
@@ -49,10 +56,22 @@ color: var(--color-text-muted);
 cursor: pointer;
 transition: all 0.2s ease;
 }
-.nav-tab:hover { background: #f1f5f9; color: var(--color-text-main); }
-.nav-tab.active { background: #e0f2fe; color: #0369a1; border-color: #bae6fd; }
-.view-panel { display: none; padding: 20px 24px; }
-.view-panel.active { display: block; }
+.nav-tab:hover {
+background: #f1f5f9;
+color: var(--color-text-main);
+}
+.nav-tab.active {
+background: #e0f2fe;
+color: #0369a1;
+border-color: #bae6fd;
+}
+.view-panel {
+display: none;
+padding: 20px 24px;
+}
+.view-panel.active {
+display: block;
+}
 
 /* STREAMING_CHUNK:Styling time table grid and slot dimensions... */
 .timetable-container {
@@ -111,7 +130,11 @@ transition: opacity 0.15s ease;
 font-size: 0.75rem;
 color: var(--color-primary);
 }
-.cell-slot:hover .empty-slot-btn { opacity: 1; border-color: #cbd5e1; background: #f8fafc; }
+.cell-slot:hover .empty-slot-btn {
+opacity: 1;
+border-color: #cbd5e1;
+background: #f8fafc;
+}
 
 /* STREAMING_CHUNK:Implementing Pattern C hybrid coloring for schedule cards... */
 .reha-slot-card {
@@ -130,13 +153,33 @@ display: flex;
 flex-direction: column;
 justify-content: space-between;
 }
-.reha-slot-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); z-index: 20; }
-.card-inpatient { border-left: 6px solid var(--color-inpatient); }
-.card-outpatient { border-left: 6px solid var(--color-outpatient); }
-.card-unit-1 { height: 48px; background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); }
-.card-unit-2 { height: 100px; background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); }
-.card-unit-3 { height: 152px; background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%); }
-.card-unit-4 { height: 204px; background: linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%); }
+.reha-slot-card:hover {
+transform: translateY(-1px);
+box-shadow: var(--shadow-md);
+z-index: 20;
+}
+.card-inpatient {
+border-left: 6px solid var(--color-inpatient);
+}
+.card-outpatient {
+border-left: 6px solid var(--color-outpatient);
+}
+.card-unit-1 {
+height: 48px;
+background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+}
+.card-unit-2 {
+height: 100px;
+background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+}
+.card-unit-3 {
+height: 152px;
+background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
+}
+.card-unit-4 {
+height: 204px;
+background: linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%);
+}
 .slot-covered-placeholder {
 pointer-events: none;
 background: rgba(241, 245, 249, 0.4);
@@ -164,26 +207,67 @@ border-radius: 4px;
 margin-left: 4px;
 }
 
-/* STREAMING_CHUNK:Styling sticky tables and data containers... */
+/* STREAMING_CHUNK:Styling responsive tables and data containers... */
 .table-container {
 width: 100%;
 overflow-x: auto;
-min-width: 1280px;
 background: var(--color-surface);
 border-radius: var(--radius-md);
 border: 1px solid var(--color-border);
 box-shadow: var(--shadow-sm);
 }
-.modern-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.85rem; }
-.modern-table th, .modern-table td {
-padding: 10px 14px;
+.modern-table {
+width: 100%;
+border-collapse: separate;
+border-spacing: 0;
+font-size: 0.85rem;
+}
+.modern-table th,
+.modern-table td {
+padding: 8px 10px;
 border-bottom: 1px solid var(--color-border);
 white-space: nowrap;
 }
-.modern-table th { background: #f8fafc; font-weight: 700; color: var(--color-text-muted); }
-.modern-table tbody tr:hover { background-color: #f1f5f9; }
-.modern-table th:last-child,
-.modern-table td:last-child {
+.modern-table th {
+background: #f8fafc;
+font-weight: 700;
+color: var(--color-text-muted);
+}
+.modern-table tbody tr:hover {
+background-color: #f1f5f9;
+}
+
+/* 月間単位表専用のタイトな設計（31日まで横スクロールなしで収めるためのスタイル） /
+.table-monthly {
+table-layout: fixed;
+width: 100%;
+font-size: 0.78rem;
+}
+.table-monthly th,
+.table-monthly td {
+padding: 5px 1px;
+text-align: center;
+border-bottom: 1px solid var(--color-border);
+border-right: 1px solid #f1f5f9;
+}
+.table-monthly th.col-fixed,
+.table-monthly td.col-fixed {
+text-align: left;
+padding-left: 6px;
+padding-right: 4px;
+}
+.table-monthly .sub-row-early {
+background-color: #faf5ff; / 早期加算行をやさしい薄紫で差別化 */
+color: #6b21a8;
+font-size: 0.72rem;
+}
+.table-monthly .sub-row-early:hover {
+background-color: #f3e8ff;
+}
+
+/* 患者台帳画面の最右列ボタン用sticky設定（月間表の31日目には干渉させない） */
+#patientTableContainer .modern-table th:last-child,
+#patientTableContainer .modern-table td:last-child {
 position: sticky;
 right: 0;
 background-color: #ffffff;
@@ -192,7 +276,9 @@ z-index: 5;
 text-align: center;
 min-width: 95px;
 }
-.modern-table tbody tr:hover td:last-child { background-color: #f1f5f9; }
+#patientTableContainer .modern-table tbody tr:hover td:last-child {
+background-color: #f1f5f9;
+}
 
 /* STREAMING_CHUNK:Building modal overlays and interactive cards... */
 .modal-overlay {
@@ -207,7 +293,10 @@ opacity: 0;
 pointer-events: none;
 transition: opacity 0.2s ease;
 }
-.modal-overlay.active { opacity: 1; pointer-events: auto; }
+.modal-overlay.active {
+opacity: 1;
+pointer-events: auto;
+}
 .modal-card {
 background: var(--color-surface);
 border-radius: var(--radius-md);
@@ -220,7 +309,9 @@ box-shadow: var(--shadow-lg);
 transform: translateY(12px);
 transition: transform 0.2s ease;
 }
-.modal-overlay.active .modal-card { transform: translateY(0); }
+.modal-overlay.active .modal-card {
+transform: translateY(0);
+}
 
 /* STREAMING_CHUNK:Configuring toast notifications... */
 .toast-container {
