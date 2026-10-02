@@ -56,6 +56,11 @@
         <button id="btnPrevMonth" style="padding:6px 12px; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer;">◀ 前月</button>
         <input type="month" id="monthlyMonthInput" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.95rem; font-weight:700;">
         <button id="btnNextMonth" style="padding:6px 12px; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer;">次月 ▶</button>
+        <select id="monthlySortSelect" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; background:#fff; font-weight:600; color:#334155; cursor:pointer; margin-left:8px;">
+          <option value="CATEGORY" selected>並べ替え: 区分順 (入院→外来→消炎)</option>
+          <option value="KANA">並べ替え: 五十音順 (あいうえお)</option>
+          <option value="ID">並べ替え: 患者ID順</option>
+        </select>
       </div>
       <div style="display:flex; gap:16px;">
         <div style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:8px 16px; text-align:center;">
