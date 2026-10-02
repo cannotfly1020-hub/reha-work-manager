@@ -1,14 +1,14 @@
 // js/views/scheduleView.js
-// VIEW 1: 当日時間割・コマ移動(D&D/モーダル)・消炎鎮痛来院・患者パレット・疾患タグ＆早期期限バッジ
+// VIEW 1: 当日時間割・コマ移動・消炎鎮痛来院・患者パレット・疾患タグ・早期期限バッジ・計画書4区分自動判定
 
 import { TIME_SLOTS, THERAPISTS, REHA_RULES } from '../config/rules.js';
 import { sanitizeHtml, safeParseInt } from '../core/dataNormalizer.js';
 import { getPatientById, searchPatients, getAllPatients } from '../store/patientStore.js';
 import {
   getDailySchedule, setScheduleSlot, clearScheduleSlot, moveScheduleSlot, getDailyStats,
-  findPatientMonthlyPlanDate, addAnalgesiaPatient, removeAnalgesiaPatient, getAnalgesiaSlotPatients
+  findPatientMonthlyPlanDate, hasPatientPastPlan, addAnalgesiaPatient, removeAnalgesiaPatient, getAnalgesiaSlotPatients
 } from '../store/scheduleStore.js';
-import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
+import { calculatePatientDeadlines, evaluateRecommendedPlan } from '../core/deadlineCalc.js';
 import { validateTimeConflict, validateDailyLimit, validateTherapistWorkload, validateMonthlyPlanLimit } from '../core/validator.js';
 import { showToast } from './exportView.js';
 
@@ -407,7 +407,20 @@ function openSlotModal(therapistId, slotId, currentItem) {
     } else {
       planSelect.disabled = false;
       const rawPlan = currentItem?.billingPlan;
-      planSelect.value = rawPlan ? (rawPlan === true ? 'PLAN_1_FIRST' : String(rawPlan)) : '';
+      if (rawPlan) {
+        // すでに保存済みの指定がある場合はそれを維持
+        planSelect.value = rawPlan === true ? 'PLAN_1_FIRST' : String(rawPlan);
+      } else {
+        // 未設定時は過去実績と患者属性から自動推奨区分を判定・初期セット
+        const hasPastPlan = hasPatientPastPlan(pId, currentDateStr);
+        const recommendation = evaluateRecommendedPlan(patient, currentDateStr, hasPastPlan);
+        if (recommendation.recommendedPlan) {
+          planSelect.value = recommendation.recommendedPlan;
+          patientInfoEl.innerHTML += `<div style="color:#0284c7; font-size:0.75rem; margin-top:4px; font-weight:600; background:#f0f9ff; padding:4px 6px; border-radius:4px; border:1px solid #bae6fd;">💡 推奨自動選択: ${recommendation.label} (${recommendation.reason})</div>`;
+        } else {
+          planSelect.value = '';
+        }
+      }
     }
   }
 
