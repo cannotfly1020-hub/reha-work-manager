@@ -1,9 +1,9 @@
 // js/views/scheduleView.js
-// VIEW 1: 当日時間割・コマ移動・消炎鎮痛来院・患者パレット・疾患タグ・早期期限バッジ・計画書4区分自動判定
+// VIEW 1: 当日時間割・コマ移動・消炎鎮痛来院・患者パレット・疾患タグ・早期期限バッジ・計画書4区分自動判定・台帳同期連動
 
 import { TIME_SLOTS, THERAPISTS, REHA_RULES } from '../config/rules.js';
 import { sanitizeHtml, safeParseInt } from '../core/dataNormalizer.js';
-import { getPatientById, searchPatients, getAllPatients } from '../store/patientStore.js';
+import { getPatientById, searchPatients, getAllPatients, updatePatientPlanStatus } from '../store/patientStore.js';
 import {
   getDailySchedule, setScheduleSlot, clearScheduleSlot, moveScheduleSlot, getDailyStats,
   findPatientMonthlyPlanDate, hasPatientPastPlan, addAnalgesiaPatient, removeAnalgesiaPatient, getAnalgesiaSlotPatients
@@ -352,6 +352,12 @@ function setupSlotModalListeners() {
     }
 
     setScheduleSlot(currentDateStr, newTherapistId, newSlotId, { patientId, units, note, billingPlan });
+
+    // 計画書算定実績確定に伴い、患者台帳の計画書ステータスを自動更新・昇格
+    if (billingPlan) {
+      updatePatientPlanStatus(patientId, billingPlan);
+    }
+
     modal.classList.remove('active');
     showToast('スケジュールを保存しました', 'success');
     renderScheduleView();
@@ -411,7 +417,7 @@ function openSlotModal(therapistId, slotId, currentItem) {
         // すでに保存済みの指定がある場合はそれを維持
         planSelect.value = rawPlan === true ? 'PLAN_1_FIRST' : String(rawPlan);
       } else {
-        // 未設定時は過去実績と患者属性から自動推奨区分を判定・初期セット
+        // 未設定時は過去実績と患者台帳属性から自動推奨区分を判定・初期セット
         const hasPastPlan = hasPatientPastPlan(pId, currentDateStr);
         const recommendation = evaluateRecommendedPlan(patient, currentDateStr, hasPastPlan);
         if (recommendation.recommendedPlan) {
