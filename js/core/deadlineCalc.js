@@ -1,5 +1,5 @@
 // js/core/deadlineCalc.js
-// 期限・早期加算・要介護3分の1移行日計算エンジン
+// 期限・早期加算・要介護3分の1移行日計算・総合計画書自動判定エンジン
 // DOMおよびStorageに一切依存しない純粋関数群として実装（200行制限準拠）
 
 import { REHA_RULES } from '../config/rules.js';
@@ -93,11 +93,9 @@ export function evaluateEarlyBonusPhase(admissionOrStart, sessionDate, category 
   // 起算日当日を1日目とするため dayCount = diff + 1
   const dayCount = diff + 1;
   const maxAllowedDays = REHA_RULES.EARLY_BONUS.PHASE_2.maxDays; // 14日
-  // 14日目の日付（起算日 + 13日加算）
   const endDateStr = addDays(admissionOrStart, maxAllowedDays - 1);
   const remainingDays = maxAllowedDays - dayCount;
 
-  // 終了日の「M/D」表示用
   const endParts = endDateStr.split('-');
   const shortDateStr = endParts.length === 3 ? `${Number(endParts[1])}/${Number(endParts[2])}` : '';
 
@@ -145,12 +143,9 @@ export function evaluateEarlyBonusPhase(admissionOrStart, sessionDate, category 
  */
 export function calculatePatientDeadlines(patient, baseDate = new Date()) {
   const disease = REHA_RULES.LIMIT_DAYS[patient?.diseaseType] || REHA_RULES.LIMIT_DAYS.ANALGESIA;
-  
-  // 起算日選定（発症日・手術日優先、無ければ入院日）
   const startDateStr = patient?.onsetDate || patient?.admissionDate || '';
   const earlyStartStr = patient?.earlyBonusStartDate || patient?.admissionDate || '';
 
-  // 1. 標準算定日数上限到達日および残日数
   let limitDateStr = '';
   let remainingDays = null;
   let isLimitExceeded = false;
@@ -162,10 +157,8 @@ export function calculatePatientDeadlines(patient, baseDate = new Date()) {
     isLimitExceeded = remainingDays !== null && remainingDays < 0;
   }
 
-  // 2. 令和8年度改定 早期加算ステータス（終了日・残日数つき）
   const earlyBonus = evaluateEarlyBonusPhase(earlyStartStr, baseDate, patient?.category);
 
-  // 3. 介護保険認定区分と総合実施計画書料2 移行日（3分の1経過日）
   let plan2TransitionDateStr = '';
   let plan2RemainingDays = null;
   let isPlan2Required = false;
@@ -177,7 +170,6 @@ export function calculatePatientDeadlines(patient, baseDate = new Date()) {
     isPlan2Required = plan2RemainingDays !== null && plan2RemainingDays <= 0;
   }
 
-  // 4. 適用基本点数（100分の60減算判定連動）
   const isMaintenanceReduction = isLimitExceeded || patient?.careInsuranceType === 'SUPPORT' || patient?.careInsuranceType === 'CARE';
   const currentBasePoints = isMaintenanceReduction ? disease.maintPoints : disease.defaultPoints;
 
@@ -197,4 +189,51 @@ export function calculatePatientDeadlines(patient, baseDate = new Date()) {
     plan2RemainingDays,
     isPlan2Required
   };
+}
+
+/**
+ * リハ総合計画評価料（4区分）の推奨選択肢を自動判定する純粋関数
+ * @param {Object} patient 患者マスター情報
+ * @param {string} targetDateStr 算定対象日 (YYYY-MM-DD)
+ * @param {boolean} hasPastPlan 過去（対象日より前）に算定実績があるか
+ * @returns {{ recommendedPlan: string, label: string, points: number, reason: string }}
+ */
+export function evaluateRecommendedPlan(patient, targetDateStr, hasPastPlan = false) {
+  if (!patient || patient.diseaseType === 'ANALGESIA') {
+    return { recommendedPlan: '', label: 'なし (算定しない)', points: 0, reason: '物療または患者未選択' };
+  }
+
+  const deadlines = calculatePatientDeadlines(patient, targetDateStr);
+  const isPlan2 = deadlines.isPlan2Required;
+  const isFirst = !hasPastPlan;
+
+  if (isPlan2) {
+    return isFirst
+      ? {
+          recommendedPlan: 'PLAN_2_FIRST',
+          label: '総合実施計画書2 (初回: 240点)',
+          points: REHA_RULES.PLAN_POINTS.PLAN_2_FIRST,
+          reason: '要介護認定 ＋ 3分の1日数経過 (初回)'
+        }
+      : {
+          recommendedPlan: 'PLAN_2_FOLLOW',
+          label: '総合実施計画書2 (2回目以降: 196点)',
+          points: REHA_RULES.PLAN_POINTS.PLAN_2_FOLLOW,
+          reason: '要介護認定 ＋ 3分の1日数経過 (2回目以降)'
+        };
+  }
+
+  return isFirst
+    ? {
+        recommendedPlan: 'PLAN_1_FIRST',
+        label: '総合実施計画書1 (初回: 300点)',
+        points: REHA_RULES.PLAN_POINTS.PLAN_1_FIRST,
+        reason: '通常算定 (初回)'
+      }
+    : {
+        recommendedPlan: 'PLAN_1_FOLLOW',
+        label: '総合実施計画書1 (2回目以降: 240点)',
+        points: REHA_RULES.PLAN_POINTS.PLAN_1_FOLLOW,
+        reason: '通常算定 (2回目以降)'
+      };
 }
