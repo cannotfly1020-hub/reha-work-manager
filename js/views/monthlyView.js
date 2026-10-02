@@ -1,13 +1,14 @@
 // js/views/monthlyView.js
-// VIEW 2: 月間単位表・収益ダッシュボード・業務日誌プレビュー制御層（200行制限準拠）
+// VIEW 2: 月間単位表・収益ダッシュボード・消炎鎮痛35点加算・3種ソート制御層（200行制限準拠）
 
 import { REHA_RULES } from '../config/rules.js';
-import { safeParseInt, sanitizeHtml } from '../core/dataNormalizer.js';
+import { safeParseInt, sanitizeHtml, normalizeToKatakana } from '../core/dataNormalizer.js';
 import { aggregateFromAppSchedule } from '../store/scheduleStore.js';
 import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
 
 let currentYear = new Date().getFullYear();
 let currentMonth = new Date().getMonth() + 1;
+let currentSortKey = 'CATEGORY'; // 'CATEGORY' | 'KANA' | 'ID'
 
 function getLocalTodayString() {
   const now = new Date();
@@ -21,6 +22,7 @@ export function initMonthlyView() {
   const monthInput = document.getElementById('monthlyMonthInput');
   const btnPrev = document.getElementById('btnPrevMonth');
   const btnNext = document.getElementById('btnNextMonth');
+  const sortSelect = document.getElementById('monthlySortSelect');
 
   if (monthInput) {
     monthInput.value = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
@@ -45,6 +47,11 @@ export function initMonthlyView() {
     currentMonth += 1;
     if (currentMonth > 12) { currentMonth = 1; currentYear += 1; }
     syncMonthInput();
+    renderMonthlyView();
+  });
+
+  sortSelect?.addEventListener('change', (e) => {
+    currentSortKey = e.target.value;
     renderMonthlyView();
   });
 }
@@ -74,6 +81,16 @@ function renderRevenueDashboard(aggregated) {
 
     item.slots.forEach((s) => {
       const isToday = s.date === todayStr;
+
+      // 消炎鎮痛（物療）は1日35点(350円)
+      if (s.isAnalgesia) {
+        const analgesiaYen = (s.points || 35) * REHA_RULES.POINT_RATE;
+        monthRevenue += analgesiaYen;
+        if (isToday) todayRevenue += analgesiaYen;
+        return;
+      }
+
+      // 個別リハビリ単位・加算計算
       const deadlines = calculatePatientDeadlines(p, s.date);
       const basePoint = deadlines.isMaintenanceReduction ? disease.maintPoints : disease.defaultPoints;
       const earlyBonusPerUnit = (deadlines.earlyBonus && deadlines.earlyBonus.points > 0) ? deadlines.earlyBonus.points : 0;
@@ -98,9 +115,36 @@ function renderRevenueDashboard(aggregated) {
   const unitsMonthEl = document.getElementById('kpiMonthUnits');
 
   if (revTodayEl) revTodayEl.textContent = `¥${todayRevenue.toLocaleString()}`;
-  if (unitsTodayEl) unitsTodayEl.textContent = `${todayUnits} 単位`;
+  if (unitsTodayEl) unitsTodayEl.textContent = `(${todayUnits}u)`;
   if (revMonthEl) revMonthEl.textContent = `¥${monthRevenue.toLocaleString()}`;
-  if (unitsMonthEl) unitsMonthEl.textContent = `${monthUnits} 単位`;
+  if (unitsMonthEl) unitsMonthEl.textContent = `(${monthUnits}u)`;
+}
+
+function sortPatients(patients, sortKey) {
+  return [...patients].sort((a, b) => {
+    const pA = a.patient;
+    const pB = b.patient;
+
+    if (sortKey === 'KANA') {
+      const kanaA = normalizeToKatakana(pA.nameKana || pA.name);
+      const kanaB = normalizeToKatakana(pB.nameKana || pB.name);
+      return kanaA.localeCompare(kanaB, 'ja');
+    }
+
+    if (sortKey === 'ID') {
+      return (pA.id || '').localeCompare(pB.id || '', undefined, { numeric: true });
+    }
+
+    // デフォルト: CATEGORY (入院 → 外来 → 消炎)
+    const getCatScore = (p) => {
+      if (p.diseaseType === 'ANALGESIA') return 3;
+      if (p.category === 'INPATIENT') return 1;
+      return 2;
+    };
+    const scoreDiff = getCatScore(pA) - getCatScore(pB);
+    if (scoreDiff !== 0) return scoreDiff;
+    return (pA.id || '').localeCompare(pB.id || '', undefined, { numeric: true });
+  });
 }
 
 function renderMonthlyUnitsTable(aggregated) {
@@ -108,14 +152,15 @@ function renderMonthlyUnitsTable(aggregated) {
   if (!container) return;
 
   const { daysInMonth, patientMap } = aggregated;
-  const patients = Object.values(patientMap);
+  const rawPatients = Object.values(patientMap);
 
-  if (patients.length === 0) {
+  if (rawPatients.length === 0) {
     container.innerHTML = '<div style="padding:24px; text-align:center; color:#94a3b8; font-size:0.85rem;">対象月のデータはありません</div>';
     return;
   }
 
-  // ID列を削除し、区分・当月計・計画書を最小限にスリム化
+  const patients = sortPatients(rawPatients, currentSortKey);
+
   let html = `
     <table class="modern-table table-monthly">
       <thead>
@@ -132,14 +177,18 @@ function renderMonthlyUnitsTable(aggregated) {
 
   patients.forEach((item) => {
     const p = item.patient;
+    const isAnalgesia = p.diseaseType === 'ANALGESIA';
     const isOut = p.category === 'OUTPATIENT';
-    // 区分を1文字化（入 / 外）
-    const catBadge = isOut
+
+    let catBadge = isOut
       ? '<span style="color:#2563eb; font-weight:700;">外</span>'
       : '<span style="color:#d97706; font-weight:700;">入</span>';
+    if (isAnalgesia) {
+      catBadge = '<span style="color:#16a34a; font-weight:700;">消</span>';
+    }
 
-    // 13単位制限判定（uを完全削除して数字のみ）
-    const is13Target = p.careInsuranceType === 'CARE' || p.careInsuranceType === 'SUPPORT' || p.force13Limit;
+    // 13単位制限判定
+    const is13Target = !isAnalgesia && (p.careInsuranceType === 'CARE' || p.careInsuranceType === 'SUPPORT' || p.force13Limit);
     const isExceeded = is13Target && item.totalUnits > 13;
     const isNearLimit = is13Target && item.totalUnits >= 11 && item.totalUnits <= 13;
 
@@ -150,18 +199,15 @@ function renderMonthlyUnitsTable(aggregated) {
       totalBadge = `<span style="background:#fef3c7; color:#b45309; padding:1px 3px; border-radius:3px; font-weight:700;">${item.totalUnits}</span>`;
     }
 
-    // 計画書バッジ (済 / 未)
     const planBadge = item.planCount > 0
       ? '<span style="background:#e0f2fe; color:#0369a1; padding:1px 4px; border-radius:3px; font-weight:700;">済</span>'
-      : '<span style="color:#cbd5e1;">未</span>';
+      : '<span style="color:#cbd5e1;">-</span>';
 
-    // 早期加算の有無（クリック開閉用バッジ）
     const hasEarly = item.totalEarlyUnits > 0;
     const earlyBadge = hasEarly
-      ? `<span class="toggle-early-btn" style="cursor:pointer; margin-left:4px; font-size:0.65rem; background:#ede9fe; color:#7c3aed; padding:0 3px; border-radius:3px; font-weight:700;" title="クリックで早期加算内訳を開閉">早▼</span>`
+      ? `<span class="toggle-early-btn" style="cursor:pointer; margin-left:4px; font-size:0.65rem; background:#ede9fe; color:#7c3aed; padding:0 3px; border-radius:3px; font-weight:700;" title="早期加算内訳">早▼</span>`
       : '';
 
-    // メイン行
     html += `
       <tr class="${hasEarly ? 'row-has-early' : ''}" data-target-id="early-${p.id}" style="${hasEarly ? 'cursor:pointer;' : ''}">
         <td class="col-fixed"><strong>${sanitizeHtml(p.name)}</strong>${earlyBadge}</td>
@@ -171,11 +217,10 @@ function renderMonthlyUnitsTable(aggregated) {
     `;
     for (let d = 1; d <= daysInMonth; d++) {
       const u = item.dailyUnits[d] || 0;
-      html += `<td>${u > 0 ? `<span style="font-weight:700; color:#0f172a;">${u}</span>` : '<span style="color:#e2e8f0;">-</span>'}</td>`;
+      html += `<td>${u > 0 ? `<span style="font-weight:700; color:${isAnalgesia ? '#16a34a' : '#0f172a'};">${u}</span>` : '<span style="color:#e2e8f0;">-</span>'}</td>`;
     }
     html += `</tr>`;
 
-    // 早期加算サブ行（初期状態は非表示: display:none、クリックで開閉）
     if (hasEarly) {
       html += `
         <tr id="early-${p.id}" class="sub-row-early" style="display:none;">
@@ -215,25 +260,29 @@ function renderDailyDiaryPreview(aggregated) {
 
   const today = new Date();
   const day = (currentYear === today.getFullYear() && currentMonth === (today.getMonth() + 1)) ? today.getDate() : 1;
-  const dayData = aggregated.dailyBreakdown[day] || { totalUnits: 0, inpatients: 0, outpatients: 0, planCount: 0 };
+  const dayData = aggregated.dailyBreakdown[day] || { totalUnits: 0, inpatients: 0, outpatients: 0, planCount: 0, analgesiaTotal: 0 };
 
   container.innerHTML = `
     <div style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:12px 16px; font-size:0.85rem;">
       <div style="font-weight:700; color:#0f172a; margin-bottom:6px;">
         📅 ${currentYear}年${currentMonth}月${day}日 業務日誌集計プレビュー (24列目連携)
       </div>
-      <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; text-align:center;">
+      <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:10px; text-align:center;">
         <div style="background:#f8fafc; padding:8px; border-radius:6px;">
           <div style="color:#64748b; font-size:0.72rem;">当日総単位</div>
-          <div style="font-size:1.05rem; font-weight:700; color:#0369a1;">${dayData.totalUnits} 単位</div>
+          <div style="font-size:1.05rem; font-weight:700; color:#0369a1;">${dayData.totalUnits} u</div>
         </div>
         <div style="background:#f8fafc; padding:8px; border-radius:6px;">
           <div style="color:#64748b; font-size:0.72rem;">入院実施単位</div>
-          <div style="font-size:1.05rem; font-weight:700; color:#d97706;">${dayData.inpatients} 単位</div>
+          <div style="font-size:1.05rem; font-weight:700; color:#d97706;">${dayData.inpatients} u</div>
         </div>
         <div style="background:#f8fafc; padding:8px; border-radius:6px;">
           <div style="color:#64748b; font-size:0.72rem;">外来実施単位</div>
-          <div style="font-size:1.05rem; font-weight:700; color:#2563eb;">${dayData.outpatients} 単位</div>
+          <div style="font-size:1.05rem; font-weight:700; color:#2563eb;">${dayData.outpatients} u</div>
+        </div>
+        <div style="background:#f8fafc; padding:8px; border-radius:6px;">
+          <div style="color:#64748b; font-size:0.72rem;">消炎鎮痛来院</div>
+          <div style="font-size:1.05rem; font-weight:700; color:#16a34a;">${dayData.analgesiaTotal || 0} 名</div>
         </div>
         <div style="background:#f8fafc; padding:8px; border-radius:6px;">
           <div style="color:#64748b; font-size:0.72rem;">計画書算定</div>
