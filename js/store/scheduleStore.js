@@ -48,11 +48,14 @@ export function setScheduleSlot(dateStr, therapistId, slotId, slotData) {
   const current = getDailySchedule(dateStr);
   if (!current[therapistId]) current[therapistId] = {};
 
+  const rawPlan = slotData.billingPlan;
+  const billingPlanVal = rawPlan ? String(rawPlan) : '';
+
   current[therapistId][slotId] = {
     patientId: slotData.patientId,
     units: Math.max(1, safeParseInt(slotData.units, 1)),
     note: slotData.note ? String(slotData.note).trim() : '',
-    billingPlan: Boolean(slotData.billingPlan),
+    billingPlan: billingPlanVal,
     updatedAt: new Date().toISOString()
   };
   return saveDailySchedule(dateStr, current);
@@ -205,7 +208,6 @@ export function aggregateFromAppSchedule(year, month) {
       });
     });
 
-    // 消炎鎮痛来院患者の月間集計統合（同一日の重複来院は1日1回として算定）
     const aSlots = schedule.analgesia || {};
     const daySeen = new Set();
     Object.values(aSlots).forEach((pIds) => {
