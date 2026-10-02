@@ -1,5 +1,5 @@
 // js/views/scheduleView.js
-// VIEW 1: 当日時間割・消炎鎮痛マルチ来院・患者パレット・計画書月1回ロック制御層（200行制限準拠）
+// VIEW 1: 当日時間割・消炎鎮痛マルチ来院・患者パレット・計画書4区分ロック制御層
 
 import { TIME_SLOTS, THERAPISTS } from '../config/rules.js';
 import { sanitizeHtml, safeParseInt } from '../core/dataNormalizer.js';
@@ -130,6 +130,13 @@ function renderTimetableGrid() {
         const isOut = p.category === 'OUTPATIENT';
         const cardClass = isOut ? 'card-outpatient' : 'card-inpatient';
 
+        let planBadge = '';
+        if (cellData.billingPlan) {
+          const pStr = String(cellData.billingPlan);
+          const lbl = pStr.includes('PLAN_2') ? '📝計2' : '📝計画書';
+          planBadge = `<span class="badge-plan">${lbl}</span>`;
+        }
+
         html += `
           <div class="cell-slot">
             <div class="reha-slot-card ${cardClass} card-unit-${u}" data-therapist="${tId}" data-slot="${slot.id}">
@@ -137,7 +144,7 @@ function renderTimetableGrid() {
                 <span style="font-weight:700; font-size:0.8rem;">${sanitizeHtml(p.name)}</span>
                 <div>
                   <span class="badge-unit badge-unit-${u}">${u}単位</span>
-                  ${cellData.billingPlan ? '<span class="badge-plan">📝計画書</span>' : ''}
+                  ${planBadge}
                 </div>
               </div>
               <div style="font-size:0.7rem; color:#475569; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
@@ -153,7 +160,6 @@ function renderTimetableGrid() {
       }
     });
 
-    // 消炎鎮痛セル（人数バッジの前面表示）
     const analgesiaPatients = getAnalgesiaSlotPatients(currentDateStr, slot.id);
     const aCount = analgesiaPatients.length;
     let badgeHtml = '';
@@ -201,11 +207,10 @@ function attachGridEventListeners(gridEl) {
       const patientId = e.dataTransfer.getData('text/plain');
       const tId = cell.dataset.therapist;
       const sId = cell.dataset.slot;
-      if (patientId && tId && sId) openSlotModal(tId, sId, { patientId, units: 1, note: '', billingPlan: false });
+      if (patientId && tId && sId) openSlotModal(tId, sId, { patientId, units: 1, note: '', billingPlan: '' });
     });
   });
 
-  // 消炎鎮痛セルのクリック（内訳モーダル起動）およびドラッグ＆ドロップ登録
   gridEl.querySelectorAll('.badge-analgesia-count').forEach((badge) => {
     badge.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -258,7 +263,8 @@ function setupSlotModalListeners() {
     const patientId = document.getElementById('slotPatientId').value;
     const units = safeParseInt(document.getElementById('slotUnitsInput').value, 1);
     const note = document.getElementById('slotNoteInput').value;
-    const billingPlan = document.getElementById('slotBillingPlanInput').checked;
+    const planSelect = document.getElementById('slotBillingPlanSelect');
+    const billingPlan = planSelect ? planSelect.value : '';
 
     if (!patientId) {
       showToast('患者が選択されていません', 'error');
@@ -302,7 +308,7 @@ function openSlotModal(therapistId, slotId, currentItem) {
   const titleEl = document.getElementById('slotModalTitle');
   const patientInfoEl = document.getElementById('slotPatientInfo');
   const btnDelete = document.getElementById('btnDeleteSlot');
-  const planInput = document.getElementById('slotBillingPlanInput');
+  const planSelect = document.getElementById('slotBillingPlanSelect');
 
   titleEl.textContent = `コマ配置 (PT ${therapistId} / ${TIME_SLOTS.find((s) => s.id === slotId)?.label || slotId})`;
   btnDelete.style.display = currentItem ? 'block' : 'none';
@@ -321,21 +327,30 @@ function openSlotModal(therapistId, slotId, currentItem) {
     b.style.background = b.dataset.unit == units ? '#e0f2fe' : '#fff';
   });
 
+  if (!planSelect) return;
+
   if (!pId) {
-    planInput.checked = false;
-    planInput.disabled = true;
+    planSelect.value = '';
+    planSelect.disabled = true;
   } else {
     const [year, month] = currentDateStr.split('-').map(Number);
     const excludeSlot = currentItem ? slotId : '';
     const existingDate = findPatientMonthlyPlanDate(pId, year, month, currentDateStr, excludeSlot);
 
     if (existingDate) {
-      planInput.checked = false;
-      planInput.disabled = true;
+      planSelect.value = '';
+      planSelect.disabled = true;
       patientInfoEl.innerHTML += `<div style="color:#e11d48; font-size:0.75rem; margin-top:4px; font-weight:700;">⚠️ 総合計画評価料は当月 ${existingDate} に算定済みのため選択できません（月1回のみ）</div>`;
     } else {
-      planInput.disabled = false;
-      planInput.checked = Boolean(currentItem?.billingPlan);
+      planSelect.disabled = false;
+      const rawPlan = currentItem?.billingPlan;
+      if (!rawPlan) {
+        planSelect.value = '';
+      } else if (rawPlan === true) {
+        planSelect.value = 'PLAN_1_FIRST';
+      } else {
+        planSelect.value = String(rawPlan);
+      }
     }
   }
 
@@ -369,7 +384,6 @@ function openAnalgesiaModal(slotId) {
   const titleEl = document.getElementById('analgesiaModalTitle');
   if (titleEl) titleEl.textContent = `消炎鎮痛（物療）来院一覧 [${slotObj?.label || slotId}]`;
 
-  // 患者選択プルダウンを更新
   const select = document.getElementById('analgesiaAddPatientSelect');
   if (select) {
     const patients = getAllPatients();
