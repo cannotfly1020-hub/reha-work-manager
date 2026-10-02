@@ -1,5 +1,5 @@
 // js/store/patientStore.js
-// 患者マスターCRUD・LocalStorage永続化・介護認定・疾患名管理層
+// 患者マスターCRUD・LocalStorage永続化・介護認定・疾患名・消炎鎮痛フィルタリング制御層（200行制限準拠）
 
 import { normalizeString, normalizePatientId, normalizeDateString } from '../core/dataNormalizer.js';
 
@@ -47,6 +47,32 @@ const DEFAULT_PATIENTS = [
     earlyBonusStartDate: '',
     onsetDate: '2026-06-01',
     notes: '維持期・外来リハビリ'
+  },
+  {
+    id: 'P004',
+    name: '高橋 健二',
+    nameKana: 'タカハシ ケンジ',
+    diseaseName: '変形性膝関節症（物療）',
+    category: 'OUTPATIENT',
+    diseaseType: 'ANALGESIA',
+    careInsuranceType: 'NONE',
+    admissionDate: '',
+    earlyBonusStartDate: '',
+    onsetDate: '2026-09-01',
+    notes: '外来・消炎鎮痛処置（温熱・低周波）'
+  },
+  {
+    id: 'P005',
+    name: '伊藤 幸子',
+    nameKana: 'イトウ サチコ',
+    diseaseName: '頸椎症性神経根症（入院物療）',
+    category: 'INPATIENT',
+    diseaseType: 'ANALGESIA',
+    careInsuranceType: 'NONE',
+    admissionDate: '2026-09-20',
+    earlyBonusStartDate: '2026-09-20',
+    onsetDate: '2026-09-15',
+    notes: '病棟牽引・消炎鎮痛処置'
   }
 ];
 
@@ -163,14 +189,20 @@ export function deletePatient(id) {
 /**
  * 検索キーワードや区分で患者リストを絞り込む
  * @param {string} keyword 氏名・ID・病名・カナあいまい検索
- * @param {string} category 'ALL' | 'INPATIENT' | 'OUTPATIENT'
+ * @param {'ALL'|'INPATIENT'|'OUTPATIENT'|'ANALGESIA'} category 絞り込み区分
  * @returns {Array<Object>} 絞り込み済み患者配列
  */
 export function searchPatients(keyword = '', category = 'ALL') {
   let list = getAllPatients();
-  if (category && category !== 'ALL') {
+
+  if (category === 'ANALGESIA') {
+    // 消炎鎮痛モード: 入院・外来問わず疾患区分が ANALGESIA の患者を抽出
+    list = list.filter((p) => p.diseaseType === 'ANALGESIA');
+  } else if (category && category !== 'ALL') {
+    // 入院または外来モード
     list = list.filter((p) => p.category === category);
   }
+
   if (!keyword || !keyword.trim()) return list;
 
   const q = normalizeString(keyword).toLowerCase();
