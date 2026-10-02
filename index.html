@@ -156,6 +156,8 @@
         <input type="hidden" id="slotId">
         <input type="hidden" id="slotPatientId">
         <input type="hidden" id="slotUnitsInput" value="1">
+        
+        <!-- 担当セラピスト ＆ 時間帯選択 -->
         <div style="display:grid; grid-template-columns: 1fr 1.6fr; gap:8px;">
           <div>
             <label for="slotModalTherapistSelect" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">担当セラピスト</label>
@@ -257,6 +259,8 @@
             </select>
           </div>
         </div>
+
+        <!-- 総合計画評価料 算定フェーズ（初回 / 計画書1継続中 / 計画書2継続中固定） -->
         <div>
           <label style="font-size:0.75rem; font-weight:700; display:block;">📝 総合計画評価料 算定フェーズ</label>
           <select id="patientFormPlanStatus" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:600; background:#f0f9ff; color:#0369a1;">
@@ -265,12 +269,20 @@
             <option value="PLAN_2_FOLLOW">計画書2 算定中 (2回目以降: 196点 固定)</option>
           </select>
         </div>
+
+        <!-- 起算日 & 当院入院日（完全復元） -->
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
           <div>
             <label style="font-size:0.75rem; font-weight:700; display:block;">起算日 (発症/手術日)</label>
             <input type="date" id="patientFormOnsetDate" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
-  　　　 </div>
+          </div>
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">当院入院日</label>
+            <input type="date" id="patientFormAdmissionDate" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </div>
         </div>
+
+        <!-- 早期加算起算日 & 月13単位制限チェック -->
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
           <div>
             <label style="font-size:0.75rem; font-weight:700; display:block;">早期加算起算日 (前医含)</label>
