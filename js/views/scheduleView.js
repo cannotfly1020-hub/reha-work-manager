@@ -1,16 +1,20 @@
 // js/views/scheduleView.js
-// VIEW 1: 当日時間割・患者パレット・コマ編集・計画書月1回ロック制御（200行制限準拠）
+// VIEW 1: 当日時間割・消炎鎮痛マルチ来院・患者パレット・計画書月1回ロック制御層（200行制限準拠）
 
 import { TIME_SLOTS, THERAPISTS } from '../config/rules.js';
 import { sanitizeHtml, safeParseInt } from '../core/dataNormalizer.js';
-import { getPatientById, searchPatients } from '../store/patientStore.js';
-import { getDailySchedule, setScheduleSlot, clearScheduleSlot, getDailyStats, findPatientMonthlyPlanDate } from '../store/scheduleStore.js';
+import { getPatientById, searchPatients, getAllPatients } from '../store/patientStore.js';
+import {
+  getDailySchedule, setScheduleSlot, clearScheduleSlot, getDailyStats,
+  findPatientMonthlyPlanDate, addAnalgesiaPatient, removeAnalgesiaPatient, getAnalgesiaSlotPatients
+} from '../store/scheduleStore.js';
 import { validateTimeConflict, validateDailyLimit, validateTherapistWorkload, validateMonthlyPlanLimit } from '../core/validator.js';
 import { showToast } from './exportView.js';
 
 let currentDateStr = new Date().toISOString().split('T')[0];
 let paletteCategory = 'ALL';
 let activeModalSlot = null; // { therapistId, slotId, currentItem }
+let activeAnalgesiaSlotId = null;
 
 export function initScheduleView() {
   const dateInput = document.getElementById('scheduleDateInput');
@@ -43,6 +47,7 @@ export function initScheduleView() {
   });
 
   setupSlotModalListeners();
+  setupAnalgesiaModalListeners();
 }
 
 export function renderScheduleView() {
@@ -55,11 +60,12 @@ function renderDailyKPIStrip() {
   const container = document.getElementById('dailyKpiStrip');
   if (!container) return;
   const stats = getDailyStats(currentDateStr);
+  const aTot = stats.analgesia?.total || 0;
   container.innerHTML = `
-    <span style="color:#0369a1;">本日総単位: <strong>${stats.totalUnits}</strong> 単位</span>
+    <span style="color:#0369a1;">個別リハ総単位: <strong>${stats.totalUnits}</strong> 単位</span>
     <span style="color:#059669;">患者数: <strong>${stats.totalPatients}</strong> 名</span>
+    <span style="color:#16a34a; background:#dcfce7; padding:2px 8px; border-radius:4px;">消炎鎮痛: <strong>${aTot}</strong>名 (入${stats.analgesia?.inpatients || 0}/外${stats.analgesia?.outpatients || 0})</span>
     <span style="color:#854d0e;">計画書: <strong>${stats.planCount}</strong> 件</span>
-    <span style="color:#64748b; font-size:0.8rem;">(A: ${stats.therapists.A.units}u / B: ${stats.therapists.B.units}u / C: ${stats.therapists.C.units}u)</span>
   `;
 }
 
@@ -87,14 +93,11 @@ function renderPatientPalette() {
           <span style="font-size:0.7rem; color:#64748b;">${p.id}</span>
         </div>
         <div style="font-size:0.7rem; color:#64748b; margin-top:2px;">${sanitizeHtml(p.diseaseName || '')}</div>
-      </div>
-    `;
+      </div>`;
   }).join('');
 
   listEl.querySelectorAll('.patient-palette-card').forEach((card) => {
-    card.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData('text/plain', e.currentTarget.dataset.patientId);
-    });
+    card.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', e.currentTarget.dataset.patientId));
   });
 }
 
@@ -105,6 +108,7 @@ function renderTimetableGrid() {
   const schedule = getDailySchedule(currentDateStr);
   let html = '<div class="timetable-header">時間帯</div>';
   THERAPISTS.forEach((t) => { html += `<div class="timetable-header">${t.name}</div>`; });
+  html += '<div class="timetable-header" style="background:#f0fdf4; color:#166534;">消炎鎮痛</div>';
 
   const coveredUntil = { A: 0, B: 0, C: 0 };
 
@@ -148,7 +152,24 @@ function renderTimetableGrid() {
           </div>`;
       }
     });
-    html += `</div>`;
+
+    // 消炎鎮痛セル（人数バッジの前面表示）
+    const analgesiaPatients = getAnalgesiaSlotPatients(currentDateStr, slot.id);
+    const aCount = analgesiaPatients.length;
+    let badgeHtml = '';
+    if (aCount > 0) {
+      const inCount = analgesiaPatients.filter((p) => p.category === 'INPATIENT').length;
+      const outCount = aCount - inCount;
+      badgeHtml = `
+        <button class="badge-analgesia-count has-patients" data-analgesia-slot="${slot.id}">
+          <span style="font-weight:800; font-size:0.85rem; color:#15803d;">${aCount}名</span>
+          <span style="font-size:0.65rem; color:#166534;">(入${inCount}/外${outCount})</span>
+        </button>`;
+    } else {
+      badgeHtml = `<button class="badge-analgesia-count" data-analgesia-slot="${slot.id}" style="color:#94a3b8; font-size:0.75rem;">＋</button>`;
+    }
+
+    html += `<div class="cell-slot analgesia-slot-cell" data-analgesia-drop="${slot.id}">${badgeHtml}</div></div>`;
   });
 
   gridEl.innerHTML = html;
@@ -173,7 +194,7 @@ function attachGridEventListeners(gridEl) {
     });
   });
 
-  gridEl.querySelectorAll('.cell-slot:not(.slot-covered-placeholder)').forEach((cell) => {
+  gridEl.querySelectorAll('.cell-slot[data-therapist]').forEach((cell) => {
     cell.addEventListener('dragover', (e) => e.preventDefault());
     cell.addEventListener('drop', (e) => {
       e.preventDefault();
@@ -181,6 +202,28 @@ function attachGridEventListeners(gridEl) {
       const tId = cell.dataset.therapist;
       const sId = cell.dataset.slot;
       if (patientId && tId && sId) openSlotModal(tId, sId, { patientId, units: 1, note: '', billingPlan: false });
+    });
+  });
+
+  // 消炎鎮痛セルのクリック（内訳モーダル起動）およびドラッグ＆ドロップ登録
+  gridEl.querySelectorAll('.badge-analgesia-count').forEach((badge) => {
+    badge.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openAnalgesiaModal(badge.dataset.analgesiaSlot);
+    });
+  });
+
+  gridEl.querySelectorAll('.cell-slot[data-analgesia-drop]').forEach((cell) => {
+    cell.addEventListener('dragover', (e) => e.preventDefault());
+    cell.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const patientId = e.dataTransfer.getData('text/plain');
+      const slotId = cell.dataset.analgesiaDrop;
+      if (patientId && slotId) {
+        addAnalgesiaPatient(currentDateStr, slotId, patientId);
+        showToast('消炎鎮痛に患者を追加しました', 'success');
+        renderScheduleView();
+      }
     });
   });
 }
@@ -226,17 +269,14 @@ function setupSlotModalListeners() {
     const currentUnits = activeModalSlot.currentItem ? activeModalSlot.currentItem.units : 0;
     const patient = getPatientById(patientId);
 
-    // 1. 重複ガード
     const conflictCheck = validateTimeConflict(dailySchedule, activeModalSlot.therapistId, activeModalSlot.slotId, patientId, units, activeModalSlot.slotId);
     if (!conflictCheck.valid) { showToast(conflictCheck.message, 'error'); return; }
 
-    // 2. 患者1日上限ガード
     if (patient) {
       const dailyLimitCheck = validateDailyLimit(dailySchedule, patient, currentDateStr, units, currentUnits);
       if (!dailyLimitCheck.valid) { showToast(dailyLimitCheck.message, 'error'); return; }
     }
 
-    // 3. 計画書 月1回ガード
     if (billingPlan) {
       const [year, month] = currentDateStr.split('-').map(Number);
       const excludeSlot = activeModalSlot.currentItem ? activeModalSlot.slotId : '';
@@ -245,7 +285,6 @@ function setupSlotModalListeners() {
       if (!planCheck.valid) { showToast(planCheck.message, 'error'); return; }
     }
 
-    // 4. セラピスト上限ガード
     const workloadCheck = validateTherapistWorkload(dailySchedule, activeModalSlot.therapistId, units, currentUnits);
     if (!workloadCheck.valid) { showToast(workloadCheck.message, 'error'); return; }
     if (workloadCheck.message) showToast(workloadCheck.message, 'warn');
@@ -268,7 +307,6 @@ function openSlotModal(therapistId, slotId, currentItem) {
   titleEl.textContent = `コマ配置 (PT ${therapistId} / ${TIME_SLOTS.find((s) => s.id === slotId)?.label || slotId})`;
   btnDelete.style.display = currentItem ? 'block' : 'none';
 
-  // パレット一番上の患者を勝手に拾わず、確実に現在配置しようとしている患者IDのみを取得
   const pId = currentItem?.patientId || '';
   const patient = pId ? getPatientById(pId) : null;
 
@@ -283,24 +321,19 @@ function openSlotModal(therapistId, slotId, currentItem) {
     b.style.background = b.dataset.unit == units ? '#e0f2fe' : '#fff';
   });
 
-  // 計画書チェックボックスの物理的ロック制御
   if (!pId) {
-    // 患者が決まっていない場合: チェック不可
     planInput.checked = false;
     planInput.disabled = true;
   } else {
-    // 患者が決まっている場合: 当月内にすでに算定日があるかを調査
     const [year, month] = currentDateStr.split('-').map(Number);
     const excludeSlot = currentItem ? slotId : '';
     const existingDate = findPatientMonthlyPlanDate(pId, year, month, currentDateStr, excludeSlot);
 
     if (existingDate) {
-      // すでに当月の別日・別コマで算定済み: 物理的にチェック不可にしてOFF
       planInput.checked = false;
       planInput.disabled = true;
       patientInfoEl.innerHTML += `<div style="color:#e11d48; font-size:0.75rem; margin-top:4px; font-weight:700;">⚠️ 総合計画評価料は当月 ${existingDate} に算定済みのため選択できません（月1回のみ）</div>`;
     } else {
-      // まだ算定していない（またはこのコマ自身）: チェック可能
       planInput.disabled = false;
       planInput.checked = Boolean(currentItem?.billingPlan);
     }
@@ -308,4 +341,85 @@ function openSlotModal(therapistId, slotId, currentItem) {
 
   document.getElementById('slotNoteInput').value = currentItem?.note || '';
   modal.classList.add('active');
+}
+
+function setupAnalgesiaModalListeners() {
+  const modal = document.getElementById('modalAnalgesiaSlot');
+  const btnClose = document.getElementById('btnCloseAnalgesiaModal');
+  const btnAdd = document.getElementById('btnConfirmAddAnalgesia');
+
+  btnClose?.addEventListener('click', () => modal.classList.remove('active'));
+
+  btnAdd?.addEventListener('click', () => {
+    const select = document.getElementById('analgesiaAddPatientSelect');
+    const pId = select?.value;
+    if (!pId || !activeAnalgesiaSlotId) return;
+
+    addAnalgesiaPatient(currentDateStr, activeAnalgesiaSlotId, pId);
+    showToast('消炎鎮痛患者を追加しました', 'success');
+    renderAnalgesiaModalList();
+    renderScheduleView();
+  });
+}
+
+function openAnalgesiaModal(slotId) {
+  activeAnalgesiaSlotId = slotId;
+  const modal = document.getElementById('modalAnalgesiaSlot');
+  const slotObj = TIME_SLOTS.find((s) => s.id === slotId);
+  const titleEl = document.getElementById('analgesiaModalTitle');
+  if (titleEl) titleEl.textContent = `消炎鎮痛（物療）来院一覧 [${slotObj?.label || slotId}]`;
+
+  // 患者選択プルダウンを更新
+  const select = document.getElementById('analgesiaAddPatientSelect');
+  if (select) {
+    const patients = getAllPatients();
+    select.innerHTML = '<option value="">-- 追加する患者を選択 --</option>' +
+      patients.map((p) => {
+        const cat = p.category === 'INPATIENT' ? '入院' : '外来';
+        return `<option value="${p.id}">${p.id} - ${sanitizeHtml(p.name)} (${cat} / ${sanitizeHtml(p.diseaseName || '')})</option>`;
+      }).join('');
+  }
+
+  renderAnalgesiaModalList();
+  modal.classList.add('active');
+}
+
+function renderAnalgesiaModalList() {
+  const listEl = document.getElementById('analgesiaPatientList');
+  if (!listEl || !activeAnalgesiaSlotId) return;
+
+  const patients = getAnalgesiaSlotPatients(currentDateStr, activeAnalgesiaSlotId);
+  if (patients.length === 0) {
+    listEl.innerHTML = '<div style="font-size:0.78rem; color:#94a3b8; text-align:center; padding:16px;">当コマの消炎鎮痛患者はいません</div>';
+    return;
+  }
+
+  listEl.innerHTML = patients.map((p) => {
+    const isIn = p.category === 'INPATIENT';
+    const catBadge = isIn
+      ? '<span style="background:#fef3c7; color:#b45309; padding:2px 6px; border-radius:3px; font-weight:700; font-size:0.7rem;">入院</span>'
+      : '<span style="background:#eff6ff; color:#1d4ed8; padding:2px 6px; border-radius:3px; font-weight:700; font-size:0.7rem;">外来</span>';
+
+    return `
+      <div style="display:flex; justify-content:space-between; align-items:center; background:#fff; border:1px solid #e2e8f0; border-radius:4px; padding:6px 10px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          ${catBadge}
+          <strong style="font-size:0.82rem; color:#0f172a;">${sanitizeHtml(p.name)}</strong>
+          <span style="font-size:0.72rem; color:#64748b;">(${p.id})</span>
+          <span style="font-size:0.72rem; color:#64748b; margin-left:4px;">${sanitizeHtml(p.diseaseName || '')}</span>
+        </div>
+        <button class="btn-remove-analgesia" data-patient-id="${p.id}"
+                style="padding:3px 8px; font-size:0.72rem; background:#fff; border:1px solid #cbd5e1; color:#ef4444; border-radius:4px; cursor:pointer;">解除</button>
+      </div>`;
+  }).join('');
+
+  listEl.querySelectorAll('.btn-remove-analgesia').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const pId = btn.dataset.patientId;
+      removeAnalgesiaPatient(currentDateStr, activeAnalgesiaSlotId, pId);
+      showToast('消炎鎮痛から患者を解除しました', 'warn');
+      renderAnalgesiaModalList();
+      renderScheduleView();
+    });
+  });
 }
