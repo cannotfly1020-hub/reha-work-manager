@@ -115,15 +115,15 @@ function renderMonthlyUnitsTable(aggregated) {
     return;
   }
 
+  // ID列を削除し、区分・当月計・計画書を最小限にスリム化
   let html = `
     <table class="modern-table table-monthly">
       <thead>
         <tr>
-          <th class="col-fixed" style="width:42px;">ID</th>
-          <th class="col-fixed" style="width:90px;">氏名</th>
-          <th style="width:40px;">区分</th>
-          <th style="width:50px;">当月計</th>
-          <th style="width:46px;">計画書</th>
+          <th class="col-fixed" style="width:110px;">氏名</th>
+          <th style="width:32px;">区分</th>
+          <th style="width:44px;">当月計</th>
+          <th style="width:42px;">計画書</th>
   `;
   for (let d = 1; d <= daysInMonth; d++) {
     html += `<th>${d}</th>`;
@@ -133,20 +133,21 @@ function renderMonthlyUnitsTable(aggregated) {
   patients.forEach((item) => {
     const p = item.patient;
     const isOut = p.category === 'OUTPATIENT';
+    // 区分を1文字化（入 / 外）
     const catBadge = isOut
-      ? '<span style="color:#2563eb; font-weight:700;">外来</span>'
-      : '<span style="color:#d97706; font-weight:700;">入院</span>';
+      ? '<span style="color:#2563eb; font-weight:700;">外</span>'
+      : '<span style="color:#d97706; font-weight:700;">入</span>';
 
-    // 13単位制限判定
+    // 13単位制限判定（uを完全削除して数字のみ）
     const is13Target = p.careInsuranceType === 'CARE' || p.careInsuranceType === 'SUPPORT' || p.force13Limit;
     const isExceeded = is13Target && item.totalUnits > 13;
     const isNearLimit = is13Target && item.totalUnits >= 11 && item.totalUnits <= 13;
 
-    let totalBadge = `<strong>${item.totalUnits}</strong>u`;
+    let totalBadge = `<strong>${item.totalUnits}</strong>`;
     if (isExceeded) {
-      totalBadge = `<span style="background:#ffe4e6; color:#e11d48; padding:1px 3px; border-radius:3px; font-weight:700;">${item.totalUnits}u!</span>`;
+      totalBadge = `<span style="background:#ffe4e6; color:#e11d48; padding:1px 3px; border-radius:3px; font-weight:700;">${item.totalUnits}!</span>`;
     } else if (isNearLimit) {
-      totalBadge = `<span style="background:#fef3c7; color:#b45309; padding:1px 3px; border-radius:3px; font-weight:700;">${item.totalUnits}u</span>`;
+      totalBadge = `<span style="background:#fef3c7; color:#b45309; padding:1px 3px; border-radius:3px; font-weight:700;">${item.totalUnits}</span>`;
     }
 
     // 計画書バッジ (済 / 未)
@@ -154,11 +155,16 @@ function renderMonthlyUnitsTable(aggregated) {
       ? '<span style="background:#e0f2fe; color:#0369a1; padding:1px 4px; border-radius:3px; font-weight:700;">済</span>'
       : '<span style="color:#cbd5e1;">未</span>';
 
-    // メイン行（通常単位）
+    // 早期加算の有無（クリック開閉用バッジ）
+    const hasEarly = item.totalEarlyUnits > 0;
+    const earlyBadge = hasEarly
+      ? `<span class="toggle-early-btn" style="cursor:pointer; margin-left:4px; font-size:0.65rem; background:#ede9fe; color:#7c3aed; padding:0 3px; border-radius:3px; font-weight:700;" title="クリックで早期加算内訳を開閉">早▼</span>`
+      : '';
+
+    // メイン行
     html += `
-      <tr>
-        <td class="col-fixed">${p.id}</td>
-        <td class="col-fixed"><strong>${sanitizeHtml(p.name)}</strong></td>
+      <tr class="${hasEarly ? 'row-has-early' : ''}" data-target-id="early-${p.id}" style="${hasEarly ? 'cursor:pointer;' : ''}">
+        <td class="col-fixed"><strong>${sanitizeHtml(p.name)}</strong>${earlyBadge}</td>
         <td>${catBadge}</td>
         <td>${totalBadge}</td>
         <td>${planBadge}</td>
@@ -169,14 +175,13 @@ function renderMonthlyUnitsTable(aggregated) {
     }
     html += `</tr>`;
 
-    // 早期加算サブ行（当月に早期加算が1単位以上ある場合のみ展開）
-    if (item.totalEarlyUnits > 0) {
+    // 早期加算サブ行（初期状態は非表示: display:none、クリックで開閉）
+    if (hasEarly) {
       html += `
-        <tr class="sub-row-early">
-          <td class="col-fixed"></td>
-          <td class="col-fixed" style="font-size:0.7rem; color:#7c3aed;">↳ 早期加算</td>
-          <td style="font-size:0.7rem;">加算</td>
-          <td style="font-weight:700; color:#7c3aed;">${item.totalEarlyUnits}u</td>
+        <tr id="early-${p.id}" class="sub-row-early" style="display:none;">
+          <td class="col-fixed" style="font-size:0.72rem; color:#7c3aed; font-weight:700; padding-left:14px;">↳ 早</td>
+          <td style="font-size:0.7rem; color:#7c3aed;">加</td>
+          <td style="font-weight:700; color:#7c3aed;">${item.totalEarlyUnits}</td>
           <td style="color:#cbd5e1;">-</td>
       `;
       for (let d = 1; d <= daysInMonth; d++) {
@@ -189,6 +194,19 @@ function renderMonthlyUnitsTable(aggregated) {
 
   html += `</tbody></table>`;
   container.innerHTML = html;
+
+  container.querySelectorAll('.row-has-early').forEach((row) => {
+    row.addEventListener('click', () => {
+      const targetId = row.dataset.targetId;
+      const subRow = document.getElementById(targetId);
+      const btn = row.querySelector('.toggle-early-btn');
+      if (subRow) {
+        const isHidden = subRow.style.display === 'none';
+        subRow.style.display = isHidden ? 'table-row' : 'none';
+        if (btn) btn.textContent = isHidden ? '早▲' : '早▼';
+      }
+    });
+  });
 }
 
 function renderDailyDiaryPreview(aggregated) {
