@@ -63,8 +63,11 @@
         </select>
       </div>
       <div style="display:flex; gap:16px;">
-        <div style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:8px 16px; text-align:center;">
-          <div style="font-size:0.75rem; color:#64748b;">本日収益見込 (単位)</div>
+        <div id="kpiTodayRevenueCard" style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:8px 16px; text-align:center; cursor:pointer; transition:all 0.15s ease;" title="クリックで本日の収益内訳明細を表示">
+          <div style="font-size:0.75rem; color:#64748b; display:flex; align-items:center; justify-content:center; gap:4px;">
+            <span>本日収益見込 (単位)</span>
+            <span style="font-size:0.68rem; background:#e0f2fe; color:#0369a1; padding:1px 4px; border-radius:3px; font-weight:700;">内訳🔍</span>
+          </div>
           <div style="font-size:1.1rem; font-weight:800; color:#0369a1;"><span id="kpiTodayRevenue">¥0</span> <span id="kpiTodayUnits" style="font-size:0.8rem; font-weight:600; color:#64748b;">(0u)</span></div>
         </div>
         <div style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:8px 16px; text-align:center;">
@@ -163,10 +166,14 @@
           </div>
         </div>
         <div>
-          <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; cursor:pointer;">
-            <input type="checkbox" id="slotBillingPlanInput">
-            <span>📝 リハビリテーション総合計画評価料を算定</span>
-          </label>
+          <label for="slotBillingPlanSelect" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">📝 リハビリテーション総合計画評価料</label>
+          <select id="slotBillingPlanSelect" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff;">
+            <option value="">なし (算定しない)</option>
+            <option value="PLAN_1_FIRST">総合実施計画書1 (初回: 300点 / ¥3,000)</option>
+            <option value="PLAN_1_FOLLOW">総合実施計画書1 (2回目以降: 240点 / ¥2,400)</option>
+            <option value="PLAN_2_FIRST">総合実施計画書2 (初回: 240点 / ¥2,400)</option>
+            <option value="PLAN_2_FOLLOW">総合実施計画書2 (2回目以降: 196点 / ¥1,960)</option>
+          </select>
         </div>
         <div>
           <label for="slotNoteInput" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">備考・メモ</label>
@@ -338,6 +345,45 @@
 
       <div style="display:flex; justify-content:flex-end;">
         <button type="button" id="btnCloseAnalgesiaModal" style="padding:6px 16px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; cursor:pointer;">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- モーダル 5: 本日収益内訳明細 -->
+  <div id="modalRevenueBreakdown" class="modal-overlay">
+    <div class="modal-card" style="max-width:620px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 id="revenueBreakdownTitle" style="font-size:1.05rem; font-weight:800; color:#0f172a; margin:0;">📊 本日リハビリ収益 内訳明細</h3>
+        <button type="button" id="btnCloseRevenueModalX" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:#64748b;">✕</button>
+      </div>
+      <p style="font-size:0.75rem; color:#64748b; margin-bottom:14px;">本日のスケジュールに配置されている全コマ（基本料・減算・早期加算・計画書4区分・消炎鎮痛）の積算明細です。</p>
+
+      <div style="border:1px solid #e2e8f0; border-radius:6px; overflow:hidden; margin-bottom:16px;">
+        <table class="modern-table" style="width:100%; font-size:0.8rem;">
+          <thead>
+            <tr>
+              <th style="padding:6px 10px; text-align:left;">項目名</th>
+              <th style="padding:6px 8px; text-align:center; width:80px;">単位 / 件数</th>
+              <th style="padding:6px 8px; text-align:right; width:70px;">単価点数</th>
+              <th style="padding:6px 10px; text-align:right; width:90px;">小計金額</th>
+            </tr>
+          </thead>
+          <tbody id="revenueBreakdownTbody">
+            <!-- JSで動的に内訳行を生成 -->
+          </tbody>
+          <tfoot>
+            <tr style="background:#f8fafc; font-weight:800; border-top:2px solid #cbd5e1;">
+              <td style="padding:8px 10px; text-align:left; color:#0f172a;">本日 合計見込</td>
+              <td id="breakdownTotalUnitsCell" style="padding:8px 8px; text-align:center; color:#0369a1;">0 u</td>
+              <td style="padding:8px 8px; text-align:right; color:#64748b;">-</td>
+              <td id="breakdownTotalAmountCell" style="padding:8px 10px; text-align:right; color:#059669; font-size:0.95rem;">¥0</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div style="display:flex; justify-content:flex-end;">
+        <button type="button" id="btnCloseRevenueModal" style="padding:6px 18px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; cursor:pointer; font-weight:600;">閉じる</button>
       </div>
     </div>
   </div>
