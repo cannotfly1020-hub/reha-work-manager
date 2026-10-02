@@ -1,11 +1,11 @@
 // js/views/scheduleView.js
-// VIEW 1: 当日時間割・患者パレット・コマ編集モーダル制御層（200行制限準拠）
+// VIEW 1: 当日時間割・患者パレット・コマ編集・計画書月1回ロック制御（200行制限準拠）
 
 import { TIME_SLOTS, THERAPISTS } from '../config/rules.js';
 import { sanitizeHtml, safeParseInt } from '../core/dataNormalizer.js';
 import { getPatientById, searchPatients } from '../store/patientStore.js';
-import { getDailySchedule, setScheduleSlot, clearScheduleSlot, getDailyStats } from '../store/scheduleStore.js';
-import { validateTimeConflict, validateDailyLimit, validateTherapistWorkload } from '../core/validator.js';
+import { getDailySchedule, setScheduleSlot, clearScheduleSlot, getDailyStats, findPatientMonthlyPlanDate } from '../store/scheduleStore.js';
+import { validateTimeConflict, validateDailyLimit, validateTherapistWorkload, validateMonthlyPlanLimit } from '../core/validator.js';
 import { showToast } from './exportView.js';
 
 let currentDateStr = new Date().toISOString().split('T')[0];
@@ -217,6 +217,11 @@ function setupSlotModalListeners() {
     const note = document.getElementById('slotNoteInput').value;
     const billingPlan = document.getElementById('slotBillingPlanInput').checked;
 
+    if (!patientId) {
+      showToast('患者が選択されていません', 'error');
+      return;
+    }
+
     const dailySchedule = getDailySchedule(currentDateStr);
     const currentUnits = activeModalSlot.currentItem ? activeModalSlot.currentItem.units : 0;
     const patient = getPatientById(patientId);
@@ -231,7 +236,16 @@ function setupSlotModalListeners() {
       if (!dailyLimitCheck.valid) { showToast(dailyLimitCheck.message, 'error'); return; }
     }
 
-    // 3. セラピスト上限ガード
+    // 3. 計画書 月1回ガード
+    if (billingPlan) {
+      const [year, month] = currentDateStr.split('-').map(Number);
+      const excludeSlot = activeModalSlot.currentItem ? activeModalSlot.slotId : '';
+      const existingDate = findPatientMonthlyPlanDate(patientId, year, month, currentDateStr, excludeSlot);
+      const planCheck = validateMonthlyPlanLimit(billingPlan, existingDate);
+      if (!planCheck.valid) { showToast(planCheck.message, 'error'); return; }
+    }
+
+    // 4. セラピスト上限ガード
     const workloadCheck = validateTherapistWorkload(dailySchedule, activeModalSlot.therapistId, units, currentUnits);
     if (!workloadCheck.valid) { showToast(workloadCheck.message, 'error'); return; }
     if (workloadCheck.message) showToast(workloadCheck.message, 'warn');
@@ -249,17 +263,19 @@ function openSlotModal(therapistId, slotId, currentItem) {
   const titleEl = document.getElementById('slotModalTitle');
   const patientInfoEl = document.getElementById('slotPatientInfo');
   const btnDelete = document.getElementById('btnDeleteSlot');
+  const planInput = document.getElementById('slotBillingPlanInput');
 
   titleEl.textContent = `コマ配置 (PT ${therapistId} / ${TIME_SLOTS.find((s) => s.id === slotId)?.label || slotId})`;
   btnDelete.style.display = currentItem ? 'block' : 'none';
 
-  const pId = currentItem?.patientId || document.querySelector('.patient-palette-card')?.dataset.patientId || '';
-  const patient = getPatientById(pId);
+  // パレット一番上の患者を勝手に拾わず、確実に現在配置しようとしている患者IDのみを取得
+  const pId = currentItem?.patientId || '';
+  const patient = pId ? getPatientById(pId) : null;
 
   document.getElementById('slotPatientId').value = pId;
   document.getElementById('slotTherapistId').value = therapistId;
   document.getElementById('slotId').value = slotId;
-  patientInfoEl.textContent = patient ? `患者: ${patient.name} (${patient.id}) / ${patient.diseaseName || ''}` : '患者が選択されていません';
+  patientInfoEl.textContent = patient ? `患者: ${patient.name} (${patient.id}) / ${patient.diseaseName || ''}` : '患者が未選択です（パレットからドラッグ＆ドロップしてください）';
 
   const units = currentItem?.units || 1;
   document.getElementById('slotUnitsInput').value = units;
@@ -267,8 +283,29 @@ function openSlotModal(therapistId, slotId, currentItem) {
     b.style.background = b.dataset.unit == units ? '#e0f2fe' : '#fff';
   });
 
-  document.getElementById('slotBillingPlanInput').checked = Boolean(currentItem?.billingPlan);
-  document.getElementById('slotNoteInput').value = currentItem?.note || '';
+  // 計画書チェックボックスの物理的ロック制御
+  if (!pId) {
+    // 患者が決まっていない場合: チェック不可
+    planInput.checked = false;
+    planInput.disabled = true;
+  } else {
+    // 患者が決まっている場合: 当月内にすでに算定日があるかを調査
+    const [year, month] = currentDateStr.split('-').map(Number);
+    const excludeSlot = currentItem ? slotId : '';
+    const existingDate = findPatientMonthlyPlanDate(pId, year, month, currentDateStr, excludeSlot);
 
+    if (existingDate) {
+      // すでに当月の別日・別コマで算定済み: 物理的にチェック不可にしてOFF
+      planInput.checked = false;
+      planInput.disabled = true;
+      patientInfoEl.innerHTML += `<div style="color:#e11d48; font-size:0.75rem; margin-top:4px; font-weight:700;">⚠️ 総合計画評価料は当月 ${existingDate} に算定済みのため選択できません（月1回のみ）</div>`;
+    } else {
+      // まだ算定していない（またはこのコマ自身）: チェック可能
+      planInput.disabled = false;
+      planInput.checked = Boolean(currentItem?.billingPlan);
+    }
+  }
+
+  document.getElementById('slotNoteInput').value = currentItem?.note || '';
   modal.classList.add('active');
 }
