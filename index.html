@@ -257,15 +257,19 @@
             </select>
           </div>
         </div>
+        <div>
+          <label style="font-size:0.75rem; font-weight:700; display:block;">📝 総合計画評価料 算定フェーズ</label>
+          <select id="patientFormPlanStatus" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:600; background:#f0f9ff; color:#0369a1;">
+            <option value="NOT_YET">未算定 (初回算定 対象)</option>
+            <option value="PLAN_1_FOLLOW">計画書1 算定中 (2回目以降: 240点)</option>
+            <option value="PLAN_2_FOLLOW">計画書2 算定中 (2回目以降: 196点 固定)</option>
+          </select>
+        </div>
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
           <div>
             <label style="font-size:0.75rem; font-weight:700; display:block;">起算日 (発症/手術日)</label>
             <input type="date" id="patientFormOnsetDate" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
-          </div>
-          <div>
-            <label style="font-size:0.75rem; font-weight:700; display:block;">当院入院日</label>
-            <input type="date" id="patientFormAdmissionDate" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
-          </div>
+  　　　 </div>
         </div>
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
           <div>
