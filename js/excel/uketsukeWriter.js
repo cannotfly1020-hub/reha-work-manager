@@ -1,17 +1,18 @@
 // js/excel/uketsukeWriter.js
-// 受付提出用Excel生成層（医事課日別入力特化・行ズレ防止ゼブラ・土日着色・計画書★・経営サマリー美装）
+// 受付提出用Excel生成層（入院・外来・消炎鎮痛シート分離 / 疾患別・標準減算ソート / オートフィルター / 美装枠固定）
 
 import { REHA_RULES } from '../config/rules.js';
-import { evaluateEarlyBonusPhase } from '../core/deadlineCalc.js';
+import { calculatePatientDeadlines, evaluateEarlyBonusPhase } from '../core/deadlineCalc.js';
 
+const SUMMARY_SHEET = 'レセプト収益サマリー';
 const INPATIENT_SHEET = '実施ﾘｽﾄ 入院';
 const OUTPATIENT_SHEET = '実施ﾘｽﾄ 外来';
-const SUMMARY_SHEET = 'レセプト収益サマリー';
+const ANALGESIA_SHEET = '実施ﾘｽﾄ 消炎鎮痛';
 
 // デザイン・カラーパレット定数
 const STYLES = {
   headerNavy: {
-    font: { name: 'Meiryo UI', sz: 10, bold: true, color: { rgb: 'FFFFFF' } },
+    font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: 'FFFFFF' } },
     fill: { fgColor: { rgb: '1E293B' } },
     alignment: { horizontal: 'center', vertical: 'center', wrapText: true }
   },
@@ -41,14 +42,14 @@ const STYLES = {
     border: thinBorder()
   },
   cellPlanStar: {
-    font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: 'B45309' } },
-    fill: { fgColor: { rgb: 'FEF3C7' } }, // 計画書算定日は淡いアンバー色
+    font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: 'B45309' } },
+    fill: { fgColor: { rgb: 'FEF3C7' } },
     alignment: { horizontal: 'center', vertical: 'center' },
     border: thinBorder()
   },
-  cellZebra: { fgColor: { rgb: 'F8FAFC' } }, // 偶数行ゼブラ（極淡いスレート）
-  cellSatCol: { fgColor: { rgb: 'EFF6FF' } }, // 土曜列（極淡いブルー）
-  cellSunCol: { fgColor: { rgb: 'FFF1F2' } }  // 日曜列（極淡いピンク）
+  cellZebra: { fgColor: { rgb: 'F8FAFC' } },
+  cellSatCol: { fgColor: { rgb: 'EFF6FF' } },
+  cellSunCol: { fgColor: { rgb: 'FFF1F2' } }
 };
 
 function thinBorder() {
@@ -57,27 +58,23 @@ function thinBorder() {
 }
 
 /**
- * 受付提出用ワークブック生成（事務提出・経営集計対応）
+ * 受付提出用ワークブック生成（入院・外来・消炎鎮痛3分立＋経営サマリー）
  */
 export function generateUketsukeWorkbook(aggregated, templateBuffer = null) {
   if (!window.XLSX) throw new Error('SheetJS (xlsx-js-style) が読み込まれていません。');
 
-  let wb;
-  if (templateBuffer) {
-    wb = window.XLSX.read(templateBuffer, { type: 'array' });
-  } else {
-    wb = window.XLSX.utils.book_new();
-  }
+  let wb = templateBuffer ? window.XLSX.read(templateBuffer, { type: 'array' }) : window.XLSX.utils.book_new();
 
   writeExecutiveSummarySheet(wb, aggregated);
-  writeJimuPatientSheet(wb, aggregated, 'INPATIENT', INPATIENT_SHEET);
-  writeJimuPatientSheet(wb, aggregated, 'OUTPATIENT', OUTPATIENT_SHEET);
+  writeRehaPatientSheet(wb, aggregated, 'INPATIENT', INPATIENT_SHEET);
+  writeRehaPatientSheet(wb, aggregated, 'OUTPATIENT', OUTPATIENT_SHEET);
+  writeAnalgesiaDedicatedSheet(wb, aggregated, ANALGESIA_SHEET);
 
   return wb;
 }
 
 /**
- * 経営者向け: レセプト総点数・総売上・加算別サマリーシート（美装版）
+ * 経営者向け: レセプト総確定・収益サマリーシート
  */
 function writeExecutiveSummarySheet(wb, aggregated) {
   const { patientMap, year, month } = aggregated;
@@ -101,15 +98,12 @@ function writeExecutiveSummarySheet(wb, aggregated) {
     });
   });
 
-  // タイトルバナー
   setStyledCell(ws, 1, 1, `【${year}年${month}月 リハビリテーション科 レセプト確定・経営収益サマリー】`, {
     font: { name: 'Meiryo UI', sz: 14, bold: true, color: { rgb: '0F172A' } }
   });
 
-  const headers = ['項目 / 算定区分', '算定対象 (単位/回)', '単価点数', '総点数', '総売上金額 (¥)', '備考・算定ルール'];
-  headers.forEach((h, idx) => {
-    setStyledCell(ws, 3, idx + 1, h, STYLES.headerNavy);
-  });
+  const headers = ['項目 / 算定区分', '算定対象 (単位/回)', '単価点数', '総点数', '総売上金額 (¥)', '備考・算定区分'];
+  headers.forEach((h, idx) => setStyledCell(ws, 3, idx + 1, h, STYLES.headerNavy));
 
   const rows = [
     ['運動器リハビリテーション(Ⅱ)', diseaseStats.LOCOMOTIVE, REHA_RULES.LIMIT_DAYS.LOCOMOTIVE.defaultPoints, '単位'],
@@ -126,15 +120,13 @@ function writeExecutiveSummarySheet(wb, aggregated) {
 
   let rIdx = 4;
   let grandTotalPoints = 0;
-
   rows.forEach((rData, i) => {
     const qty = rData[1];
     const pts = rData[2];
     const totPts = qty * pts;
     const totAmount = totPts * 10;
     grandTotalPoints += totPts;
-    const isEven = i % 2 === 1;
-    const bg = isEven ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } };
+    const bg = (i % 2 === 1) ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } };
 
     setStyledCell(ws, rIdx, 1, rData[0], { ...STYLES.cellNormal, fill: bg });
     setStyledCell(ws, rIdx, 2, qty, { ...STYLES.cellCenter, fill: bg, numFmt: '#,##0' });
@@ -145,7 +137,6 @@ function writeExecutiveSummarySheet(wb, aggregated) {
     rIdx++;
   });
 
-  // 総合計行（会計ダブルアンダーライン風）
   const totalBorder = {
     top: { style: 'thin', color: { rgb: '0F172A' } },
     bottom: { style: 'double', color: { rgb: '0F172A' } },
@@ -167,9 +158,10 @@ function writeExecutiveSummarySheet(wb, aggregated) {
 }
 
 /**
- * 事務（医事課）向け: 日別入力特化シート（ゼブラ縞・土日色分け・計画書★・枠固定完備）
+ * 事務（医事課）向け: 個別リハビリ実施リスト（入院 / 外来）
+ * 疾患区分（運動器→脳血管→廃用）× 算定区分（標準→減算）でソート ＆ オートフィルター完備
  */
-function writeJimuPatientSheet(wb, aggregated, category, sheetName) {
+function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
   const { daysInMonth, patientMap, year, month } = aggregated;
   const isInput = category === 'INPATIENT';
   const ws = {};
@@ -180,72 +172,96 @@ function writeJimuPatientSheet(wb, aggregated, category, sheetName) {
     font: { name: 'Meiryo UI', sz: 12, bold: true, color: { rgb: '0F172A' } }
   });
 
-  // 行1: ヘッダー
+  // 行1: 固定サマリーヘッダー
   setStyledCell(ws, 1, 0, '患者ID', STYLES.headerNavy);
   setStyledCell(ws, 1, 1, '患者氏名', STYLES.headerNavy);
-  setStyledCell(ws, 1, 2, '疾患名 / 区分', STYLES.headerNavy);
-  setStyledCell(ws, 1, 3, '介護認定', STYLES.headerNavy);
-  setStyledCell(ws, 1, 4, '当月総単位', { ...STYLES.headerNavy, fill: { fgColor: { rgb: '0369A1' } } });
+  setStyledCell(ws, 1, 2, '疾患名 (病名)', STYLES.headerNavy);
+  setStyledCell(ws, 1, 3, '疾患区分', STYLES.headerNavy);
+  setStyledCell(ws, 1, 4, '算定区分', { ...STYLES.headerNavy, fill: { fgColor: { rgb: '334155' } } });
+  setStyledCell(ws, 1, 5, '介護認定', STYLES.headerNavy);
+  setStyledCell(ws, 1, 6, '当月総単位', { ...STYLES.headerNavy, fill: { fgColor: { rgb: '0369A1' } } });
 
-  const dayColStart = 5;
+  // 日別ヘッダー（Col 7〜）
+  const dayColStart = 7;
   for (let d = 1; d <= daysInMonth; d++) {
     const dateObj = new Date(year, month - 1, d);
-    const dayOfWeek = dateObj.getDay(); // 0:日, 6:土
+    const dayOfWeek = dateObj.getDay();
     const col = dayColStart + (d - 1);
     const hLabel = `${d}\n(${dayOfWeekNames[dayOfWeek]})`;
 
     let style = STYLES.headerNavy;
     if (dayOfWeek === 6) style = STYLES.headerSat;
     else if (dayOfWeek === 0) style = STYLES.headerSun;
-
     setStyledCell(ws, 1, col, hLabel, style);
   }
 
+  // 加算集計列
   const extraCol = dayColStart + daysInMonth;
   if (isInput) {
     setStyledCell(ws, 1, extraCol, '早期加算Ⅰ(60点)', STYLES.headerNavy);
     setStyledCell(ws, 1, extraCol + 1, '早期加算Ⅱ(25点)', STYLES.headerNavy);
     setStyledCell(ws, 1, extraCol + 2, '計画書算定日', STYLES.headerNavy);
     setStyledCell(ws, 1, extraCol + 3, '計画書区分・点数', STYLES.headerNavy);
-    setStyledCell(ws, 1, extraCol + 4, '備考', STYLES.headerNavy);
+    setStyledCell(ws, 1, extraCol + 4, '備考・特記事項', STYLES.headerNavy);
   } else {
     setStyledCell(ws, 1, extraCol, '計画書算定日', STYLES.headerNavy);
     setStyledCell(ws, 1, extraCol + 1, '計画書区分・点数', STYLES.headerNavy);
-    setStyledCell(ws, 1, extraCol + 2, '備考', STYLES.headerNavy);
+    setStyledCell(ws, 1, extraCol + 2, '備考・特記事項', STYLES.headerNavy);
   }
 
-  // データ行描画
-  const patients = Object.values(patientMap).filter((item) => item.patient.category === category);
+  // 対象患者（消炎鎮痛のみの患者を除外）を抽出
+  const rawPatients = Object.values(patientMap).filter(
+    (item) => item.patient.category === category && item.patient.diseaseType !== 'ANALGESIA'
+  );
+
+  // 疾患順（運動器 -> 脳血管 -> 廃用） × 算定区分順（標準 -> 減算）でソート
+  const diseaseOrder = { LOCOMOTIVE: 1, CEREBROVASCULAR: 2, DISUSE: 3 };
+  const sortedPatients = rawPatients.map((item) => {
+    const baseDate = `${year}-${String(month).padStart(2, '0')}-01`;
+    const dl = calculatePatientDeadlines(item.patient, baseDate);
+    const isReduced = dl.isMaintenanceReduction;
+    const calcType = isReduced ? '減算' : '標準';
+    const sortScore = (diseaseOrder[item.patient.diseaseType] || 9) * 10 + (isReduced ? 2 : 1);
+    return { ...item, calcType, isReduced, dl, sortScore };
+  }).sort((a, b) => {
+    if (a.sortScore !== b.sortScore) return a.sortScore - b.sortScore;
+    return a.patient.id.localeCompare(b.patient.id);
+  });
+
   let curRow = 2;
-
-  patients.forEach((item, pIdx) => {
+  sortedPatients.forEach((item, pIdx) => {
     const p = item.patient;
-    const isEvenRow = pIdx % 2 === 1;
-    const zebraBg = isEvenRow ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } };
+    const zebraBg = (pIdx % 2 === 1) ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } };
 
-    // 患者基本情報（固定列）
     setStyledCell(ws, curRow, 0, p.id, { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true } });
     setStyledCell(ws, curRow, 1, p.name, { ...STYLES.cellNormal, fill: zebraBg, font: { bold: true } });
-    setStyledCell(ws, curRow, 2, p.diseaseName || p.diseaseType, { ...STYLES.cellNormal, fill: zebraBg });
-    setStyledCell(ws, curRow, 3, p.careInsuranceType === 'CARE' ? '要介護' : (p.careInsuranceType === 'SUPPORT' ? '要支援' : 'なし'), { ...STYLES.cellCenter, fill: zebraBg });
-    // 検算用・当月総単位（目立たせる）
-    setStyledCell(ws, curRow, 4, item.totalUnits, {
+    setStyledCell(ws, curRow, 2, p.diseaseName || '-', { ...STYLES.cellNormal, fill: zebraBg });
+    setStyledCell(ws, curRow, 3, REHA_RULES.LIMIT_DAYS[p.diseaseType]?.shortLabel || p.diseaseType, { ...STYLES.cellCenter, fill: zebraBg });
+    
+    // 算定区分（標準 / 減算）
+    const calcStyle = item.isReduced
+      ? { ...STYLES.cellCenter, fill: { fgColor: { rgb: 'FEE2E2' } }, font: { bold: true, color: { rgb: 'B91C1C' } } }
+      : { ...STYLES.cellCenter, fill: { fgColor: { rgb: 'ECFDF5' } }, font: { bold: true, color: { rgb: '047857' } } };
+    setStyledCell(ws, curRow, 4, item.calcType, calcStyle);
+
+    setStyledCell(ws, curRow, 5, p.careInsuranceType === 'CARE' ? '要介護' : (p.careInsuranceType === 'SUPPORT' ? '要支援' : 'なし'), { ...STYLES.cellCenter, fill: zebraBg });
+    
+    // 当月総単位
+    setStyledCell(ws, curRow, 6, item.totalUnits, {
       ...STYLES.cellCenter,
       fill: { fgColor: { rgb: 'E0F2FE' } },
       font: { name: 'Meiryo UI', sz: 10, bold: true, color: { rgb: '0369A1' } },
       numFmt: '#,##0'
     });
 
-    // 計画書算定日・早期加算日数の走査
+    // 計画書・早期加算走査
     let e1 = 0, e2 = 0, planDateStr = '', planLabel = '';
     const planDatesSet = new Set();
-
     item.slots.forEach((s) => {
       if (s.billingPlan) {
         planDateStr = s.date ? s.date.slice(5) : '';
         planLabel = formatPlanLabel(s.billingPlan);
-        const dNum = parseInt(s.date.split('-')[2], 10);
-        planDatesSet.add(dNum);
+        planDatesSet.add(parseInt(s.date.split('-')[2], 10));
       }
       if (isInput && !s.isAnalgesia) {
         const ph = evaluateEarlyBonusPhase(p.earlyBonusStartDate || p.admissionDate, s.date, 'INPATIENT');
@@ -254,7 +270,7 @@ function writeJimuPatientSheet(wb, aggregated, category, sheetName) {
       }
     });
 
-    // 1日〜31日セル
+    // 日別セル（1日〜31日）
     for (let d = 1; d <= daysInMonth; d++) {
       const dateObj = new Date(year, month - 1, d);
       const dayOfWeek = dateObj.getDay();
@@ -268,14 +284,12 @@ function writeJimuPatientSheet(wb, aggregated, category, sheetName) {
       else cellStyle.fill = zebraBg;
 
       if (isPlanDay) {
-        // 計画書算定日は ★ マークをつけてハイライト（見落とし防止）
         setStyledCell(ws, curRow, col, `${u}★`, STYLES.cellPlanStar);
       } else {
         setStyledCell(ws, curRow, col, u > 0 ? u : '', cellStyle);
       }
     }
 
-    // 加算集計列
     if (isInput) {
       setStyledCell(ws, curRow, extraCol, e1 > 0 ? `${e1}日` : '-', { ...STYLES.cellCenter, fill: zebraBg });
       setStyledCell(ws, curRow, extraCol + 1, e2 > 0 ? `${e2}日` : '-', { ...STYLES.cellCenter, fill: zebraBg });
@@ -292,20 +306,110 @@ function writeJimuPatientSheet(wb, aggregated, category, sheetName) {
   });
 
   // 列幅設定
-  const colWidths = [10, 14, 20, 10, 12];
+  const colWidths = [10, 14, 20, 12, 10, 10, 12];
   for (let d = 1; d <= daysInMonth; d++) colWidths.push(4.5);
   if (isInput) colWidths.push(14, 14, 12, 24, 20);
   else colWidths.push(12, 24, 20);
   setSheetCols(ws, colWidths);
 
-  // ウィンドウ枠固定（上部ヘッダー行2行 ＆ 左側患者サマリー5列 E列まで画面固定）
-  ws['!freeze'] = {
-    xSplit: 'E',
-    ySplit: '2',
-    topLeftCell: 'F3',
-    activePane: 'bottomRight',
-    state: 'frozen'
-  };
+  // ウィンドウ枠固定（G列「当月総単位」まで常時画面固定）
+  ws['!freeze'] = { xSplit: 'G', ySplit: '2', topLeftCell: 'H3', activePane: 'bottomRight', state: 'frozen' };
+
+  // オートフィルター機能（ヘッダー行全体に▼を配置し、疾患や算定区分で即時並べ替え可能に）
+  const totalCols = extraCol + (isInput ? 5 : 3);
+  ws['!autofilter'] = { ref: window.XLSX.utils.encode_range({ r: 1, c: 0 }, { r: Math.max(1, curRow - 1), c: totalCols - 1 }) };
+
+  updateSheetRange(ws);
+  appendOrReplaceSheet(wb, ws, sheetName);
+}
+
+/**
+ * 事務（医事課）向け: 消炎鎮痛（物療）専用シート
+ * 個別リハと完全に切り離し、1日1回35点の回数・来院日・区分（入院/外来）を一括出力
+ */
+function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
+  const { daysInMonth, patientMap, year, month } = aggregated;
+  const ws = {};
+  const dayOfWeekNames = ['日', '月', '火', '水', '木', '金', '土'];
+
+  setStyledCell(ws, 0, 0, `【${year}年${month}月 消炎鎮痛等処置 (物療) 実施リスト (1日1回35点)】`, {
+    font: { name: 'Meiryo UI', sz: 12, bold: true, color: { rgb: '0F172A' } }
+  });
+
+  setStyledCell(ws, 1, 0, '患者ID', STYLES.headerNavy);
+  setStyledCell(ws, 1, 1, '患者氏名', STYLES.headerNavy);
+  setStyledCell(ws, 1, 2, '区分', STYLES.headerNavy);
+  setStyledCell(ws, 1, 3, '疾患名 (処置部位)', STYLES.headerNavy);
+  setStyledCell(ws, 1, 4, '当月実施回数', { ...STYLES.headerNavy, fill: { fgColor: { rgb: '15803D' } } });
+  setStyledCell(ws, 1, 5, '総点数(35点/回)', { ...STYLES.headerNavy, fill: { fgColor: { rgb: '166534' } } });
+
+  const dayColStart = 6;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateObj = new Date(year, month - 1, d);
+    const dayOfWeek = dateObj.getDay();
+    const col = dayColStart + (d - 1);
+    let style = STYLES.headerNavy;
+    if (dayOfWeek === 6) style = STYLES.headerSat;
+    else if (dayOfWeek === 0) style = STYLES.headerSun;
+    setStyledCell(ws, 1, col, `${d}\n(${dayOfWeekNames[dayOfWeek]})`, style);
+  }
+  setStyledCell(ws, 1, dayColStart + daysInMonth, '備考・特記事項', STYLES.headerNavy);
+
+  // 消炎鎮痛の患者を抽出
+  const analgesiaPatients = Object.values(patientMap).filter((item) => {
+    return item.patient.diseaseType === 'ANALGESIA' || item.slots.some((s) => s.isAnalgesia);
+  }).sort((a, b) => {
+    if (a.patient.category !== b.patient.category) {
+      return a.patient.category === 'INPATIENT' ? -1 : 1;
+    }
+    return a.patient.id.localeCompare(b.patient.id);
+  });
+
+  let curRow = 2;
+  analgesiaPatients.forEach((item, pIdx) => {
+    const p = item.patient;
+    const zebraBg = (pIdx % 2 === 1) ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } };
+    const analgesiaSlots = item.slots.filter((s) => s.isAnalgesia || p.diseaseType === 'ANALGESIA');
+    const totalCount = analgesiaSlots.length || (p.diseaseType === 'ANALGESIA' ? item.totalUnits : 0);
+    const totalPts = totalCount * 35;
+
+    setStyledCell(ws, curRow, 0, p.id, { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true } });
+    setStyledCell(ws, curRow, 1, p.name, { ...STYLES.cellNormal, fill: zebraBg, font: { bold: true } });
+    setStyledCell(ws, curRow, 2, p.category === 'INPATIENT' ? '入院' : '外来', { ...STYLES.cellCenter, fill: zebraBg });
+    setStyledCell(ws, curRow, 3, p.diseaseName || '消炎鎮痛処置', { ...STYLES.cellNormal, fill: zebraBg });
+    setStyledCell(ws, curRow, 4, `${totalCount} 回`, {
+      ...STYLES.cellCenter, fill: { fgColor: { rgb: 'DCFCE7' } }, font: { bold: true, color: { rgb: '166534' } }
+    });
+    setStyledCell(ws, curRow, 5, totalPts, {
+      ...STYLES.cellCenter, fill: { fgColor: { rgb: 'F0FDF4' } }, font: { bold: true, color: { rgb: '15803D' } }, numFmt: '#,##0'
+    });
+
+    const datesMap = new Set(analgesiaSlots.map((s) => parseInt(s.date.split('-')[2], 10)));
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateObj = new Date(year, month - 1, d);
+      const dayOfWeek = dateObj.getDay();
+      const col = dayColStart + (d - 1);
+      const isDone = datesMap.has(d) || (p.diseaseType === 'ANALGESIA' && (item.dailyUnits[d] || 0) > 0);
+
+      let cellStyle = { ...STYLES.cellNormal, alignment: { horizontal: 'center', vertical: 'center' } };
+      if (dayOfWeek === 6) cellStyle.fill = STYLES.cellSatCol;
+      else if (dayOfWeek === 0) cellStyle.fill = STYLES.cellSunCol;
+      else cellStyle.fill = zebraBg;
+
+      setStyledCell(ws, curRow, col, isDone ? '◯' : '', cellStyle);
+    }
+
+    setStyledCell(ws, curRow, dayColStart + daysInMonth, p.notes || '', { ...STYLES.cellNormal, fill: zebraBg });
+    curRow++;
+  });
+
+  const colWidths = [10, 14, 8, 20, 12, 14];
+  for (let d = 1; d <= daysInMonth; d++) colWidths.push(4.5);
+  colWidths.push(24);
+  setSheetCols(ws, colWidths);
+
+  ws['!freeze'] = { xSplit: 'F', ySplit: '2', topLeftCell: 'G3', activePane: 'bottomRight', state: 'frozen' };
+  ws['!autofilter'] = { ref: window.XLSX.utils.encode_range({ r: 1, c: 0 }, { r: Math.max(1, curRow - 1), c: dayColStart + daysInMonth }) };
 
   updateSheetRange(ws);
   appendOrReplaceSheet(wb, ws, sheetName);
