@@ -1,175 +1,158 @@
 // js/excel/uketsukeWriter.js
-// 受付提出用Excelワークブック生成・テンプレート転記層（200行制限準拠）
+// 受付提出用Excel生成層（医事課入力支援・経営レセプト収益サマリー完備・200行制限準拠）
 
 import { REHA_RULES } from '../config/rules.js';
-import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
+import { calculatePatientDeadlines, evaluateEarlyBonusPhase } from '../core/deadlineCalc.js';
 
 const INPATIENT_SHEET = '実施ﾘｽﾄ 入院';
-const OUTPATIENT_SHEET = '外来';
-const RECEIPT_SHEET = '(レセプト合計)入院';
+const OUTPATIENT_SHEET = '実施ﾘｽﾄ 外来';
+const SUMMARY_SHEET = 'レセプト収益サマリー';
 
 /**
- * 受付提出用ワークブックを生成する（テンプレートがあれば転記、なければ新規構築）
- * @param {Object} aggregated aggregateFromAppSchedule の集計オブジェクト
- * @param {ArrayBuffer|null} templateBuffer アップロードされた原本テンプレート
- * @returns {Object|null} XLSX ワークブックオブジェクト
+ * 受付提出用ワークブック生成（事務提出・経営集計対応）
  */
 export function generateUketsukeWorkbook(aggregated, templateBuffer = null) {
-  if (!window.XLSX) {
-    throw new Error('SheetJS (XLSX) ライブラリが読み込まれていません。');
-  }
+  if (!window.XLSX) throw new Error('SheetJS (XLSX) が読み込まれていません。');
 
   let wb;
   if (templateBuffer) {
     wb = window.XLSX.read(templateBuffer, { type: 'array' });
   } else {
     wb = window.XLSX.utils.book_new();
-    initFallbackSheets(wb, aggregated.daysInMonth);
   }
 
-  writePatientCategorySheet(wb, aggregated, 'INPATIENT', INPATIENT_SHEET);
-  writePatientCategorySheet(wb, aggregated, 'OUTPATIENT', OUTPATIENT_SHEET);
-  writeReceiptTotalSheet(wb, aggregated);
+  writeExecutiveSummarySheet(wb, aggregated);
+  writeJimuPatientSheet(wb, aggregated, 'INPATIENT', INPATIENT_SHEET);
+  writeJimuPatientSheet(wb, aggregated, 'OUTPATIENT', OUTPATIENT_SHEET);
 
   return wb;
 }
 
 /**
- * 入院・外来シートへの日別単位データ書き込み
+ * 経営者向け: レセプト総点数・総売上・加算別サマリーシート
  */
-function writePatientCategorySheet(wb, aggregated, category, sheetName) {
-  let ws = wb.Sheets[sheetName];
-  if (!ws) {
-    ws = window.XLSX.utils.aoa_to_sheet([['患者ID', '患者氏名', '疾患名', '合計']]);
-    window.XLSX.utils.book_append_sheet(wb, ws, sheetName);
-  }
+function writeExecutiveSummarySheet(wb, aggregated) {
+  const { patientMap, year, month } = aggregated;
+  const rows = [
+    [`【${year}年${month}月 リハビリテーション科 レセプト・収益確定サマリー】`],
+    ['項目 / 区分', '算定対象 (単位/回)', '単価点数', '総点数', '総売上金額 (¥)', '備考']
+  ];
 
-  const { daysInMonth, patientMap, year, month } = aggregated;
-  const patients = Object.values(patientMap).filter(
-    (item) => item.patient.category === category
-  );
+  const diseaseStats = { LOCOMOTIVE: 0, CEREBROVASCULAR: 0, DISUSE: 0, ANALGESIA: 0 };
+  let early1Count = 0, early2Count = 0;
+  const planStats = { PLAN_1_FIRST: 0, PLAN_1_FOLLOW: 0, PLAN_2_FIRST: 0, PLAN_2_FOLLOW: 0 };
 
-  const startRow = 3; // 4行目（0-indexed: 3）からデータ行開始
-  patients.forEach((item, pIndex) => {
-    const r = startRow + pIndex;
+  Object.values(patientMap).forEach((item) => {
     const p = item.patient;
-    const baseDate = `${year}-${String(month).padStart(2, '0')}-01`;
-    const deadlines = calculatePatientDeadlines(p, baseDate);
-
-    // 基本情報列
-    setCell(ws, r, 0, p.id);
-    setCell(ws, r, 1, p.name);
-    setCell(ws, r, 2, p.diseaseName || deadlines.diseaseLabel);
-    setCell(ws, r, 3, item.totalUnits);
-
-    // 日別単位列（E列/col 4 以降）
-    for (let day = 1; day <= daysInMonth; day++) {
-      const col = 3 + day;
-      const u = item.dailyUnits[day] || 0;
-      setCell(ws, r, col, u > 0 ? u : '');
+    if (diseaseStats[p.diseaseType] !== undefined) {
+      diseaseStats[p.diseaseType] += (p.diseaseType === 'ANALGESIA' ? item.slots.length : item.totalUnits);
     }
-
-    // 早期加算回数・計画書算定等の集計列
-    const earlyBonusCol = 4 + daysInMonth;
-    const planCol = earlyBonusCol + 1;
-    setCell(ws, r, earlyBonusCol, item.earlyBonusCount || 0);
-    setCell(ws, r, planCol, item.planCount || 0);
+    item.slots.forEach((s) => {
+      if (s.billingPlan && planStats[s.billingPlan] !== undefined) planStats[s.billingPlan]++;
+      if (p.category === 'INPATIENT' && !s.isAnalgesia) {
+        const ph = evaluateEarlyBonusPhase(p.earlyBonusStartDate || p.admissionDate, s.date, 'INPATIENT');
+        if (ph.phase === 'PHASE_1') early1Count++;
+        else if (ph.phase === 'PHASE_2') early2Count++;
+      }
+    });
   });
 
-  updateSheetRange(ws);
-}
-
-/**
- * レセプト合計シートへの疾患別・点数別合算書き込み
- */
-function writeReceiptTotalSheet(wb, aggregated) {
-  let ws = wb.Sheets[RECEIPT_SHEET];
-  if (!ws) {
-    ws = window.XLSX.utils.aoa_to_sheet([['疾患区分', '対象患者数', '総単位数', '概算点数']]);
-    window.XLSX.utils.book_append_sheet(wb, ws, RECEIPT_SHEET);
-  }
-
-  const statsByDisease = {
-    LOCOMOTIVE: { count: 0, units: 0, points: 0 },
-    CEREBROVASCULAR: { count: 0, units: 0, points: 0 },
-    DISUSE: { count: 0, units: 0, points: 0 },
-    ANALGESIA: { count: 0, units: 0, points: 0 }
+  const addRow = (label, qty, pts, note = '') => {
+    const totalPts = qty * pts;
+    rows.push([label, qty, pts, totalPts, totalPts * 10, note]);
+    return totalPts;
   };
 
-  Object.values(aggregated.patientMap).forEach((item) => {
-    const p = item.patient;
-    const dType = statsByDisease[p.diseaseType] ? p.diseaseType : 'LOCOMOTIVE';
-    const diseaseRule = REHA_RULES.LIMIT_DAYS[dType];
+  let grandTotalPoints = 0;
+  grandTotalPoints += addRow('運動器リハビリテーション(Ⅱ)', diseaseStats.LOCOMOTIVE, REHA_RULES.LIMIT_DAYS.LOCOMOTIVE.defaultPoints, '単位');
+  grandTotalPoints += addRow('脳血管疾患等リハビリテーション(Ⅲ)', diseaseStats.CEREBROVASCULAR, REHA_RULES.LIMIT_DAYS.CEREBROVASCULAR.defaultPoints, '単位');
+  grandTotalPoints += addRow('廃用症候群リハビリテーション(Ⅲ)', diseaseStats.DISUSE, REHA_RULES.LIMIT_DAYS.DISUSE.defaultPoints, '単位');
+  grandTotalPoints += addRow('消炎鎮痛等処置 (物療)', diseaseStats.ANALGESIA, 35, '件数 (外来/入院)');
+  grandTotalPoints += addRow('早期加算(Ⅰ) 1〜4日目', early1Count, REHA_RULES.EARLY_BONUS.PHASE_1.points, '件数 (入院のみ)');
+  grandTotalPoints += addRow('早期加算(Ⅱ) 5〜14日目', early2Count, REHA_RULES.EARLY_BONUS.PHASE_2.points, '件数 (入院のみ)');
+  grandTotalPoints += addRow('総合実施計画書1 (初回)', planStats.PLAN_1_FIRST, REHA_RULES.PLAN_POINTS.PLAN_1_FIRST, '件数');
+  grandTotalPoints += addRow('総合実施計画書1 (2回目以降)', planStats.PLAN_1_FOLLOW, REHA_RULES.PLAN_POINTS.PLAN_1_FOLLOW, '件数');
+  grandTotalPoints += addRow('総合実施計画書2 (初回)', planStats.PLAN_2_FIRST, REHA_RULES.PLAN_POINTS.PLAN_2_FIRST, '件数 (要介護3分の1)');
+  grandTotalPoints += addRow('総合実施計画書2 (2回目以降:固定)', planStats.PLAN_2_FOLLOW, REHA_RULES.PLAN_POINTS.PLAN_2_FOLLOW, '件数 (要介護3分の1継続)');
 
-    statsByDisease[dType].count += 1;
-    statsByDisease[dType].units += item.totalUnits;
-    statsByDisease[dType].points += item.totalUnits * diseaseRule.defaultPoints;
-    if (item.planCount) {
-      statsByDisease[dType].points += item.planCount * REHA_RULES.PLAN_POINTS.PLAN_1;
-    }
-  });
+  rows.push(['【総合計】', '-', '-', grandTotalPoints, grandTotalPoints * 10, 'レセプト総収益']);
 
-  let row = 2;
-  Object.entries(statsByDisease).forEach(([key, stat]) => {
-    const label = REHA_RULES.LIMIT_DAYS[key]?.fullName || key;
-    setCell(ws, row, 0, label);
-    setCell(ws, row, 1, stat.count);
-    setCell(ws, row, 2, stat.units);
-    setCell(ws, row, 3, stat.points);
-    row++;
-  });
-
-  updateSheetRange(ws);
+  const ws = window.XLSX.utils.aoa_to_sheet(rows);
+  setSheetCols(ws, [32, 18, 12, 14, 18, 24]);
+  appendOrReplaceSheet(wb, ws, SUMMARY_SHEET);
 }
 
 /**
- * テンプレート未指定時のフォールバック用シート雛形生成
+ * 事務（医事課）向け: 患者別日別単位・加算・計画書詳細シート
  */
-function initFallbackSheets(wb, daysInMonth) {
-  const header = ['患者ID', '患者氏名', '疾患名', '当月計'];
+function writeJimuPatientSheet(wb, aggregated, category, sheetName) {
+  const { daysInMonth, patientMap } = aggregated;
+  const isInput = category === 'INPATIENT';
+
+  const header = ['患者ID', '患者氏名', '疾患名', '介護認定', '当月総単位'];
   for (let d = 1; d <= daysInMonth; d++) header.push(`${d}日`);
-  header.push('早期加算回数', '計画書件数');
+  if (isInput) header.push('早期加算Ⅰ(60点)', '早期加算Ⅱ(25点)');
+  header.push('計画書算定日', '計画書区分・点数', '備考');
 
-  [INPATIENT_SHEET, OUTPATIENT_SHEET].forEach((sName) => {
-    const ws = window.XLSX.utils.aoa_to_sheet([
-      [`受付提出用 実施リスト (${sName})`],
-      header
-    ]);
-    window.XLSX.utils.book_append_sheet(wb, ws, sName);
+  const rows = [header];
+  const patients = Object.values(patientMap).filter((item) => item.patient.category === category);
+
+  patients.forEach((item) => {
+    const p = item.patient;
+    const row = [p.id, p.name, p.diseaseName || p.diseaseType, p.careInsuranceType === 'CARE' ? '要介護' : (p.careInsuranceType === 'SUPPORT' ? '要支援' : 'なし'), item.totalUnits];
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const u = item.dailyUnits[d];
+      row.push(u > 0 ? u : '');
+    }
+
+    let e1 = 0, e2 = 0, planDate = '', planLabel = '';
+    item.slots.forEach((s) => {
+      if (s.billingPlan) {
+        planDate = s.date ? s.date.slice(5) : '';
+        planLabel = formatPlanLabel(s.billingPlan);
+      }
+      if (isInput && !s.isAnalgesia) {
+        const ph = evaluateEarlyBonusPhase(p.earlyBonusStartDate || p.admissionDate, s.date, 'INPATIENT');
+        if (ph.phase === 'PHASE_1') e1++;
+        else if (ph.phase === 'PHASE_2') e2++;
+      }
+    });
+
+    if (isInput) { row.push(e1 > 0 ? `${e1}日` : '-', e2 > 0 ? `${e2}日` : '-'); }
+    row.push(planDate || '-', planLabel || '-', p.notes || '');
+    rows.push(row);
   });
+
+  const ws = window.XLSX.utils.aoa_to_sheet(rows);
+  const colWidths = [10, 14, 20, 10, 12];
+  for (let d = 1; d <= daysInMonth; d++) colWidths.push(4);
+  if (isInput) colWidths.push(14, 14);
+  colWidths.push(12, 22, 20);
+
+  setSheetCols(ws, colWidths);
+  appendOrReplaceSheet(wb, ws, sheetName);
 }
 
-/**
- * ワークシートの特定セル (row, col) に値を設定
- */
-function setCell(ws, r, c, val) {
-  const addr = window.XLSX.utils.encode_cell({ r, c });
-  if (val === '' || val === null || val === undefined) {
-    delete ws[addr];
-    return;
+function formatPlanLabel(planKey) {
+  switch (planKey) {
+    case 'PLAN_1_FIRST': return '計画書1 (初回 300点)';
+    case 'PLAN_1_FOLLOW': return '計画書1 (継続 240点)';
+    case 'PLAN_2_FIRST': return '計画書2 (初回 240点)';
+    case 'PLAN_2_FOLLOW': return '計画書2 (継続 196点)';
+    default: return planKey;
   }
-  const isNum = typeof val === 'number';
-  ws[addr] = { t: isNum ? 'n' : 's', v: val };
 }
 
-/**
- * ワークシートの !ref を再計算して更新
- */
-function updateSheetRange(ws) {
-  const keys = Object.keys(ws).filter((k) => !k.startsWith('!'));
-  if (keys.length === 0) return;
+function setSheetCols(ws, widthList) {
+  ws['!cols'] = widthList.map((w) => ({ wch: w }));
+}
 
-  let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
-  keys.forEach((k) => {
-    const cell = window.XLSX.utils.decode_cell(k);
-    if (cell.r < minR) minR = cell.r;
-    if (cell.r > maxR) maxR = cell.r;
-    if (cell.c < minC) minC = cell.c;
-    if (cell.c > maxC) maxC = cell.c;
-  });
-
-  ws['!ref'] = window.XLSX.utils.encode_range(
-    { r: minR, c: minC },
-    { r: maxR, c: maxC }
-  );
+function appendOrReplaceSheet(wb, ws, name) {
+  const existingIdx = wb.SheetNames.indexOf(name);
+  if (existingIdx >= 0) {
+    wb.Sheets[name] = ws;
+  } else {
+    window.XLSX.utils.book_append_sheet(wb, ws, name);
+  }
 }
