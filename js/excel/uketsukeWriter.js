@@ -1,5 +1,5 @@
 // js/excel/uketsukeWriter.js
-// 受付提出用Excel生成層（A4横1枚印刷対応 / 日付▼非表示 / 入院・外来・消炎鎮痛3分立 / 疾患・減算ソート）
+// 受付提出用Excel生成層（A4横1枚印刷・超高視認性最適化 / 疾患名除外スリム化 / 日付▼非表示 / 疾患・減算ソート）
 
 import { REHA_RULES } from '../config/rules.js';
 import { calculatePatientDeadlines, evaluateEarlyBonusPhase } from '../core/deadlineCalc.js';
@@ -152,7 +152,7 @@ function writeExecutiveSummarySheet(wb, aggregated) {
   setStyledCell(ws, rIdx, 5, grandTotalPoints * 10, { alignment: { horizontal: 'right' }, font: { name: 'Meiryo UI', sz: 11, bold: true, color: { rgb: '047857' } }, fill: totalFill, border: totalBorder, numFmt: '¥#,##0' });
   setStyledCell(ws, rIdx, 6, 'レセプト総収益（保険点数×10円）', { font: { sz: 8.5, color: { rgb: '047857' }, bold: true }, fill: totalFill, border: totalBorder });
 
-  setSheetCols(ws, [32, 16, 12, 15, 18, 26]);
+  setSheetCols(ws, [30, 16, 12, 14, 18, 26]);
   applyA4LandscapePrintSetup(ws);
   updateSheetRange(ws);
   appendOrReplaceSheet(wb, ws, SUMMARY_SHEET);
@@ -160,7 +160,7 @@ function writeExecutiveSummarySheet(wb, aggregated) {
 
 /**
  * 事務（医事課）向け: 個別リハビリ実施リスト（入院 / 外来）
- * 疾患区分×算定区分ソート ＆ 左側7列のみオートフィルター（日付の▼は非表示） ＆ A4横1枚印刷
+ * 疾患名を除外して横幅を強力に圧縮 ＆ A4横1枚印刷に完全最適化
  */
 function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
   const { daysInMonth, patientMap, year, month } = aggregated;
@@ -173,17 +173,15 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
     font: { name: 'Meiryo UI', sz: 11, bold: true, color: { rgb: '0F172A' } }
   });
 
-  // 行1: 固定サマリーヘッダー（Col 0〜6）
+  // 行1: 固定サマリーヘッダー（Col 0〜4：疾患名を除外して5列にスリム化）
   setStyledCell(ws, 1, 0, '患者ID', STYLES.headerNavy);
   setStyledCell(ws, 1, 1, '患者氏名', STYLES.headerNavy);
-  setStyledCell(ws, 1, 2, '疾患名 (病名)', STYLES.headerNavy);
-  setStyledCell(ws, 1, 3, '疾患区分', STYLES.headerNavy);
-  setStyledCell(ws, 1, 4, '算定区分', { ...STYLES.headerNavy, fill: { fgColor: { rgb: '334155' } } });
-  setStyledCell(ws, 1, 5, '介護認定', STYLES.headerNavy);
-  setStyledCell(ws, 1, 6, '当月総単位', { ...STYLES.headerNavy, fill: { fgColor: { rgb: '0369A1' } } });
+  setStyledCell(ws, 1, 2, '疾患区分', STYLES.headerNavy);
+  setStyledCell(ws, 1, 3, '算定区分', { ...STYLES.headerNavy, fill: { fgColor: { rgb: '334155' } } });
+  setStyledCell(ws, 1, 4, '当月総単位', { ...STYLES.headerNavy, fill: { fgColor: { rgb: '0369A1' } } });
 
-  // 日別ヘッダー（Col 7〜）
-  const dayColStart = 7;
+  // 日別ヘッダー（Col 5〜）
+  const dayColStart = 5;
   for (let d = 1; d <= daysInMonth; d++) {
     const dateObj = new Date(year, month - 1, d);
     const dayOfWeek = dateObj.getDay();
@@ -203,11 +201,11 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
     setStyledCell(ws, 1, extraCol + 1, '早期加算Ⅱ(25点)', STYLES.headerNavy);
     setStyledCell(ws, 1, extraCol + 2, '計画書算定日', STYLES.headerNavy);
     setStyledCell(ws, 1, extraCol + 3, '計画書区分・点数', STYLES.headerNavy);
-    setStyledCell(ws, 1, extraCol + 4, '備考・特記事項', STYLES.headerNavy);
+    setStyledCell(ws, 1, extraCol + 4, '備考', STYLES.headerNavy);
   } else {
     setStyledCell(ws, 1, extraCol, '計画書算定日', STYLES.headerNavy);
     setStyledCell(ws, 1, extraCol + 1, '計画書区分・点数', STYLES.headerNavy);
-    setStyledCell(ws, 1, extraCol + 2, '備考・特記事項', STYLES.headerNavy);
+    setStyledCell(ws, 1, extraCol + 2, '備考', STYLES.headerNavy);
   }
 
   // 対象患者（消炎鎮痛のみの患者を除外）
@@ -234,21 +232,21 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
     const p = item.patient;
     const zebraBg = (pIdx % 2 === 1) ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } };
 
+    // Col 0: 患者ID
     setStyledCell(ws, curRow, 0, p.id, { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true } });
+    // Col 1: 患者氏名
     setStyledCell(ws, curRow, 1, p.name, { ...STYLES.cellNormal, fill: zebraBg, font: { bold: true } });
-    setStyledCell(ws, curRow, 2, p.diseaseName || '-', { ...STYLES.cellNormal, fill: zebraBg });
-    setStyledCell(ws, curRow, 3, REHA_RULES.LIMIT_DAYS[p.diseaseType]?.shortLabel || p.diseaseType, { ...STYLES.cellCenter, fill: zebraBg });
+    // Col 2: 疾患区分
+    setStyledCell(ws, curRow, 2, REHA_RULES.LIMIT_DAYS[p.diseaseType]?.shortLabel || p.diseaseType, { ...STYLES.cellCenter, fill: zebraBg });
     
-    // 算定区分（標準 / 減算）
+    // Col 3: 算定区分（標準 / 減算）
     const calcStyle = item.isReduced
       ? { ...STYLES.cellCenter, fill: { fgColor: { rgb: 'FEE2E2' } }, font: { bold: true, color: { rgb: 'B91C1C' } } }
       : { ...STYLES.cellCenter, fill: { fgColor: { rgb: 'ECFDF5' } }, font: { bold: true, color: { rgb: '047857' } } };
-    setStyledCell(ws, curRow, 4, item.calcType, calcStyle);
-
-    setStyledCell(ws, curRow, 5, p.careInsuranceType === 'CARE' ? '要介護' : (p.careInsuranceType === 'SUPPORT' ? '要支援' : 'なし'), { ...STYLES.cellCenter, fill: zebraBg });
+    setStyledCell(ws, curRow, 3, item.calcType, calcStyle);
     
-    // 当月総単位
-    setStyledCell(ws, curRow, 6, item.totalUnits, {
+    // Col 4: 当月総単位
+    setStyledCell(ws, curRow, 4, item.totalUnits, {
       ...STYLES.cellCenter,
       fill: { fgColor: { rgb: 'E0F2FE' } },
       font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: '0369A1' } },
@@ -306,19 +304,18 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
     curRow++;
   });
 
-  // A4横印刷に最適化した列幅設定（コンパクトで横1枚に綺麗に凝縮）
-  const colWidths = [8, 12, 16, 9, 8, 8, 9];
-  for (let d = 1; d <= daysInMonth; d++) colWidths.push(3.6);
-  if (isInput) colWidths.push(11, 11, 9, 18, 14);
-  else colWidths.push(9, 18, 14);
+  // A4横印刷に最適化したスリム列幅設定（疾患名除外により余裕が生まれフォント縮小を回避）
+  const colWidths = [6.5, 11, 8.5, 7.5, 8.5]; // ID(6.5), 氏名(11), 疾患区分(8.5), 算定区分(7.5), 総単位(8.5)
+  for (let d = 1; d <= daysInMonth; d++) colWidths.push(3.3);
+  if (isInput) colWidths.push(9.5, 9.5, 8.5, 17, 10);
+  else colWidths.push(8.5, 17, 10);
   setSheetCols(ws, colWidths);
 
-  // ウィンドウ枠固定（G列「当月総単位」まで常時画面固定）
-  ws['!freeze'] = { xSplit: 'G', ySplit: '2', topLeftCell: 'H3', activePane: 'bottomRight', state: 'frozen' };
+  // ウィンドウ枠固定（E列「当月総単位」まで常時固定）
+  ws['!freeze'] = { xSplit: 'E', ySplit: '2', topLeftCell: 'F3', activePane: 'bottomRight', state: 'frozen' };
 
-  // 【最重要】オートフィルターの範囲をCol 0〜6（患者ID〜当月総単位）のみに限定！
-  // 日付列（Col 7以降）には昇降▼マークを一切出さない仕様
-  ws['!autofilter'] = { ref: window.XLSX.utils.encode_range({ r: 1, c: 0 }, { r: Math.max(1, curRow - 1), c: 6 }) };
+  // オートフィルターの範囲をCol 0〜4（患者ID〜当月総単位）のみに限定（日付の▼は非表示）
+  ws['!autofilter'] = { ref: window.XLSX.utils.encode_range({ r: 1, c: 0 }, { r: Math.max(1, curRow - 1), c: 4 }) };
 
   // A4横1枚印刷（横幅ぴったり1ページフィット）設定
   applyA4LandscapePrintSetup(ws);
@@ -342,11 +339,10 @@ function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
   setStyledCell(ws, 1, 0, '患者ID', STYLES.headerNavy);
   setStyledCell(ws, 1, 1, '患者氏名', STYLES.headerNavy);
   setStyledCell(ws, 1, 2, '区分', STYLES.headerNavy);
-  setStyledCell(ws, 1, 3, '疾患名 (処置部位)', STYLES.headerNavy);
-  setStyledCell(ws, 1, 4, '当月実施回数', { ...STYLES.headerNavy, fill: { fgColor: { rgb: '15803D' } } });
-  setStyledCell(ws, 1, 5, '総点数(35点/回)', { ...STYLES.headerNavy, fill: { fgColor: { rgb: '166534' } } });
+  setStyledCell(ws, 1, 3, '当月回数', { ...STYLES.headerNavy, fill: { fgColor: { rgb: '15803D' } } });
+  setStyledCell(ws, 1, 4, '総点数(35点/回)', { ...STYLES.headerNavy, fill: { fgColor: { rgb: '166534' } } });
 
-  const dayColStart = 6;
+  const dayColStart = 5;
   for (let d = 1; d <= daysInMonth; d++) {
     const dateObj = new Date(year, month - 1, d);
     const dayOfWeek = dateObj.getDay();
@@ -356,7 +352,7 @@ function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
     else if (dayOfWeek === 0) style = STYLES.headerSun;
     setStyledCell(ws, 1, col, `${d}\n${dayOfWeekNames[dayOfWeek]}`, style);
   }
-  setStyledCell(ws, 1, dayColStart + daysInMonth, '備考・特記事項', STYLES.headerNavy);
+  setStyledCell(ws, 1, dayColStart + daysInMonth, '備考', STYLES.headerNavy);
 
   // 消炎鎮痛の患者を抽出
   const analgesiaPatients = Object.values(patientMap).filter((item) => {
@@ -379,11 +375,10 @@ function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
     setStyledCell(ws, curRow, 0, p.id, { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true } });
     setStyledCell(ws, curRow, 1, p.name, { ...STYLES.cellNormal, fill: zebraBg, font: { bold: true } });
     setStyledCell(ws, curRow, 2, p.category === 'INPATIENT' ? '入院' : '外来', { ...STYLES.cellCenter, fill: zebraBg });
-    setStyledCell(ws, curRow, 3, p.diseaseName || '消炎鎮痛処置', { ...STYLES.cellNormal, fill: zebraBg });
-    setStyledCell(ws, curRow, 4, `${totalCount} 回`, {
+    setStyledCell(ws, curRow, 3, `${totalCount} 回`, {
       ...STYLES.cellCenter, fill: { fgColor: { rgb: 'DCFCE7' } }, font: { bold: true, color: { rgb: '166534' } }
     });
-    setStyledCell(ws, curRow, 5, totalPts, {
+    setStyledCell(ws, curRow, 4, totalPts, {
       ...STYLES.cellCenter, fill: { fgColor: { rgb: 'F0FDF4' } }, font: { bold: true, color: { rgb: '15803D' } }, numFmt: '#,##0'
     });
 
@@ -406,15 +401,15 @@ function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
     curRow++;
   });
 
-  const colWidths = [8, 12, 7, 16, 10, 11];
-  for (let d = 1; d <= daysInMonth; d++) colWidths.push(3.6);
-  colWidths.push(18);
+  const colWidths = [6.5, 11, 7, 8.5, 10];
+  for (let d = 1; d <= daysInMonth; d++) colWidths.push(3.3);
+  colWidths.push(12);
   setSheetCols(ws, colWidths);
 
-  ws['!freeze'] = { xSplit: 'F', ySplit: '2', topLeftCell: 'G3', activePane: 'bottomRight', state: 'frozen' };
+  ws['!freeze'] = { xSplit: 'E', ySplit: '2', topLeftCell: 'F3', activePane: 'bottomRight', state: 'frozen' };
 
-  // 左側6列のみオートフィルター（日付の▼は非表示）
-  ws['!autofilter'] = { ref: window.XLSX.utils.encode_range({ r: 1, c: 0 }, { r: Math.max(1, curRow - 1), c: 5 }) };
+  // 左側5列のみオートフィルター（日付の▼は非表示）
+  ws['!autofilter'] = { ref: window.XLSX.utils.encode_range({ r: 1, c: 0 }, { r: Math.max(1, curRow - 1), c: 4 }) };
 
   applyA4LandscapePrintSetup(ws);
 
@@ -436,14 +431,14 @@ function applyA4LandscapePrintSetup(ws) {
     fitToHeight: 0
   };
 
-  // 左右・上下の余白をスリムにしてA4横を最大限広く活用
+  // 左右・上下の余白を極限までスリムにして印字可能エリアを最大化
   ws['!margins'] = {
-    left: 0.25,
-    right: 0.25,
-    top: 0.35,
-    bottom: 0.35,
-    header: 0.15,
-    footer: 0.15
+    left: 0.2,
+    right: 0.2,
+    top: 0.3,
+    bottom: 0.3,
+    header: 0.1,
+    footer: 0.1
   };
 }
 
