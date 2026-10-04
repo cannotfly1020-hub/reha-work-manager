@@ -1,5 +1,5 @@
 // js/views/exportView.js
-// VIEW 5: 月末Excel原本出力アクション制御（ファイル選択完全撤廃・1クリック高速出力・200行制限準拠）
+// VIEW 5: 月末Excel原本出力アクション制御・ワンクリック自動生成・トースト通知管理層（200行制限準拠）
 
 import { safeParseInt } from '../core/dataNormalizer.js';
 import { aggregateFromAppSchedule } from '../store/scheduleStore.js';
@@ -39,7 +39,7 @@ export function initExportView() {
   const btnUketsuke = document.getElementById('btnExportUketsuke');
   const btnDiary = document.getElementById('btnExportDiary');
 
-  // 初期年月設定（当月）
+  // 初期年月設定（当月 YYYY-MM）
   if (monthInput && !monthInput.value) {
     const today = new Date();
     const y = today.getFullYear();
@@ -47,12 +47,12 @@ export function initExportView() {
     monthInput.value = `${y}-${m}`;
   }
 
-  // 受付提出用Excel出力（1クリック自動生成）
+  // 1. 受付提出用Excel出力ボタン（テンプレート選択完全撤廃・ワンクリック生成）
   btnUketsuke?.addEventListener('click', () => {
     handleExportUketsuke(monthInput);
   });
 
-  // 業務日誌Excel出力（1クリック自動生成）
+  // 2. 業務日誌Excel出力ボタン
   btnDiary?.addEventListener('click', () => {
     handleExportDiary(monthInput);
   });
@@ -65,11 +65,12 @@ function handleExportUketsuke(monthInput) {
     return;
   }
 
-  showToast(`${year}年${month}月 受付提出用Excelを生成中...`, 'info');
+  showToast(`${year}年${month}月 受付提出用Excelを集計・生成中...`, 'info');
 
   try {
     const aggregated = aggregateFromAppSchedule(year, month);
     const wb = generateUketsukeWorkbook(aggregated, null);
+
     if (!wb) {
       showToast('受付提出用Excelの生成に失敗しました', 'error');
       return;
@@ -91,11 +92,12 @@ function handleExportDiary(monthInput) {
     return;
   }
 
-  showToast(`${year}年${month}月 業務日誌Excelを生成中...`, 'info');
+  showToast(`${year}年${month}月 業務日誌Excelを集計・生成中...`, 'info');
 
   try {
     const aggregated = aggregateFromAppSchedule(year, month);
     const wb = generateDiaryWorkbook(aggregated, null);
+
     if (!wb) {
       showToast('業務日誌Excelの生成に失敗しました', 'error');
       return;
