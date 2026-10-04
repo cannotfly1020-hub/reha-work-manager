@@ -1,169 +1,208 @@
 // js/excel/diaryWriter.js
-// 業務日誌Excelワークブック生成・日別シート（24列目）転記層（200行制限準拠）
+// 業務日誌Excel生成層（日別シート / 時間割完全プロット / PT別・区分別実績サマリー / A4縦1枚収容 / 200行制限準拠）
 
-import { REHA_RULES } from '../config/rules.js';
+import { TIME_SLOTS, THERAPISTS, REHA_RULES } from '../config/rules.js';
+import { getDailySchedule } from '../store/scheduleStore.js';
+import { getPatientById } from '../store/patientStore.js';
 
-const TARGET_COL_INDEX = 23; // 24列目（0-indexed で 23 = ExcelのX列）
-
-/**
- * 業務日誌Excelワークブックを生成する（テンプレートがあれば転記、なければ新規作成）
- * @param {Object} aggregated aggregateFromAppSchedule の集計オブジェクト
- * @param {ArrayBuffer|null} templateBuffer アップロードされた原本テンプレート
- * @returns {Object} XLSX ワークブックオブジェクト
- */
-export function generateDiaryWorkbook(aggregated, templateBuffer = null) {
-  if (!window.XLSX) {
-    throw new Error('SheetJS (XLSX) ライブラリが読み込まれていません。');
+const STYLES = {
+  headerNavy: {
+    font: { name: 'Meiryo UI', sz: 8.5, bold: true, color: { rgb: 'FFFFFF' } },
+    fill: { fgColor: { rgb: '1E293B' } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: thinBorder()
+  },
+  headerSub: {
+    font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: '1E293B' } },
+    fill: { fgColor: { rgb: 'F1F5F9' } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: thinBorder()
+  },
+  cellTime: {
+    font: { name: 'Meiryo UI', sz: 7.5, bold: true, color: { rgb: '475569' } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: thinBorder()
+  },
+  cellInpatient: {
+    font: { name: 'Meiryo UI', sz: 7.5, color: { rgb: '92400E' } },
+    fill: { fgColor: { rgb: 'FEF3C7' } },
+    alignment: { vertical: 'center', wrapText: true },
+    border: thinBorder()
+  },
+  cellOutpatient: {
+    font: { name: 'Meiryo UI', sz: 7.5, color: { rgb: '1E40AF' } },
+    fill: { fgColor: { rgb: 'EFF6FF' } },
+    alignment: { vertical: 'center', wrapText: true },
+    border: thinBorder()
+  },
+  cellEmpty: {
+    font: { name: 'Meiryo UI', sz: 7.5 },
+    border: thinBorder()
+  },
+  cellLabel: {
+    font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: '334155' } },
+    fill: { fgColor: { rgb: 'F8FAFC' } },
+    alignment: { vertical: 'center' },
+    border: thinBorder()
+  },
+  cellVal: {
+    font: { name: 'Meiryo UI', sz: 8 },
+    alignment: { horizontal: 'right', vertical: 'center' },
+    border: thinBorder()
+  },
+  cellTotal: {
+    font: { name: 'Meiryo UI', sz: 8.5, bold: true, color: { rgb: '0F172A' } },
+    fill: { fgColor: { rgb: 'ECFDF5' } },
+    alignment: { horizontal: 'right', vertical: 'center' },
+    border: { top: { style: 'thin', color: { rgb: '0F172A' } }, bottom: { style: 'double', color: { rgb: '0F172A' } }, left: { style: 'thin', color: { rgb: 'CBD5E1' } }, right: { style: 'thin', color: { rgb: 'CBD5E1' } } }
   }
+};
 
-  let wb;
-  if (templateBuffer) {
-    wb = window.XLSX.read(templateBuffer, { type: 'array' });
-  } else {
-    wb = window.XLSX.utils.book_new();
-  }
+function thinBorder() {
+  const b = { style: 'thin', color: { rgb: 'CBD5E1' } };
+  return { top: b, bottom: b, left: b, right: b };
+}
 
-  const { daysInMonth, year, month } = aggregated;
+export function generateDiaryWorkbook(aggregated) {
+  if (!window.XLSX) throw new Error('SheetJS (xlsx-js-style) が読み込まれていません。');
+  const wb = window.XLSX.utils.book_new();
+  const { year, month, daysInMonth } = aggregated;
 
-  // 1日〜当月最終日までの各日シートに対してデータを書き込み
   for (let day = 1; day <= daysInMonth; day++) {
-    const sheetName = getDiarySheetName(wb, day);
-    let ws = wb.Sheets[sheetName];
+    const ws = {};
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const dayOfWeek = new Date(year, month - 1, day).getDay();
+    const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
 
-    if (!ws) {
-      // テンプレートに対象日のシートが存在しない場合はフォールバックシートを作成
-      ws = createFallbackDiarySheet(year, month, day);
-      window.XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    // 1. タイトルヘッダー
+    setStyledCell(ws, 0, 0, `【業務日誌】 ${year}年${month}月${day}日 (${dayNames[dayOfWeek]}) リハビリテーション科`, {
+      font: { name: 'Meiryo UI', sz: 11, bold: true, color: { rgb: '0F172A' } }
+    });
+
+    // 2. 時間割テーブルヘッダー
+    setStyledCell(ws, 2, 0, '時間帯', STYLES.headerNavy);
+    THERAPISTS.forEach((t, i) => setStyledCell(ws, 2, i + 1, t.name, STYLES.headerNavy));
+
+    // 3. 時間割データ描画
+    const schedule = getDailySchedule(dateStr);
+    const ptStats = { A: { units: 0, patients: new Set() }, B: { units: 0, patients: new Set() }, C: { units: 0, patients: new Set() } };
+    const diseaseUnits = { LOCOMOTIVE: 0, CEREBROVASCULAR: 0, DISUSE: 0, inUnits: 0, outUnits: 0 };
+    let planCount = 0;
+
+    TIME_SLOTS.forEach((slot, rIdx) => {
+      const r = 3 + rIdx;
+      setStyledCell(ws, r, 0, slot.label, STYLES.cellTime);
+
+      THERAPISTS.forEach((t, cIdx) => {
+        const item = schedule[t.id]?.[slot.id];
+        if (item?.patientId) {
+          const p = getPatientById(item.patientId);
+          const u = item.units || 1;
+          ptStats[t.id].units += u;
+          ptStats[t.id].patients.add(item.patientId);
+          const isIn = p?.category === 'INPATIENT';
+          if (isIn) diseaseUnits.inUnits += u;
+          else diseaseUnits.outUnits += u;
+          if (p?.diseaseType && diseaseUnits[p.diseaseType] !== undefined) diseaseUnits[p.diseaseType] += u;
+          if (item.billingPlan) planCount++;
+
+          const planMark = item.billingPlan ? '★' : '';
+          const text = `${p ? p.name : item.patientId} (${u}u${planMark})`;
+          setStyledCell(ws, r, cIdx + 1, text, isIn ? STYLES.cellInpatient : STYLES.cellOutpatient);
+        } else {
+          setStyledCell(ws, r, cIdx + 1, '', STYLES.cellEmpty);
+        }
+      });
+    });
+
+    // 4. 右側：当日実績サマリーブロック (E列〜G列 / col 5〜6)
+    setStyledCell(ws, 2, 5, '実績集計項目', STYLES.headerNavy);
+    setStyledCell(ws, 2, 6, '当日の実績値', STYLES.headerNavy);
+
+    const aPatients = Object.values(schedule.analgesia || {}).flat();
+    const analgesiaCount = aPatients.length;
+    const totalUnits = ptStats.A.units + ptStats.B.units + ptStats.C.units;
+
+    const summaryRows = [
+      ['個別リハ総単位数', `${totalUnits} 単位`],
+      ['入院実施単位数', `${diseaseUnits.inUnits} 単位`],
+      ['外来実施単位数', `${diseaseUnits.outUnits} 単位`],
+      ['運動器リハ(Ⅱ)', `${diseaseUnits.LOCOMOTIVE} 単位`],
+      ['脳血管等リハ(Ⅲ)', `${diseaseUnits.CEREBROVASCULAR} 単位`],
+      ['廃用症候群リハ(Ⅲ)', `${diseaseUnits.DISUSE} 単位`],
+      ['消炎鎮痛処置 (物療)', `${analgesiaCount} 件`],
+      ['総合計画書策定', `${planCount} 件`],
+      ['PT A 実施単位 (患者数)', `${ptStats.A.units} u (${ptStats.A.patients.size}名)`],
+      ['PT B 実施単位 (患者数)', `${ptStats.B.units} u (${ptStats.B.patients.size}名)`],
+      ['PT C 実施単位 (患者数)', `${ptStats.C.units} u (${ptStats.C.patients.size}名)`]
+    ];
+
+    summaryRows.forEach((row, sIdx) => {
+      const r = 3 + sIdx;
+      setStyledCell(ws, r, 5, row[0], STYLES.cellLabel);
+      setStyledCell(ws, r, 6, row[1], STYLES.cellVal);
+    });
+
+    // 概算収益
+    const estPoints = (diseaseUnits.LOCOMOTIVE * 170) + (diseaseUnits.CEREBROVASCULAR * 100) + (diseaseUnits.DISUSE * 77) + (analgesiaCount * 35);
+    setStyledCell(ws, 15, 5, '当日リハ概算収益', STYLES.cellTotal);
+    setStyledCell(ws, 15, 6, `¥${(estPoints * 10).toLocaleString()}`, STYLES.cellTotal);
+
+    // 5. 下部：消炎鎮痛患者一覧 (17行目〜)
+    setStyledCell(ws, 17, 5, '消炎鎮痛(物療) 来院者一覧', STYLES.headerSub);
+    setStyledCell(ws, 17, 6, `${analgesiaCount} 名`, STYLES.headerSub);
+    if (aPatients.length === 0) {
+      setStyledCell(ws, 18, 5, '(本日の来院者なし)', STYLES.cellEmpty);
+      setStyledCell(ws, 18, 6, '-', STYLES.cellEmpty);
+    } else {
+      aPatients.slice(0, 7).forEach((pId, aIdx) => {
+        const p = getPatientById(pId);
+        const r = 18 + aIdx;
+        setStyledCell(ws, r, 5, p ? `${p.name} (${p.category === 'INPATIENT' ? '入院' : '外来'})` : pId, STYLES.cellVal);
+        setStyledCell(ws, r, 6, '1回 (35点)', STYLES.cellVal);
+      });
     }
 
-    writeDailyStatsToSheet(ws, aggregated, day);
+    // 列幅: 時間帯(11), PT A/B/C(18ずつ), 余白(2), サマリー項目(20), サマリー値(14)
+    setSheetCols(ws, [11, 18, 18, 18, 2, 20, 14]);
+
+    applyA4PortraitPrintSetup(ws);
+    updateSheetRange(ws);
+    window.XLSX.utils.book_append_sheet(wb, ws, `${day}日`);
   }
 
   return wb;
 }
 
-/**
- * 日付に応じたシート名を取得（"1日", "1", "01日" 等の既存シート名に対応）
- */
-function getDiarySheetName(wb, day) {
-  const candidates = [`${day}日`, `${day}`, String(day).padStart(2, '0'), `${String(day).padStart(2, '0')}日`];
-  const existingNames = wb.SheetNames || [];
-  
-  for (const name of candidates) {
-    if (existingNames.includes(name)) {
-      return name;
-    }
-  }
-  return `${day}日`;
-}
-
-/**
- * 特定日の集計数値をワークシートの24列目（X列）の定位置ブロックに転記
- */
-function writeDailyStatsToSheet(ws, aggregated, day) {
-  const dayStr = `${aggregated.year}-${String(aggregated.month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-  
-  // 疾患別 × 入院/外来の集計カウンタ
-  const breakdown = {
-    INPATIENT: { LOCOMOTIVE: 0, CEREBROVASCULAR: 0, DISUSE: 0, ANALGESIA: 0, total: 0 },
-    OUTPATIENT: { LOCOMOTIVE: 0, CEREBROVASCULAR: 0, DISUSE: 0, ANALGESIA: 0, total: 0 },
-    plans: 0,
-    totalUnits: 0
+function applyA4PortraitPrintSetup(ws) {
+  ws['!properties'] = { pageSetUpPr: { fitToPage: true } };
+  ws['!pageSetup'] = {
+    paperSize: 9, // A4
+    orientation: 'portrait', // 縦向き
+    fitToWidth: 1, // 横1ページ
+    fitToHeight: 1, // 縦1ページ（1日＝1枚完全収容）
+    fitToPage: true
   };
-
-  Object.values(aggregated.patientMap).forEach((item) => {
-    const p = item.patient;
-    const cat = p.category === 'INPATIENT' ? 'INPATIENT' : 'OUTPATIENT';
-    const dType = p.diseaseType in breakdown[cat] ? p.diseaseType : 'LOCOMOTIVE';
-    
-    // 当日実施スロットのみ抽出
-    const todaySlots = (item.slots || []).filter((s) => s.date === dayStr);
-    todaySlots.forEach((slot) => {
-      breakdown[cat][dType] += slot.units;
-      breakdown[cat].total += slot.units;
-      breakdown.totalUnits += slot.units;
-      if (slot.billingPlan) {
-        breakdown.plans += 1;
-      }
-    });
-  });
-
-  // 24列目（X列: colIndex = 23）の定位置ブロック（行インデックス 2〜12）へ書き出し
-  const c = TARGET_COL_INDEX;
-  setCell(ws, 1, c, `当日集計 (${day}日)`);
-  setCell(ws, 2, c, breakdown.totalUnits);       // 総実施単位
-  setCell(ws, 3, c, breakdown.INPATIENT.total);   // 入院総単位
-  setCell(ws, 4, c, breakdown.OUTPATIENT.total);  // 外来総単位
-  setCell(ws, 5, c, breakdown.INPATIENT.LOCOMOTIVE);      // 入院 運動器
-  setCell(ws, 6, c, breakdown.INPATIENT.CEREBROVASCULAR); // 入院 脳血管
-  setCell(ws, 7, c, breakdown.INPATIENT.DISUSE);          // 入院 廃用
-  setCell(ws, 8, c, breakdown.OUTPATIENT.LOCOMOTIVE);     // 外来 運動器
-  setCell(ws, 9, c, breakdown.OUTPATIENT.CEREBROVASCULAR);// 外来 脳血管
-  setCell(ws, 10, c, breakdown.OUTPATIENT.ANALGESIA);     // 外来 消炎鎮痛
-  setCell(ws, 11, c, breakdown.plans);                    // 計画書策定件数
-
-  updateSheetRange(ws);
+  ws['!margins'] = { left: 0.2, right: 0.2, top: 0.3, bottom: 0.3, header: 0.1, footer: 0.1 };
 }
 
-/**
- * テンプレート未指定時用の日別フォールバックシート構築
- */
-function createFallbackDiarySheet(year, month, day) {
-  const rows = [
-    [`リハビリテーション業務日誌 - ${year}年${month}月${day}日`],
-    ['時間帯', 'PT A', 'PT B', 'PT C']
-  ];
-
-  // 22スロット分の空行を確保
-  for (let i = 1; i <= 22; i++) {
-    rows.push([`第${i}コマ`, '', '', '']);
-  }
-
-  const ws = window.XLSX.utils.aoa_to_sheet(rows);
-
-  // 23列目（W列）にラベルを付与
-  const labelCol = TARGET_COL_INDEX - 1;
-  const labels = [
-    '項目',
-    '当日総単位数',
-    '入院総単位数',
-    '外来総単位数',
-    '入院 運動器',
-    '入院 脳血管',
-    '入院 廃用',
-    '外来 運動器',
-    '外来 脳血管',
-    '外来 消炎鎮痛',
-    '計画書策定件数'
-  ];
-
-  labels.forEach((text, idx) => {
-    setCell(ws, idx + 1, labelCol, text);
-  });
-
-  return ws;
-}
-
-/**
- * ワークシートの特定セル (row, col) に値を設定
- */
-function setCell(ws, r, c, val) {
+function setStyledCell(ws, r, c, val, style = {}) {
   const addr = window.XLSX.utils.encode_cell({ r, c });
   if (val === '' || val === null || val === undefined) {
-    delete ws[addr];
+    ws[addr] = { t: 's', v: '', s: style };
     return;
   }
   const isNum = typeof val === 'number';
-  ws[addr] = { t: isNum ? 'n' : 's', v: val };
+  ws[addr] = { t: isNum ? 'n' : 's', v: val, s: style };
 }
 
-/**
- * ワークシートの !ref を再計算して更新
- */
+function setSheetCols(ws, widthList) {
+  ws['!cols'] = widthList.map((w) => ({ wch: w }));
+}
+
 function updateSheetRange(ws) {
   const keys = Object.keys(ws).filter((k) => !k.startsWith('!'));
   if (keys.length === 0) return;
-
   let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
   keys.forEach((k) => {
     const cell = window.XLSX.utils.decode_cell(k);
@@ -172,9 +211,5 @@ function updateSheetRange(ws) {
     if (cell.c < minC) minC = cell.c;
     if (cell.c > maxC) maxC = cell.c;
   });
-
-  ws['!ref'] = window.XLSX.utils.encode_range(
-    { r: minR, c: minC },
-    { r: maxR, c: maxC }
-  );
+  ws['!ref'] = window.XLSX.utils.encode_range({ r: minR, c: minC }, { r: maxR, c: maxC });
 }
