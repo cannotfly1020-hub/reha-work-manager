@@ -204,12 +204,8 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
     setStyledCell(ws, 1, extraCol, '早期Ⅰ', STYLES.headerNavy);
     setStyledCell(ws, 1, extraCol + 1, '早期Ⅱ', STYLES.headerNavy);
     setStyledCell(ws, 1, extraCol + 2, '計画日', STYLES.headerNavy);
-    setStyledCell(ws, 1, extraCol + 3, '計画書区分・点数', STYLES.headerNavy);
-    setStyledCell(ws, 1, extraCol + 4, '備考', STYLES.headerNavy);
   } else {
     setStyledCell(ws, 1, extraCol, '計画日', STYLES.headerNavy);
-    setStyledCell(ws, 1, extraCol + 1, '計画書区分・点数', STYLES.headerNavy);
-    setStyledCell(ws, 1, extraCol + 2, '備考', STYLES.headerNavy);
   }
 
   const patients = Object.values(patientMap).filter(
@@ -225,12 +221,11 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
     const planDatesSet = new Set();
     const early1DatesSet = new Set();
     const early2DatesSet = new Set();
-    let planDateStr = '', planLabel = '';
+    let planDateStr = '';
 
     item.slots.forEach((s) => {
       if (s.billingPlan) {
         planDateStr = s.date ? s.date.slice(5) : '';
-        planLabel = formatPlanLabel(s.billingPlan);
         planDatesSet.add(parseInt(s.date.split('-')[2], 10));
       }
       if (isInput && baseEarlyDate && s.date && !s.isAnalgesia) {
@@ -288,22 +283,18 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
       setStyledCell(ws, curRow, extraCol, e1Count > 0 ? `${e1Count}日` : '-', { ...STYLES.cellCenter, fill: e1Count > 0 ? { fgColor: { rgb: 'D1FAE5' } } : zebraBg, font: { bold: e1Count > 0 } });
       setStyledCell(ws, curRow, extraCol + 1, e2Count > 0 ? `${e2Count}日` : '-', { ...STYLES.cellCenter, fill: e2Count > 0 ? { fgColor: { rgb: 'DBEAFE' } } : zebraBg, font: { bold: e2Count > 0 } });
       setStyledCell(ws, curRow, extraCol + 2, planDateStr || '-', { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true, color: { rgb: 'B45309' } } });
-      setStyledCell(ws, curRow, extraCol + 3, planLabel || '-', { ...STYLES.cellNormal, fill: zebraBg, font: { sz: 7 } });
-      setStyledCell(ws, curRow, extraCol + 4, p.notes || '', { ...STYLES.cellNormal, fill: zebraBg });
     } else {
       setStyledCell(ws, curRow, extraCol, planDateStr || '-', { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true, color: { rgb: 'B45309' } } });
-      setStyledCell(ws, curRow, extraCol + 1, planLabel || '-', { ...STYLES.cellNormal, fill: zebraBg, font: { sz: 7 } });
-      setStyledCell(ws, curRow, extraCol + 2, p.notes || '', { ...STYLES.cellNormal, fill: zebraBg });
     }
 
     curRow++;
   });
 
-  // A4横1枚（縮小なしでも合計97幅で完全収容）
-  const colWidths = [4.0, 7.5, 3.2, 2.8, 4.2];
-  for (let d = 1; d <= daysInMonth; d++) colWidths.push(1.85);
-  if (isInput) colWidths.push(3.2, 3.2, 3.8, 8.5, 4.5);
-  else colWidths.push(3.8, 8.5, 4.5);
+  // A4横1枚（計画書区分・備考削除により横幅に大幅な余裕が誕生）
+  const colWidths = [4.2, 8.0, 3.5, 3.0, 4.5];
+  for (let d = 1; d <= daysInMonth; d++) colWidths.push(1.9);
+  if (isInput) colWidths.push(3.5, 3.5, 4.2);
+  else colWidths.push(4.2);
   setSheetCols(ws, colWidths);
 
   ws['!freeze'] = { xSplit: 'E', ySplit: '2', topLeftCell: 'F3', activePane: 'bottomRight', state: 'frozen' };
