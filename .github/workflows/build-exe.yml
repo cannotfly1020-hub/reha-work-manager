@@ -1,7 +1,3 @@
-.github/workflows/build-exe.yml
-
-GitHub Actions クラウド上で Windows 専用ポータブル .exe を自動生成する設定
-
 name: Build Windows Portable App
 
 on:
@@ -26,7 +22,6 @@ steps:
     uses: actions/setup-node@v4
     with:
       node-version: 20
-      cache: 'npm'
 
   - name: 依存パッケージのインストール
     run: npm install
