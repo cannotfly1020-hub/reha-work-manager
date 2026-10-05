@@ -1,5 +1,5 @@
 // js/views/scheduleView.js
-// VIEW 1: 当日時間割・コマ移動・消炎鎮痛来院・患者パレット・疾患タグ・早期期限バッジ・計画書4区分自動判定・動的セラピスト管理（稼働中のみ表示・検索・追加・ステータス切替）
+// VIEW 1: 当日時間割（セラピスト増減に完全追従する動的CSSグリッド対応）・コマ移動・消炎鎮痛来院・患者パレット・疾患タグ・早期期限バッジ・計画書4区分自動判定・動的セラピスト管理
 
 import { TIME_SLOTS, REHA_RULES } from '../config/rules.js';
 import { sanitizeHtml, safeParseInt } from '../core/dataNormalizer.js';
@@ -156,9 +156,18 @@ function renderTimetableGrid() {
   const gridEl = document.getElementById('timetableGrid');
   if (!gridEl) return;
 
-  // 時間割には「稼働中」のセラピストのみを動的表示（退職者・休職者は完全除外）
+  // 稼働中セラピストのみを取得
   const therapists = getActiveTherapists();
   const schedule = getDailySchedule(currentDateStr);
+
+  // 【レイアウト崩れ根本解決】セラピストの人数に合わせてグリッド列数を動的に自動適用
+  // 時間帯列: 88px, セラピスト各列: 均等 1fr (最低140px確保), 消炎鎮痛: 100px
+  const therapistCount = therapists.length;
+  gridEl.style.display = 'grid';
+  gridEl.style.gridTemplateColumns = `88px repeat(${therapistCount}, minmax(130px, 1fr)) 100px`;
+  gridEl.style.overflowX = 'auto';
+
+  // 1. ヘッダー行の描画
   let html = '<div class="timetable-header">時間帯</div>';
   therapists.forEach((t) => { html += `<div class="timetable-header">${sanitizeHtml(t.name)}</div>`; });
   html += '<div class="timetable-header" style="background:#f0fdf4; color:#166534;">消炎鎮痛</div>';
@@ -166,8 +175,12 @@ function renderTimetableGrid() {
   const coveredUntil = {};
   therapists.forEach((t) => { coveredUntil[t.id] = 0; });
 
+  // 2. 各時間帯（22コマ）のセルを描画
   TIME_SLOTS.forEach((slot, index) => {
-    html += `<div class="time-slot-row"><div class="time-col">${slot.label}</div>`;
+    // 各時間行のラッパー自身も、親グリッドと同じ列数で均等展開
+    const rowGridStyle = `display:contents;`;
+    html += `<div class="time-slot-row" style="${rowGridStyle}"><div class="time-col">${slot.label}</div>`;
+
     therapists.forEach((t) => {
       const tId = t.id;
       const cellData = schedule[tId]?.[slot.id];
@@ -388,7 +401,6 @@ function openSlotModal(therapistId, slotId, currentItem) {
   btnDelete.style.display = currentItem ? 'block' : 'none';
 
   if (therapistSelect) {
-    // 稼働中スタッフを基本とし、過去データの枠が休職/退職の場合はそれも含めて安全に表示
     const selectCandidates = [...activeTherapists];
     if (currentTherapist && !selectCandidates.some((t) => t.id === currentTherapist.id)) {
       selectCandidates.push(currentTherapist);
@@ -547,12 +559,10 @@ function setupStaffSettingsModalListeners() {
   btnClose?.addEventListener('click', closeModal);
   btnCloseX?.addEventListener('click', closeModal);
 
-  // リアルタイム検索フィルター連動
   searchInput?.addEventListener('input', () => {
     renderStaffSettingsFields();
   });
 
-  // 新規セラピスト追加イベント
   const handleAddNewStaff = () => {
     const name = newNameInput ? newNameInput.value.trim() : '';
     if (!name) {
@@ -592,7 +602,6 @@ function setupStaffSettingsModalListeners() {
     renderScheduleView();
   });
 
-  // 名称 ＆ ステータスの一括保存処理
   form?.addEventListener('submit', (e) => {
     e.preventDefault();
     const updateMap = {};
@@ -625,13 +634,11 @@ function renderStaffSettingsFields() {
   const keyword = (searchInput ? searchInput.value.trim().toLowerCase() : '');
   const allTherapists = getAllTherapists();
 
-  // 検索語によるフィルタリング
   const matchesKeyword = (t) => {
     if (!keyword) return true;
     return t.name.toLowerCase().includes(keyword) || t.id.toLowerCase().includes(keyword);
   };
 
-  // 現役（稼働中・休職）と過去・退職者を分離
   const currentStaffList = allTherapists.filter((t) => t.status !== THERAPIST_STATUS.RETIRED && matchesKeyword(t));
   const retiredStaffList = allTherapists.filter((t) => t.status === THERAPIST_STATUS.RETIRED && matchesKeyword(t));
 
@@ -665,14 +672,12 @@ function renderStaffSettingsFields() {
     `;
   };
 
-  // 1. トップ表示エリア（現役スタッフ一覧）
   if (currentStaffList.length === 0) {
     activeContainer.innerHTML = `<div style="font-size:0.75rem; color:#94a3b8; text-align:center; padding:12px;">該当するスタッフがいません</div>`;
   } else {
     activeContainer.innerHTML = currentStaffList.map(buildRowHtml).join('');
   }
 
-  // 2. 最下部折りたたみエリア（退職者一覧）
   if (retiredContainer) {
     if (retiredStaffList.length === 0) {
       retiredContainer.innerHTML = `<div style="font-size:0.75rem; color:#94a3b8; text-align:center; padding:8px;">退職・非表示スタッフはいません</div>`;
@@ -681,7 +686,6 @@ function renderStaffSettingsFields() {
     }
   }
 
-  // ステータス変更時にプルダウンの配色を即座に連動
   document.querySelectorAll('.staff-status-select').forEach((sel) => {
     sel.addEventListener('change', (e) => {
       const val = e.target.value;
