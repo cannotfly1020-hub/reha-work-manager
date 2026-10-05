@@ -1,8 +1,9 @@
 // js/views/scheduleView.js
-// VIEW 1: 当日時間割・コマ移動・消炎鎮痛来院・患者パレット・疾患タグ・早期期限バッジ・計画書4区分自動判定・台帳同期連動
+// VIEW 1: 当日時間割・コマ移動・消炎鎮痛来院・患者パレット・疾患タグ・早期期限バッジ・計画書4区分自動判定・セラピスト表示名動的連動・台帳同期
 
-import { TIME_SLOTS, THERAPISTS, REHA_RULES } from '../config/rules.js';
+import { TIME_SLOTS, REHA_RULES } from '../config/rules.js';
 import { sanitizeHtml, safeParseInt } from '../core/dataNormalizer.js';
+import { getAllTherapists, updateTherapistNames, saveAllTherapists } from '../store/therapistStore.js';
 import { getPatientById, searchPatients, getAllPatients, updatePatientPlanStatus } from '../store/patientStore.js';
 import {
   getDailySchedule, setScheduleSlot, clearScheduleSlot, moveScheduleSlot, getDailyStats,
@@ -46,6 +47,7 @@ export function initScheduleView() {
 
   setupSlotModalListeners();
   setupAnalgesiaModalListeners();
+  setupStaffSettingsModalListeners();
 }
 
 export function renderScheduleView() {
@@ -151,16 +153,18 @@ function renderTimetableGrid() {
   const gridEl = document.getElementById('timetableGrid');
   if (!gridEl) return;
 
+  const therapists = getAllTherapists();
   const schedule = getDailySchedule(currentDateStr);
   let html = '<div class="timetable-header">時間帯</div>';
-  THERAPISTS.forEach((t) => { html += `<div class="timetable-header">${t.name}</div>`; });
+  therapists.forEach((t) => { html += `<div class="timetable-header">${sanitizeHtml(t.name)}</div>`; });
   html += '<div class="timetable-header" style="background:#f0fdf4; color:#166534;">消炎鎮痛</div>';
 
-  const coveredUntil = { A: 0, B: 0, C: 0 };
+  const coveredUntil = {};
+  therapists.forEach((t) => { coveredUntil[t.id] = 0; });
 
   TIME_SLOTS.forEach((slot, index) => {
     html += `<div class="time-slot-row"><div class="time-col">${slot.label}</div>`;
-    THERAPISTS.forEach((t) => {
+    therapists.forEach((t) => {
       const tId = t.id;
       const cellData = schedule[tId]?.[slot.id];
 
@@ -374,10 +378,17 @@ function openSlotModal(therapistId, slotId, currentItem) {
   const therapistSelect = document.getElementById('slotModalTherapistSelect');
   const slotSelect = document.getElementById('slotModalSlotSelect');
 
-  titleEl.textContent = `コマ配置 (PT ${therapistId} / ${TIME_SLOTS.find((s) => s.id === slotId)?.label || slotId})`;
+  const therapists = getAllTherapists();
+  const currentTherapist = therapists.find((t) => t.id === therapistId);
+  const tDisplayName = currentTherapist ? currentTherapist.name : `PT ${therapistId}`;
+
+  titleEl.textContent = `コマ配置 (${tDisplayName} / ${TIME_SLOTS.find((s) => s.id === slotId)?.label || slotId})`;
   btnDelete.style.display = currentItem ? 'block' : 'none';
 
-  if (therapistSelect) therapistSelect.value = therapistId;
+  if (therapistSelect) {
+    therapistSelect.innerHTML = therapists.map((t) => `<option value="${t.id}">${sanitizeHtml(t.name)}</option>`).join('');
+    therapistSelect.value = therapistId;
+  }
   if (slotSelect) {
     slotSelect.innerHTML = TIME_SLOTS.map((s) => `<option value="${s.id}">${s.label}</option>`).join('');
     slotSelect.value = slotId;
@@ -409,7 +420,7 @@ function openSlotModal(therapistId, slotId, currentItem) {
     if (existingDate) {
       planSelect.value = '';
       planSelect.disabled = true;
-      patientInfoEl.innerHTML += `<div style="color:#e11d48; font-size:0.75rem; margin-top:4px; font-weight:700;">⚠️ 総合計画評価料は当月 ${existingDate} に算定済みのため選択できません</div>`;
+      patientInfoEl.innerHTML += `<div style="color:#e11d48; font-size:0.75rem; margin-top:4px; font-weight:700;">⚠️️ 総合計画評価料は当月 ${existingDate} に算定済みのため選択できません</div>`;
     } else {
       planSelect.disabled = false;
       const rawPlan = currentItem?.billingPlan;
@@ -508,4 +519,70 @@ function renderAnalgesiaModalList() {
       renderScheduleView();
     });
   });
+}
+
+function setupStaffSettingsModalListeners() {
+  const btnOpen = document.getElementById('btnOpenStaffSettings');
+  const modal = document.getElementById('modalStaffSettings');
+  const btnClose = document.getElementById('btnCloseStaffModal');
+  const btnCloseX = document.getElementById('btnCloseStaffModalX');
+  const btnReset = document.getElementById('btnResetStaffDefault');
+  const form = document.getElementById('staffSettingsForm');
+  const listContainer = document.getElementById('staffSettingsListContainer');
+
+  btnOpen?.addEventListener('click', () => {
+    renderStaffSettingsFields();
+    modal?.classList.add('active');
+  });
+
+  const closeModal = () => modal?.classList.remove('active');
+  btnClose?.addEventListener('click', closeModal);
+  btnCloseX?.addEventListener('click', closeModal);
+
+  btnReset?.addEventListener('click', () => {
+    const defaultList = [
+      { id: 'A', name: 'PT A', color: '#0284c7' },
+      { id: 'B', name: 'PT B', color: '#0d9488' },
+      { id: 'C', name: 'PT C', color: '#7c3aed' }
+    ];
+    saveAllTherapists(defaultList);
+    renderStaffSettingsFields();
+    showToast('セラピスト名を初期デフォルトに戻しました', 'info');
+  });
+
+  form?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const nameMap = {};
+    listContainer?.querySelectorAll('.staff-name-input').forEach((input) => {
+      const tId = input.dataset.therapistId;
+      if (tId) nameMap[tId] = input.value.trim();
+    });
+
+    updateTherapistNames(nameMap);
+    closeModal();
+    showToast('セラピスト表示名を保存・更新しました', 'success');
+    renderScheduleView();
+  });
+}
+
+function renderStaffSettingsFields() {
+  const container = document.getElementById('staffSettingsListContainer');
+  if (!container) return;
+
+  const therapists = getAllTherapists();
+  container.innerHTML = therapists.map((t) => {
+    return `
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; background:#fff; padding:8px 12px; border:1px solid #cbd5e1; border-radius:6px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="width:10px; height:10px; border-radius:50%; background:${t.color || '#0284c7'}; display:inline-block;"></span>
+          <strong style="font-size:0.85rem; color:#0f172a; min-width:40px;">枠 ${t.id}</strong>
+        </div>
+        <div style="flex:1;">
+          <input type="text" class="staff-name-input" data-therapist-id="${t.id}" value="${sanitizeHtml(t.name)}"
+                 placeholder="セラピスト氏名を入力"
+                 style="width:100%; padding:6px 10px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; font-weight:600;">
+        </div>
+      </div>
+    `;
+  }).join('');
 }
