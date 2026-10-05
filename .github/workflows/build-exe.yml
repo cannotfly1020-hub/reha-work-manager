@@ -3,31 +3,31 @@ name: Build Windows Portable App
 on: push
 
 jobs:
- build:
-  runs-on: windows-latest
-  steps:
-  - uses: actions/checkout@v4
+  build:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
 
-   - uses: actions/setup-node@v4
-     with:
-     node-version: 22
-     
-   - name: Install dependencies
-    　run: npm install
-     
-   - name: Convert icon.png to icon.ico if present
-    　shell: bash
-    　run: |
-       if [ -f icon.png ]; then
-        echo "icon.png found. Converting to icon.ico..."
-        npx png-to-ico icon.png > icon.ico
-       fi
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
 
-  - name: Build Windows App
-    run: npm run build:win
+    - name: Convert icon.png to icon.ico if present
+      shell: bash
+      run: |
+         if [ -f icon.png ]; then
+           echo "icon.png found. Converting to icon.ico..."
+           npx png-to-ico icon.png > icon.ico
+         fi
 
-  - uses: actions/upload-artifact@v4
-    with:
-      name: reha-work-manager-windows-exe
-      path: dist/*.exe
-      if-no-files-found: error
+    - name: Install dependencies
+      run: npm install
+
+    - name: Build Windows App
+      run: npm run build:win
+
+    - uses: actions/upload-artifact@v4
+      with:
+         name: reha-work-manager-windows-exe
+         path: dist/*.exe
+         if-no-files-found: error
