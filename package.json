@@ -1,0 +1,40 @@
+{
+"name": "reha-work-manager",
+"version": "1.0.0",
+"description": "リハビリ業務管理システム Windows専用デスクトップアプリケーション",
+"main": "main.js",
+"scripts": {
+"start": "electron .",
+"build:win": "electron-builder --win portable"
+},
+"keywords": [
+"rehabilitation",
+"medical",
+"schedule",
+"electron"
+],
+"author": "Rehabilitation科",
+"license": "ISC",
+"devDependencies": {
+"electron": "^33.0.0",
+"electron-builder": "^25.1.8"
+},
+"build": {
+"appId": "com.reha.workmanager",
+"productName": "リハビリ業務管理システム",
+"win": {
+"target": "portable"
+},
+"directories": {
+"output": "dist"
+},
+"files": [
+"index.html",
+"css//*",
+"js//*",
+"main.js",
+"preload.js",
+"package.json"
+]
+}
+}
