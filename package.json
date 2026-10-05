@@ -29,12 +29,9 @@
 "output": "dist"
 },
 "files": [
-"index.html",
-"css//*",
-"js//*",
-"main.js",
-"preload.js",
-"package.json"
+"/*",
+"!dist/",
+"!.github/"
 ]
 }
 }
