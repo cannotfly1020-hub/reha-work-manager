@@ -5,7 +5,7 @@
 "main": "main.js",
 "scripts": {
 "start": "electron .",
-"build:win": "electron-builder --win nsis -c.publish=never"
+"build:win": "electron-builder --win nsis --publish never"
 },
 "keywords": [
 "rehabilitation",
@@ -22,6 +22,7 @@
 "build": {
 "appId": "com.reha.workmanager",
 "productName": "リハビリ業務管理システム",
+"publish": null,
 "win": {
 "target": "nsis",
 "icon": "icon.ico"
