@@ -449,23 +449,45 @@
     </div>
   </div>
 
-  <!-- モーダル 6: セラピストマスター設定（名称変更・動的登録） -->
+  <!-- モーダル 6: セラピストマスター設定（名称変更・動的登録・ステータス管理・リアルタイム検索・退職者折りたたみ） -->
   <div id="modalStaffSettings" class="modal-overlay">
-    <div class="modal-card" style="max-width:520px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <h3 style="font-size:1.05rem; font-weight:800; color:#0f172a; margin:0;">⚙ セラピスト表示名設定</h3>
+    <div class="modal-card" style="max-width:560px; max-height:85vh; display:flex; flex-direction:column;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <h3 style="font-size:1.05rem; font-weight:800; color:#0f172a; margin:0;">⚙ セラピストマスター設定</h3>
         <button type="button" id="btnCloseStaffModalX" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:#64748b;">✕</button>
       </div>
-      <p style="font-size:0.75rem; color:#64748b; margin-bottom:16px;">
-        時間割・コマ配置・業務日誌Excelへ出力されるセラピストの表示名を編集できます。ブラウザに自動保存されます。
+      <p style="font-size:0.75rem; color:#64748b; margin-bottom:12px;">
+        時間割には「稼働中」のセラピストのみが表示されます。休職・退職ステータスにより過去データを完全保持しながら柔軟に管理できます。
       </p>
 
-      <form id="staffSettingsForm" style="display:flex; flex-direction:column; gap:12px;">
-        <div id="staffSettingsListContainer" style="display:flex; flex-direction:column; gap:8px; border:1px solid #e2e8f0; border-radius:6px; padding:12px; background:#f8fafc;">
-          <!-- JSで動的にセラピストIDごとの入力欄を展開 -->
+      <!-- リアルタイム検索 & 新規セラピスト追加バー -->
+      <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px; background:#f8fafc; padding:10px; border-radius:6px; border:1px solid #e2e8f0;">
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="staffSearchInput" placeholder="セラピスト名・枠IDで絞り込み..." style="flex:1; padding:6px 10px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff;">
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input type="text" id="newStaffNameInput" placeholder="新規セラピスト氏名（例: 山田 太郎）" style="flex:1; padding:6px 10px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff;">
+          <button type="button" id="btnAddNewStaff" style="padding:6px 14px; background:#0284c7; color:#fff; border:none; border-radius:4px; font-size:0.82rem; font-weight:700; cursor:pointer; white-space:nowrap; transition:background 0.15s ease;" onmouseover="this.style.background='#0369a1'" onmouseout="this.style.background='#0284c7'">＋ 追加</button>
+        </div>
+      </div>
+
+      <form id="staffSettingsForm" style="display:flex; flex-direction:column; gap:10px; overflow-y:auto; flex:1; padding-right:4px;">
+        <!-- 現役（稼働中・休職中）セラピストリスト -->
+        <div id="staffSettingsListContainer" style="display:flex; flex-direction:column; gap:8px;">
+          <!-- JSで動的にセラピストIDごとの入力欄およびステータス切替を展開 -->
         </div>
 
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+        <!-- 過去・退職者（非表示スタッフ）折りたたみアコーディオン（トップを汚さず一番下に配置） -->
+        <details id="retiredStaffAccordion" style="margin-top:6px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; padding:8px 10px;">
+          <summary style="font-size:0.78rem; font-weight:700; color:#64748b; cursor:pointer; user-select:none;">
+            ▶ 過去・退職者（非表示スタッフ）を表示する
+          </summary>
+          <div id="retiredStaffListContainer" style="display:flex; flex-direction:column; gap:6px; margin-top:8px;">
+            <!-- JSで動的に退職者枠を展開 -->
+          </div>
+        </details>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px; padding-top:8px; border-top:1px solid #e2e8f0;">
           <button type="button" id="btnResetStaffDefault" style="padding:6px 12px; background:#fff; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; color:#64748b; cursor:pointer;">デフォルトに戻す</button>
           <div style="display:flex; gap:8px;">
             <button type="button" id="btnCloseStaffModal" style="padding:6px 14px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; cursor:pointer;">閉じる</button>
