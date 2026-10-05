@@ -8,13 +8,23 @@ jobs:
   steps:
   - uses: actions/checkout@v4
 
-  - uses: actions/setup-node@v4
-    with:
-      node-version: 22
+   - uses: actions/setup-node@v4
+     with:
+     node-version: 22
+     
+   - name: Install dependencies
+    　run: npm install
+     
+   - name: Convert icon.png to icon.ico if present
+    　shell: bash
+    　run: |
+       if [ -f icon.png ]; then
+        echo "icon.png found. Converting to icon.ico..."
+        npx png-to-ico icon.png > icon.ico
+       fi
 
-  - run: npm install
-
-  - run: npm run build:win
+  - name: Build Windows App
+    run: npm run build:win
 
   - uses: actions/upload-artifact@v4
     with:
