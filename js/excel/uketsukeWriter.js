@@ -1,5 +1,5 @@
 // js/excel/uketsukeWriter.js
-// 受付提出用Excel生成層（A4横1枚完全収容 / 早期Ⅱはみ出し解消 / 早期完全集計 / 日別カラー / 200行制限準拠）
+// 受付提出用Excel生成層（氏名100px / 区分頭文字「運脳廃消」/ 早期加算単位数表示 / オートフィルターソート対応 / A4横1枚収容 / 200行制限準拠）
 
 import { REHA_RULES } from '../config/rules.js';
 import { evaluateEarlyBonusPhase } from '../core/deadlineCalc.js';
@@ -68,6 +68,20 @@ function thinBorder() {
   return { top: b, bottom: b, left: b, right: b };
 }
 
+function getDiseaseInitial(type) {
+  switch (type) {
+    case 'LOCOMOTIVE': return '運';
+    case 'CEREBROVASCULAR': return '脳';
+    case 'DISUSE': return '廃';
+    case 'ANALGESIA': return '消';
+    default: return type ? type.slice(0, 1) : '-';
+  }
+}
+
+function getEarlyBaseDate(p) {
+  return p.earlyBonusStartDate || p.admissionDate || p.onsetDate || '';
+}
+
 export function generateUketsukeWorkbook(aggregated) {
   if (!window.XLSX) throw new Error('SheetJS (xlsx-js-style) が読み込まれていません。');
   const wb = window.XLSX.utils.book_new();
@@ -78,10 +92,6 @@ export function generateUketsukeWorkbook(aggregated) {
   writeAnalgesiaDedicatedSheet(wb, aggregated, ANALGESIA_SHEET);
 
   return wb;
-}
-
-function getEarlyBaseDate(p) {
-  return p.earlyBonusStartDate || p.admissionDate || p.onsetDate || '';
 }
 
 function writeExecutiveSummarySheet(wb, aggregated) {
@@ -208,9 +218,10 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
     setStyledCell(ws, 1, extraCol, '計画日', STYLES.headerNavy);
   }
 
-  const patients = Object.values(patientMap).filter(
-    (item) => item.patient.category === category && item.patient.diseaseType !== 'ANALGESIA' && item.totalUnits > 0
-  );
+  // 取得した患者リスト（初期表示は患者ID順）
+  const patients = Object.values(patientMap)
+    .filter((item) => item.patient.category === category && item.patient.diseaseType !== 'ANALGESIA' && item.totalUnits > 0)
+    .sort((a, b) => a.patient.id.localeCompare(b.patient.id, 'ja', { numeric: true }));
 
   let curRow = 2;
   patients.forEach((item, pIdx) => {
@@ -221,9 +232,12 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
     const planDatesSet = new Set();
     const early1DatesSet = new Set();
     const early2DatesSet = new Set();
+    let early1Units = 0;
+    let early2Units = 0;
     let planDateStr = '';
 
     item.slots.forEach((s) => {
+      const u = s.units || 1;
       if (s.billingPlan) {
         planDateStr = s.date ? s.date.slice(5) : '';
         planDatesSet.add(parseInt(s.date.split('-')[2], 10));
@@ -231,14 +245,20 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
       if (isInput && baseEarlyDate && s.date && !s.isAnalgesia) {
         const dNum = parseInt(s.date.split('-')[2], 10);
         const ph = evaluateEarlyBonusPhase(baseEarlyDate, s.date, 'INPATIENT');
-        if (ph.phase === 'PHASE_1') early1DatesSet.add(dNum);
-        else if (ph.phase === 'PHASE_2') early2DatesSet.add(dNum);
+        if (ph.phase === 'PHASE_1') {
+          early1DatesSet.add(dNum);
+          early1Units += u;
+        } else if (ph.phase === 'PHASE_2') {
+          early2DatesSet.add(dNum);
+          early2Units += u;
+        }
       }
     });
 
     setStyledCell(ws, curRow, 0, p.id, { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true } });
     setStyledCell(ws, curRow, 1, p.name, { ...STYLES.cellNormal, fill: zebraBg, font: { bold: true } });
-    setStyledCell(ws, curRow, 2, REHA_RULES.LIMIT_DAYS[p.diseaseType]?.shortLabel || p.diseaseType, { ...STYLES.cellCenter, fill: zebraBg });
+    // 区分を「運」「脳」「廃」の頭文字1文字に変更
+    setStyledCell(ws, curRow, 2, getDiseaseInitial(p.diseaseType), { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true } });
     setStyledCell(ws, curRow, 3, p.careInsuranceType === 'CARE' ? '介護' : (p.careInsuranceType === 'SUPPORT' ? '支援' : '-'), { ...STYLES.cellCenter, fill: zebraBg });
     
     setStyledCell(ws, curRow, 4, item.totalUnits, {
@@ -277,11 +297,18 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
       }
     }
 
+    // 早期加算を日数ではなく「単位数」で表示
     if (isInput) {
-      const e1Count = early1DatesSet.size;
-      const e2Count = early2DatesSet.size;
-      setStyledCell(ws, curRow, extraCol, e1Count > 0 ? `${e1Count}日` : '-', { ...STYLES.cellCenter, fill: e1Count > 0 ? { fgColor: { rgb: 'D1FAE5' } } : zebraBg, font: { bold: e1Count > 0 } });
-      setStyledCell(ws, curRow, extraCol + 1, e2Count > 0 ? `${e2Count}日` : '-', { ...STYLES.cellCenter, fill: e2Count > 0 ? { fgColor: { rgb: 'DBEAFE' } } : zebraBg, font: { bold: e2Count > 0 } });
+      setStyledCell(ws, curRow, extraCol, early1Units > 0 ? early1Units : '-', {
+        ...STYLES.cellCenter,
+        fill: early1Units > 0 ? { fgColor: { rgb: 'D1FAE5' } } : zebraBg,
+        font: { bold: early1Units > 0 }
+      });
+      setStyledCell(ws, curRow, extraCol + 1, early2Units > 0 ? early2Units : '-', {
+        ...STYLES.cellCenter,
+        fill: early2Units > 0 ? { fgColor: { rgb: 'DBEAFE' } } : zebraBg,
+        font: { bold: early2Units > 0 }
+      });
       setStyledCell(ws, curRow, extraCol + 2, planDateStr || '-', { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true, color: { rgb: 'B45309' } } });
     } else {
       setStyledCell(ws, curRow, extraCol, planDateStr || '-', { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true, color: { rgb: 'B45309' } } });
@@ -290,12 +317,24 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
     curRow++;
   });
 
-  // A4横1枚（計画書区分・備考削除により横幅に大幅な余裕が誕生）
-  const colWidths = [4.2, 8.0, 3.5, 3.0, 4.5];
-  for (let d = 1; d <= daysInMonth; d++) colWidths.push(1.9);
-  if (isInput) colWidths.push(3.5, 3.5, 4.2);
-  else colWidths.push(4.2);
-  setSheetCols(ws, colWidths);
+  // 列幅設定（患者氏名列を正確に100pxに固定）
+  const totalLastCol = isInput ? (extraCol + 2) : extraCol;
+  const colProps = [
+    { wch: 4.2 },       // 患者ID
+    { wpx: 100 },       // 患者氏名 (100ピクセル固定)
+    { wch: 2.8 },       // 区分 (1文字短縮によりスリム化)
+    { wch: 3.0 },       // 介護
+    { wch: 4.5 }        // 総単位
+  ];
+  for (let d = 1; d <= daysInMonth; d++) colProps.push({ wch: 1.9 });
+  if (isInput) colProps.push({ wch: 3.5 }, { wch: 3.5 }, { wch: 4.2 });
+  else colProps.push({ wch: 4.2 });
+  ws['!cols'] = colProps;
+
+  // Excel上での並び替えを可能にするオートフィルター設定 (ID、氏名、区分など全列対応)
+  ws['!autofilter'] = {
+    ref: window.XLSX.utils.encode_range({ r: 1, c: 0 }, { r: curRow - 1, c: totalLastCol })
+  };
 
   ws['!freeze'] = { xSplit: 'E', ySplit: '2', topLeftCell: 'F3', activePane: 'bottomRight', state: 'frozen' };
 
@@ -336,9 +375,9 @@ function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
   const extraCol = dayColStart + daysInMonth;
   setStyledCell(ws, 1, extraCol, '備考', STYLES.headerNavy);
 
-  const analgesiaPatients = Object.values(patientMap).filter((item) => {
-    return item.patient.diseaseType === 'ANALGESIA' || item.slots.some((s) => s.isAnalgesia);
-  });
+  const analgesiaPatients = Object.values(patientMap)
+    .filter((item) => item.patient.diseaseType === 'ANALGESIA' || item.slots.some((s) => s.isAnalgesia))
+    .sort((a, b) => a.patient.id.localeCompare(b.patient.id, 'ja', { numeric: true }));
 
   let curRow = 2;
   analgesiaPatients.forEach((item, pIdx) => {
@@ -356,13 +395,13 @@ function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
       }
     }
 
-    const catLabel = p.category === 'INPATIENT' ? '入院' : '外来';
+    const catLabel = p.category === 'INPATIENT' ? '入' : '外';
     const totalDays = analgesiaDaysSet.size;
     const totalPoints = totalDays * 35;
 
     setStyledCell(ws, curRow, 0, p.id, { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true } });
     setStyledCell(ws, curRow, 1, p.name, { ...STYLES.cellNormal, fill: zebraBg, font: { bold: true } });
-    setStyledCell(ws, curRow, 2, catLabel, { ...STYLES.cellCenter, fill: zebraBg });
+    setStyledCell(ws, curRow, 2, catLabel, { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true } });
     setStyledCell(ws, curRow, 3, p.diseaseName || '消炎鎮痛等処置', { ...STYLES.cellNormal, fill: zebraBg, font: { sz: 7 } });
 
     setStyledCell(ws, curRow, 4, totalDays, {
@@ -401,10 +440,21 @@ function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
     curRow++;
   });
 
-  const colWidths = [4.0, 7.5, 3.0, 8.5, 3.8, 4.5];
-  for (let d = 1; d <= daysInMonth; d++) colWidths.push(1.85);
-  colWidths.push(5.0);
-  setSheetCols(ws, colWidths);
+  const colProps = [
+    { wch: 4.0 },       // 患者ID
+    { wpx: 100 },       // 患者氏名 (100ピクセル固定)
+    { wch: 2.8 },       // 区分 (短縮)
+    { wch: 8.5 },       // 疾患名
+    { wch: 3.8 },       // 回数
+    { wch: 4.5 }        // 総点数
+  ];
+  for (let d = 1; d <= daysInMonth; d++) colProps.push({ wch: 1.85 });
+  colProps.push({ wch: 5.0 });
+  ws['!cols'] = colProps;
+
+  ws['!autofilter'] = {
+    ref: window.XLSX.utils.encode_range({ r: 1, c: 0 }, { r: curRow - 1, c: extraCol })
+  };
 
   ws['!freeze'] = { xSplit: 'F', ySplit: '2', topLeftCell: 'G3', activePane: 'bottomRight', state: 'frozen' };
 
@@ -424,16 +474,6 @@ function applyA4LandscapePrintSetup(ws) {
     fitToPage: true
   };
   ws['!margins'] = { left: 0.1, right: 0.1, top: 0.2, bottom: 0.2, header: 0.05, footer: 0.05 };
-}
-
-function formatPlanLabel(planKey) {
-  switch (planKey) {
-    case 'PLAN_1_FIRST': return '計1(初300)';
-    case 'PLAN_1_FOLLOW': return '計1(継240)';
-    case 'PLAN_2_FIRST': return '計2(初240)';
-    case 'PLAN_2_FOLLOW': return '計2(継196)';
-    default: return planKey;
-  }
 }
 
 function setStyledCell(ws, r, c, val, style = {}) {
