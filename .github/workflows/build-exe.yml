@@ -15,10 +15,12 @@ jobs:
     - name: Convert icon.png to icon.ico if present
       shell: bash
       run: |
-         if [ -f icon.png ]; then
-           echo "icon.png found. Converting to icon.ico..."
-           npx png-to-ico icon.png > icon.ico
-         fi
+       if [ -f icon.png ]; then
+         echo "icon.png found. Resizing to square and converting..."
+         npx --yes sharp-cli resize 256 256 --fit contain --background "rgba(0,0,0,0)" -i icon.png -o icon_square.png
+         npx --yes png-to-ico icon_square.png > icon.ico
+       fi
+
 
     - name: Install dependencies
       run: npm install
