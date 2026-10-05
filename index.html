@@ -161,6 +161,42 @@
           </div>
           <button id="btnExportDiary" style="padding:12px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.9rem; cursor:pointer; transition:background 0.2s;" onmouseover="this.style.background='#0369a1'" onmouseout="this.style.background='#0284c7'">業務日誌Excelを出力</button>
         </div>
+      </div><!-- 3. システム全データ バックアップ & 復元 (セーフティネット) -->
+      <div style="margin-top:28px; border-top:1px dashed #cbd5e1; padding-top:24px;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+          <span style="font-size:1.1rem;">📦</span>
+          <h3 style="font-size:0.95rem; font-weight:800; color:#0f172a; margin:0;">3. システム全データ バックアップ & 復元 (JSON)</h3>
+        </div>
+        <p style="font-size:0.78rem; color:#64748b; line-height:1.5; margin-bottom:16px;">
+          患者台帳・時間割・スタッフ設定・物品貸出などの全データを1つのファイルとしてPCに保存、または過去のバックアップから完全復元できます。
+        </p>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; background:#f8fafc; padding:16px; border-radius:8px; border:1px solid #e2e8f0;">
+          <!-- バックアップ保存 -->
+          <div style="display:flex; flex-direction:column; justify-content:space-between;">
+            <div>
+              <div style="font-weight:700; font-size:0.82rem; color:#334155; margin-bottom:4px;">全データをPCへ保存</div>
+              <div style="font-size:0.72rem; color:#64748b; margin-bottom:10px;">現在の全データを日付付きJSONファイルとしてダウンロードします。</div>
+            </div>
+            <button id="btnBackupDownload" type="button" style="padding:9px 12px; background:#334155; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.82rem; cursor:pointer; transition:background 0.15s ease;" onmouseover="this.style.background='#1e293b'" onmouseout="this.style.background='#334155'">
+              📦 バックアップファイルを保存
+            </button>
+          </div>
+
+          <!-- バックアップ復元 -->
+          <div style="display:flex; flex-direction:column; justify-content:space-between; border-left:1px solid #e2e8f0; padding-left:16px;">
+            <div>
+              <div style="font-weight:700; font-size:0.82rem; color:#334155; margin-bottom:4px;">ファイルから復元</div>
+              <div style="font-size:0.72rem; color:#64748b; margin-bottom:10px;">保存したJSONファイルを選択し、データを復元します（上書き）。</div>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <input type="file" id="backupFileInput" accept=".json" style="display:none;">
+              <button id="btnTriggerRestore" type="button" style="flex:1; padding:9px 12px; background:#fff; border:1px solid #cbd5e1; color:#0f172a; border-radius:6px; font-weight:700; font-size:0.82rem; cursor:pointer; transition:all 0.15s ease;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='#fff'">
+                📥 ファイルを選択して復元
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </section>
