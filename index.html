@@ -16,13 +16,20 @@
       <h1 style="font-size:1.15rem; font-weight:800; color:#0f172a; margin:0;">reha-work-manager</h1>
       <span style="font-size:0.75rem; background:#e0f2fe; color:#0369a1; padding:2px 8px; border-radius:9999px; font-weight:700;">令和8年度改定準拠</span>
     </div>
-    <nav class="nav-tab-group">
-      <button class="nav-tab active" data-target="viewSchedule">本日時間割</button>
-      <button class="nav-tab" data-target="viewMonthly">月間単位・収益</button>
-      <button class="nav-tab" data-target="viewPatient">患者台帳</button>
-      <button class="nav-tab" data-target="viewLoan">物品貸出</button>
-      <button class="nav-tab" data-target="viewExport">Excel出力</button>
-    </nav>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <nav class="nav-tab-group">
+        <button class="nav-tab active" data-target="viewSchedule">本日時間割</button>
+        <button class="nav-tab" data-target="viewMonthly">月間単位・収益</button>
+        <button class="nav-tab" data-target="viewPatient">患者台帳</button>
+        <button class="nav-tab" data-target="viewLoan">物品貸出</button>
+        <button class="nav-tab" data-target="viewExport">Excel出力</button>
+      </nav>
+      <!-- スタッフ設定ボタン -->
+      <button id="btnOpenStaffSettings" type="button" style="display:flex; align-items:center; gap:5px; padding:6px 12px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; font-size:0.82rem; font-weight:700; color:#334155; cursor:pointer; transition:all 0.15s ease;" onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f8fafc'">
+        <span>⚙</span>
+        <span>スタッフ設定</span>
+      </button>
+    </div>
   </header>
 
   <!-- VIEW 1: 本日時間割 -->
@@ -439,6 +446,33 @@
       <div style="display:flex; justify-content:flex-end;">
         <button type="button" id="btnCloseRevenueModal" style="padding:6px 18px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; cursor:pointer; font-weight:600;">閉じる</button>
       </div>
+    </div>
+  </div>
+
+  <!-- モーダル 6: セラピストマスター設定（名称変更・動的登録） -->
+  <div id="modalStaffSettings" class="modal-overlay">
+    <div class="modal-card" style="max-width:520px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="font-size:1.05rem; font-weight:800; color:#0f172a; margin:0;">⚙ セラピスト表示名設定</h3>
+        <button type="button" id="btnCloseStaffModalX" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:#64748b;">✕</button>
+      </div>
+      <p style="font-size:0.75rem; color:#64748b; margin-bottom:16px;">
+        時間割・コマ配置・業務日誌Excelへ出力されるセラピストの表示名を編集できます。ブラウザに自動保存されます。
+      </p>
+
+      <form id="staffSettingsForm" style="display:flex; flex-direction:column; gap:12px;">
+        <div id="staffSettingsListContainer" style="display:flex; flex-direction:column; gap:8px; border:1px solid #e2e8f0; border-radius:6px; padding:12px; background:#f8fafc;">
+          <!-- JSで動的にセラピストIDごとの入力欄を展開 -->
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+          <button type="button" id="btnResetStaffDefault" style="padding:6px 12px; background:#fff; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; color:#64748b; cursor:pointer;">デフォルトに戻す</button>
+          <div style="display:flex; gap:8px;">
+            <button type="button" id="btnCloseStaffModal" style="padding:6px 14px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; cursor:pointer;">閉じる</button>
+            <button type="submit" style="padding:6px 18px; background:#0284c7; color:#fff; border:none; border-radius:4px; font-size:0.85rem; font-weight:700; cursor:pointer;">保存する</button>
+          </div>
+        </div>
+      </form>
     </div>
   </div>
 
