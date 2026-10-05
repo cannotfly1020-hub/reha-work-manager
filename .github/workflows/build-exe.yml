@@ -3,11 +3,11 @@ name: Build Windows Portable App
 on: push
 
 jobs:
-build:
-runs-on: windows-latest
-steps:
-- uses: actions/checkout@v4
-　
+ build:
+  runs-on: windows-latest
+  steps:
+  - uses: actions/checkout@v4
+
   - uses: actions/setup-node@v4
     with:
       node-version: 20
