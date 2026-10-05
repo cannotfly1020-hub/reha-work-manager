@@ -24,7 +24,8 @@
 "productName": "リハビリ業務管理システム",
 "asar": false,
 "win": {
-"target": "portable"
+"target": "portable",
+"icon": "icon.ico"
 },
 "directories": {
 "output": "dist"
