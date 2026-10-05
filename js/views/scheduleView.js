@@ -1,9 +1,12 @@
 // js/views/scheduleView.js
-// VIEW 1: 当日時間割・コマ移動・消炎鎮痛来院・患者パレット・疾患タグ・早期期限バッジ・計画書4区分自動判定・セラピスト表示名動的連動・台帳同期
+// VIEW 1: 当日時間割・コマ移動・消炎鎮痛来院・患者パレット・疾患タグ・早期期限バッジ・計画書4区分自動判定・動的セラピスト管理（稼働中のみ表示・検索・追加・ステータス切替）
 
 import { TIME_SLOTS, REHA_RULES } from '../config/rules.js';
 import { sanitizeHtml, safeParseInt } from '../core/dataNormalizer.js';
-import { getAllTherapists, updateTherapistNames, saveAllTherapists } from '../store/therapistStore.js';
+import {
+  getAllTherapists, getActiveTherapists, addTherapist, updateTherapistSettings,
+  saveAllTherapists, THERAPIST_STATUS
+} from '../store/therapistStore.js';
 import { getPatientById, searchPatients, getAllPatients, updatePatientPlanStatus } from '../store/patientStore.js';
 import {
   getDailySchedule, setScheduleSlot, clearScheduleSlot, moveScheduleSlot, getDailyStats,
@@ -153,7 +156,8 @@ function renderTimetableGrid() {
   const gridEl = document.getElementById('timetableGrid');
   if (!gridEl) return;
 
-  const therapists = getAllTherapists();
+  // 時間割には「稼働中」のセラピストのみを動的表示（退職者・休職者は完全除外）
+  const therapists = getActiveTherapists();
   const schedule = getDailySchedule(currentDateStr);
   let html = '<div class="timetable-header">時間帯</div>';
   therapists.forEach((t) => { html += `<div class="timetable-header">${sanitizeHtml(t.name)}</div>`; });
@@ -228,7 +232,6 @@ function attachGridEventListeners(gridEl) {
       let rawData = null;
       try { rawData = JSON.parse(e.dataTransfer.getData('application/json')); } catch (_) {}
 
-      // A: コマ移動のドロップ処理
       if (rawData?.type === 'MOVE_SLOT') {
         const { fromTherapist, fromSlot } = rawData;
         if (fromTherapist === targetTId && fromSlot === targetSId) return;
@@ -252,7 +255,6 @@ function attachGridEventListeners(gridEl) {
         return;
       }
 
-      // B: 新規患者パレットからのドロップ
       const patientId = rawData?.patientId || e.dataTransfer.getData('text/plain');
       if (patientId && !patientId.includes(':')) {
         openSlotModal(targetTId, targetSId, { patientId, units: 1, note: '', billingPlan: '' });
@@ -357,7 +359,6 @@ function setupSlotModalListeners() {
 
     setScheduleSlot(currentDateStr, newTherapistId, newSlotId, { patientId, units, note, billingPlan });
 
-    // 計画書算定実績確定に伴い、患者台帳の計画書ステータスを自動更新・昇格
     if (billingPlan) {
       updatePatientPlanStatus(patientId, billingPlan);
     }
@@ -378,15 +379,21 @@ function openSlotModal(therapistId, slotId, currentItem) {
   const therapistSelect = document.getElementById('slotModalTherapistSelect');
   const slotSelect = document.getElementById('slotModalSlotSelect');
 
-  const therapists = getAllTherapists();
-  const currentTherapist = therapists.find((t) => t.id === therapistId);
+  const allTherapists = getAllTherapists();
+  const activeTherapists = getActiveTherapists();
+  const currentTherapist = allTherapists.find((t) => t.id === therapistId);
   const tDisplayName = currentTherapist ? currentTherapist.name : `PT ${therapistId}`;
 
   titleEl.textContent = `コマ配置 (${tDisplayName} / ${TIME_SLOTS.find((s) => s.id === slotId)?.label || slotId})`;
   btnDelete.style.display = currentItem ? 'block' : 'none';
 
   if (therapistSelect) {
-    therapistSelect.innerHTML = therapists.map((t) => `<option value="${t.id}">${sanitizeHtml(t.name)}</option>`).join('');
+    // 稼働中スタッフを基本とし、過去データの枠が休職/退職の場合はそれも含めて安全に表示
+    const selectCandidates = [...activeTherapists];
+    if (currentTherapist && !selectCandidates.some((t) => t.id === currentTherapist.id)) {
+      selectCandidates.push(currentTherapist);
+    }
+    therapistSelect.innerHTML = selectCandidates.map((t) => `<option value="${t.id}">${sanitizeHtml(t.name)}</option>`).join('');
     therapistSelect.value = therapistId;
   }
   if (slotSelect) {
@@ -420,15 +427,13 @@ function openSlotModal(therapistId, slotId, currentItem) {
     if (existingDate) {
       planSelect.value = '';
       planSelect.disabled = true;
-      patientInfoEl.innerHTML += `<div style="color:#e11d48; font-size:0.75rem; margin-top:4px; font-weight:700;">⚠️️ 総合計画評価料は当月 ${existingDate} に算定済みのため選択できません</div>`;
+      patientInfoEl.innerHTML += `<div style="color:#e11d48; font-size:0.75rem; margin-top:4px; font-weight:700;">⚠ 総合計画評価料は当月 ${existingDate} に算定済みのため選択できません</div>`;
     } else {
       planSelect.disabled = false;
       const rawPlan = currentItem?.billingPlan;
       if (rawPlan) {
-        // すでに保存済みの指定がある場合はそれを維持
         planSelect.value = rawPlan === true ? 'PLAN_1_FIRST' : String(rawPlan);
       } else {
-        // 未設定時は過去実績と患者台帳属性から自動推奨区分を判定・初期セット
         const hasPastPlan = hasPatientPastPlan(pId, currentDateStr);
         const recommendation = evaluateRecommendedPlan(patient, currentDateStr, hasPastPlan);
         if (recommendation.recommendedPlan) {
@@ -528,9 +533,12 @@ function setupStaffSettingsModalListeners() {
   const btnCloseX = document.getElementById('btnCloseStaffModalX');
   const btnReset = document.getElementById('btnResetStaffDefault');
   const form = document.getElementById('staffSettingsForm');
-  const listContainer = document.getElementById('staffSettingsListContainer');
+  const searchInput = document.getElementById('staffSearchInput');
+  const btnAdd = document.getElementById('btnAddNewStaff');
+  const newNameInput = document.getElementById('newStaffNameInput');
 
   btnOpen?.addEventListener('click', () => {
+    if (searchInput) searchInput.value = '';
     renderStaffSettingsFields();
     modal?.classList.add('active');
   });
@@ -539,50 +547,154 @@ function setupStaffSettingsModalListeners() {
   btnClose?.addEventListener('click', closeModal);
   btnCloseX?.addEventListener('click', closeModal);
 
+  // リアルタイム検索フィルター連動
+  searchInput?.addEventListener('input', () => {
+    renderStaffSettingsFields();
+  });
+
+  // 新規セラピスト追加イベント
+  const handleAddNewStaff = () => {
+    const name = newNameInput ? newNameInput.value.trim() : '';
+    if (!name) {
+      showToast('セラピスト氏名を入力してください', 'warn');
+      newNameInput?.focus();
+      return;
+    }
+
+    const res = addTherapist(name, THERAPIST_STATUS.ACTIVE);
+    if (res.success) {
+      showToast(res.message, 'success');
+      if (newNameInput) newNameInput.value = '';
+      renderStaffSettingsFields();
+      renderScheduleView();
+    } else {
+      showToast('セラピストの追加に失敗しました', 'error');
+    }
+  };
+
+  btnAdd?.addEventListener('click', handleAddNewStaff);
+  newNameInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAddNewStaff();
+    }
+  });
+
   btnReset?.addEventListener('click', () => {
     const defaultList = [
-      { id: 'A', name: 'PT A', color: '#0284c7' },
-      { id: 'B', name: 'PT B', color: '#0d9488' },
-      { id: 'C', name: 'PT C', color: '#7c3aed' }
+      { id: 'A', name: 'PT A', color: '#0284c7', status: THERAPIST_STATUS.ACTIVE },
+      { id: 'B', name: 'PT B', color: '#0d9488', status: THERAPIST_STATUS.ACTIVE },
+      { id: 'C', name: 'PT C', color: '#7c3aed', status: THERAPIST_STATUS.ACTIVE }
     ];
     saveAllTherapists(defaultList);
     renderStaffSettingsFields();
-    showToast('セラピスト名を初期デフォルトに戻しました', 'info');
+    showToast('セラピスト設定を初期デフォルトに戻しました', 'info');
+    renderScheduleView();
   });
 
+  // 名称 ＆ ステータスの一括保存処理
   form?.addEventListener('submit', (e) => {
     e.preventDefault();
-    const nameMap = {};
-    listContainer?.querySelectorAll('.staff-name-input').forEach((input) => {
-      const tId = input.dataset.therapistId;
-      if (tId) nameMap[tId] = input.value.trim();
+    const updateMap = {};
+
+    form.querySelectorAll('.staff-item-row').forEach((row) => {
+      const tId = row.dataset.therapistId;
+      const nameInput = row.querySelector('.staff-name-input');
+      const statusSelect = row.querySelector('.staff-status-select');
+      if (tId && nameInput && statusSelect) {
+        updateMap[tId] = {
+          name: nameInput.value.trim(),
+          status: statusSelect.value
+        };
+      }
     });
 
-    updateTherapistNames(nameMap);
+    updateTherapistSettings(updateMap);
     closeModal();
-    showToast('セラピスト表示名を保存・更新しました', 'success');
+    showToast('セラピスト設定（名称・ステータス）を更新・保存しました', 'success');
     renderScheduleView();
   });
 }
 
 function renderStaffSettingsFields() {
-  const container = document.getElementById('staffSettingsListContainer');
-  if (!container) return;
+  const activeContainer = document.getElementById('staffSettingsListContainer');
+  const retiredContainer = document.getElementById('retiredStaffListContainer');
+  const searchInput = document.getElementById('staffSearchInput');
+  if (!activeContainer) return;
 
-  const therapists = getAllTherapists();
-  container.innerHTML = therapists.map((t) => {
+  const keyword = (searchInput ? searchInput.value.trim().toLowerCase() : '');
+  const allTherapists = getAllTherapists();
+
+  // 検索語によるフィルタリング
+  const matchesKeyword = (t) => {
+    if (!keyword) return true;
+    return t.name.toLowerCase().includes(keyword) || t.id.toLowerCase().includes(keyword);
+  };
+
+  // 現役（稼働中・休職）と過去・退職者を分離
+  const currentStaffList = allTherapists.filter((t) => t.status !== THERAPIST_STATUS.RETIRED && matchesKeyword(t));
+  const retiredStaffList = allTherapists.filter((t) => t.status === THERAPIST_STATUS.RETIRED && matchesKeyword(t));
+
+  const buildRowHtml = (t) => {
+    const isRetired = t.status === THERAPIST_STATUS.RETIRED;
+    const isLeave = t.status === THERAPIST_STATUS.LEAVE;
+    const statusBg = isRetired ? '#f1f5f9' : (isLeave ? '#fffbeb' : '#f0fdf4');
+    const statusCol = isRetired ? '#64748b' : (isLeave ? '#b45309' : '#15803d');
+
     return `
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; background:#fff; padding:8px 12px; border:1px solid #cbd5e1; border-radius:6px;">
-        <div style="display:flex; align-items:center; gap:8px;">
+      <div class="staff-item-row" data-therapist-id="${t.id}"
+           style="display:flex; align-items:center; justify-content:space-between; gap:10px; background:#fff; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px;">
+        <div style="display:flex; align-items:center; gap:6px; min-width:56px;">
           <span style="width:10px; height:10px; border-radius:50%; background:${t.color || '#0284c7'}; display:inline-block;"></span>
-          <strong style="font-size:0.85rem; color:#0f172a; min-width:40px;">枠 ${t.id}</strong>
+          <strong style="font-size:0.82rem; color:#0f172a;">枠 ${t.id}</strong>
         </div>
         <div style="flex:1;">
-          <input type="text" class="staff-name-input" data-therapist-id="${t.id}" value="${sanitizeHtml(t.name)}"
-                 placeholder="セラピスト氏名を入力"
-                 style="width:100%; padding:6px 10px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; font-weight:600;">
+          <input type="text" class="staff-name-input" value="${sanitizeHtml(t.name)}"
+                 placeholder="セラピスト氏名"
+                 style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; font-weight:600;">
+        </div>
+        <div style="width:105px;">
+          <select class="staff-status-select"
+                  style="width:100%; padding:5px 6px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.78rem; font-weight:700; background:${statusBg}; color:${statusCol}; cursor:pointer;">
+            <option value="${THERAPIST_STATUS.ACTIVE}" ${t.status === THERAPIST_STATUS.ACTIVE ? 'selected' : ''}>● 稼働中</option>
+            <option value="${THERAPIST_STATUS.LEAVE}" ${t.status === THERAPIST_STATUS.LEAVE ? 'selected' : ''}>▲ 休職</option>
+            <option value="${THERAPIST_STATUS.RETIRED}" ${t.status === THERAPIST_STATUS.RETIRED ? 'selected' : ''}>■ 退職</option>
+          </select>
         </div>
       </div>
     `;
-  }).join('');
+  };
+
+  // 1. トップ表示エリア（現役スタッフ一覧）
+  if (currentStaffList.length === 0) {
+    activeContainer.innerHTML = `<div style="font-size:0.75rem; color:#94a3b8; text-align:center; padding:12px;">該当するスタッフがいません</div>`;
+  } else {
+    activeContainer.innerHTML = currentStaffList.map(buildRowHtml).join('');
+  }
+
+  // 2. 最下部折りたたみエリア（退職者一覧）
+  if (retiredContainer) {
+    if (retiredStaffList.length === 0) {
+      retiredContainer.innerHTML = `<div style="font-size:0.75rem; color:#94a3b8; text-align:center; padding:8px;">退職・非表示スタッフはいません</div>`;
+    } else {
+      retiredContainer.innerHTML = retiredStaffList.map(buildRowHtml).join('');
+    }
+  }
+
+  // ステータス変更時にプルダウンの配色を即座に連動
+  document.querySelectorAll('.staff-status-select').forEach((sel) => {
+    sel.addEventListener('change', (e) => {
+      const val = e.target.value;
+      if (val === THERAPIST_STATUS.ACTIVE) {
+        e.target.style.background = '#f0fdf4';
+        e.target.style.color = '#15803d';
+      } else if (val === THERAPIST_STATUS.LEAVE) {
+        e.target.style.background = '#fffbeb';
+        e.target.style.color = '#b45309';
+      } else {
+        e.target.style.background = '#f1f5f9';
+        e.target.style.color = '#64748b';
+      }
+    });
+  });
 }
