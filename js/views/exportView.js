@@ -1,5 +1,5 @@
 // js/views/exportView.js
-// VIEW 5: 月末Excel原本出力アクション制御・ワンクリック自動生成・トースト通知管理層（200行制限準拠）
+// VIEW 5: 月末Excel原本出力アクション制御・全データバックアップ＆復元(JSON)・トースト通知管理層（200行制限準拠）
 
 import { safeParseInt } from '../core/dataNormalizer.js';
 import { aggregateFromAppSchedule } from '../store/scheduleStore.js';
@@ -56,6 +56,9 @@ export function initExportView() {
   btnDiary?.addEventListener('click', () => {
     handleExportDiary(monthInput);
   });
+
+  // 3. システム全データ バックアップ保存 & 復元イベントリスナー
+  setupBackupAndRestoreListeners();
 }
 
 function handleExportUketsuke(monthInput) {
@@ -116,4 +119,101 @@ function parseYearMonth(val) {
   if (!val) return [null, null];
   const parts = val.split('-');
   return [safeParseInt(parts[0]), safeParseInt(parts[1])];
+}
+
+/**
+ * システム全データのバックアップ(JSON)保存 & 復元リスナー設定
+ */
+function setupBackupAndRestoreListeners() {
+  const btnBackup = document.getElementById('btnBackupDownload');
+  const btnTriggerRestore = document.getElementById('btnTriggerRestore');
+  const fileInput = document.getElementById('backupFileInput');
+
+  // A: 全データ一括バックアップ (ダウンロード)
+  btnBackup?.addEventListener('click', () => {
+    try {
+      const dumpData = {
+        app: 'reha-work-manager',
+        version: '1.0.0',
+        exportedAt: new Date().toISOString(),
+        storage: {}
+      };
+
+      // reha_ で始まる全データ（患者台帳、時間割、スタッフ設定、物品貸出等）を安全に収集
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('reha_')) {
+          dumpData.storage[key] = localStorage.getItem(key);
+        }
+      }
+
+      const jsonStr = JSON.stringify(dumpData, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const nowStr = new Date().toISOString().slice(0, 10);
+      const fileName = `reha_backup_${nowStr}.json`;
+
+      const downloadLink = document.createElement('a');
+      downloadLink.href = URL.createObjectURL(blob);
+      downloadLink.download = fileName;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      downloadLink.remove();
+      URL.revokeObjectURL(downloadLink.href);
+
+      showToast(`全データを保存しました: ${fileName}`, 'success');
+    } catch (err) {
+      console.error('Backup error:', err);
+      showToast('バックアップの作成に失敗しました', 'error');
+    }
+  });
+
+  // B: 復元ファイル選択トリガー
+  btnTriggerRestore?.addEventListener('click', () => {
+    if (fileInput) {
+      fileInput.value = '';
+      fileInput.click();
+    }
+  });
+
+  // C: 復元ファイルの読み込み & LocalStorage展開
+  fileInput?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result;
+        if (typeof text !== 'string') throw new Error('ファイルを読み込めませんでした');
+
+        const parsed = JSON.parse(text);
+        if (!parsed || parsed.app !== 'reha-work-manager' || !parsed.storage) {
+          showToast('無効なファイル形式です。reha-work-managerのバックアップJSONを選択してください。', 'error');
+          return;
+        }
+
+        // 既存の reha_ 関連キーを一旦クリアしてバックアップ内容で完全復元
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith('reha_')) keysToRemove.push(k);
+        }
+        keysToRemove.forEach((k) => localStorage.removeItem(k));
+
+        // バックアップの全キーを展開
+        Object.entries(parsed.storage).forEach(([k, v]) => {
+          if (typeof v === 'string') localStorage.setItem(k, v);
+        });
+
+        showToast('データを完全復元しました。画面を再読み込みします...', 'success');
+        setTimeout(() => {
+          window.location.reload();
+        }, 1200);
+      } catch (err) {
+        console.error('Restore error:', err);
+        showToast('ファイルの復元に失敗しました。正しいJSONファイルかご確認ください。', 'error');
+      }
+    };
+    reader.readAsText(file);
+  });
 }
