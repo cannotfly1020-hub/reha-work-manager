@@ -10,7 +10,6 @@ const OUTPATIENT_SHEET = '実施ﾘｽﾄ 外来';
 const ANALGESIA_SHEET = '実施ﾘｽﾄ 消炎鎮痛';// js/excel/uketsukeWriter.js
 // 受付提出用Excel生成層（氏名100px / 区分頭文字「運脳廃消」/ 早期加算単位数表示 / 基本列限定オートフィルター / A4横1枚収容）
 
-import { REHA_RULES } from '../config/rules.js';
 import { evaluateEarlyBonusPhase } from '../core/deadlineCalc.js';
 
 const SUMMARY_SHEET = 'レセプト収益サマリー';
