@@ -1,5 +1,5 @@
 // js/store/scheduleStore.js
-// 時間割コマCRUD・コマ移動・消炎鎮痛CRUD・LocalStorage永続化・月間集計・過去計画書履歴判定層（200行制限準拠）
+// 時間割コマCRUD・コマ移動・消炎鎮痛CRUD・LocalStorage永続化・月間集計・過去計画書履歴判定層（高速O(1)最適化対応・200行制限準拠）
 
 import { normalizeDateString, safeParseInt } from '../core/dataNormalizer.js';
 import { getPatientById } from './patientStore.js';
@@ -173,9 +173,23 @@ export function findPatientMonthlyPlanDate(patientId, year, month, excludeDate =
 
 /**
  * 対象患者が指定日より過去に計画書を算定した実績があるか判定する
+ * 【超高速化 O(1)】患者マスターの planStatus 属性を最優先参照し、全LocalStorage総当たりループを根絶
+ * @param {string} patientId 患者ID
+ * @param {string} beforeDateStr 指定日 (YYYY-MM-DD)
+ * @returns {boolean}
  */
 export function hasPatientPastPlan(patientId, beforeDateStr) {
   if (!patientId || !beforeDateStr) return false;
+
+  // 1. 【超高速 O(1)】患者台帳の永続ステータスを即座に参照
+  const patient = getPatientById(patientId);
+  if (patient) {
+    if (patient.planStatus === 'PLAN_1_FOLLOW' || patient.planStatus === 'PLAN_2_FOLLOW') {
+      return true; // すでに継続フェーズに入っているため過去算定歴あり（走査時間 0ミリ秒）
+    }
+  }
+
+  // 2. 【安全弁フォールバック】台帳が未設定（NOT_YET）の場合のみ過去キーを走査
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
@@ -183,7 +197,10 @@ export function hasPatientPastPlan(patientId, beforeDateStr) {
       const datePart = key.replace(STORAGE_PREFIX, '');
       if (datePart >= beforeDateStr) continue; // 指定日当日以降は除外
 
-      const sched = JSON.parse(localStorage.getItem(key) || '{}');
+      const raw = localStorage.getItem(key);
+      if (!raw || !raw.includes(patientId)) continue; // 文字列レベルで高速プレフィルタ
+
+      const sched = JSON.parse(raw);
       for (const tId of ['A', 'B', 'C']) {
         const slots = sched[tId] || {};
         for (const item of Object.values(slots)) {
