@@ -5,7 +5,7 @@
 "main": "main.js",
 "scripts": {
 "start": "electron .",
-"build:win": "electron-builder --win portable"
+"build:win": "electron-builder --win nsis"
 },
 "keywords": [
 "rehabilitation",
@@ -22,10 +22,17 @@
 "build": {
 "appId": "com.reha.workmanager",
 "productName": "リハビリ業務管理システム",
-"asar": false,
 "win": {
-"target": "portable",
+"target": "nsis",
 "icon": "icon.ico"
+},
+"nsis": {
+"oneClick": true,
+"perMachine": false,
+"allowToChangeInstallationDirectory": false,
+"createDesktopShortcut": true,
+"createStartMenuShortcut": true,
+"shortcutName": "リハビリ業務管理システム"
 },
 "directories": {
 "output": "dist"
