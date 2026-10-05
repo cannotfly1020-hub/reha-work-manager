@@ -1,7 +1,7 @@
 // js/excel/diaryWriter.js
-// 業務日誌Excel生成層（入院・外来別単位＆人数 / スタッフ出欠枠 / PT別実績 / A4縦1枚収容 / 200行制限準拠）
+// 業務日誌Excel生成層（原本R8.6準拠 / 検印欄 / 時間割撤廃 / セラピスト増員動的対応 / 入外別実績 / 担当別実績 / A4横1枚収容 / 200行制限準拠）
 
-import { TIME_SLOTS, THERAPISTS, REHA_RULES } from '../config/rules.js';
+import { THERAPISTS, REHA_RULES } from '../config/rules.js';
 import { getDailySchedule } from '../store/scheduleStore.js';
 import { getPatientById } from '../store/patientStore.js';
 
@@ -9,34 +9,13 @@ const STYLES = {
   headerNavy: {
     font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: 'FFFFFF' } },
     fill: { fgColor: { rgb: '1E293B' } },
-    alignment: { horizontal: 'center', vertical: 'center' },
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
     border: thinBorder()
   },
   headerSub: {
     font: { name: 'Meiryo UI', sz: 7.5, bold: true, color: { rgb: '1E293B' } },
     fill: { fgColor: { rgb: 'F1F5F9' } },
     alignment: { horizontal: 'center', vertical: 'center' },
-    border: thinBorder()
-  },
-  cellTime: {
-    font: { name: 'Meiryo UI', sz: 7.5, bold: true, color: { rgb: '475569' } },
-    alignment: { horizontal: 'center', vertical: 'center' },
-    border: thinBorder()
-  },
-  cellInpatient: {
-    font: { name: 'Meiryo UI', sz: 7.5, color: { rgb: '92400E' } },
-    fill: { fgColor: { rgb: 'FEF3C7' } },
-    alignment: { vertical: 'center', wrapText: true },
-    border: thinBorder()
-  },
-  cellOutpatient: {
-    font: { name: 'Meiryo UI', sz: 7.5, color: { rgb: '1E40AF' } },
-    fill: { fgColor: { rgb: 'EFF6FF' } },
-    alignment: { vertical: 'center', wrapText: true },
-    border: thinBorder()
-  },
-  cellEmpty: {
-    font: { name: 'Meiryo UI', sz: 7.5 },
     border: thinBorder()
   },
   cellLabel: {
@@ -54,12 +33,6 @@ const STYLES = {
     font: { name: 'Meiryo UI', sz: 7.5 },
     alignment: { horizontal: 'center', vertical: 'center' },
     border: thinBorder()
-  },
-  cellTotal: {
-    font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: '0F172A' } },
-    fill: { fgColor: { rgb: 'ECFDF5' } },
-    alignment: { horizontal: 'right', vertical: 'center' },
-    border: { top: { style: 'thin', color: { rgb: '0F172A' } }, bottom: { style: 'double', color: { rgb: '0F172A' } }, left: { style: 'thin', color: { rgb: 'CBD5E1' } }, right: { style: 'thin', color: { rgb: 'CBD5E1' } } }
   }
 };
 
@@ -78,114 +51,150 @@ export function generateDiaryWorkbook(aggregated) {
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const dayOfWeek = new Date(year, month - 1, day).getDay();
     const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+    const reiwaYear = year - 2018;
 
-    // 1. タイトル
-    setStyledCell(ws, 0, 0, `【リハビリテーション科 業務日誌】 ${year}年${month}月${day}日 (${dayNames[dayOfWeek]})`, {
-      font: { name: 'Meiryo UI', sz: 10.5, bold: true, color: { rgb: '0F172A' } }
+    // 1. タイトル & 日付 & 検印枠（右上）
+    setStyledCell(ws, 0, 0, 'リハビリテーション科 業務日誌', {
+      font: { name: 'Meiryo UI', sz: 12, bold: true, color: { rgb: '0F172A' } }
+    });
+    setStyledCell(ws, 1, 0, `令和${reiwaYear}年 ${month}月 ${day}日 (${dayNames[dayOfWeek]})`, {
+      font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: '334155' } }
     });
 
-    // 2. 時間割ヘッダー
-    setStyledCell(ws, 2, 0, '時間帯', STYLES.headerNavy);
-    THERAPISTS.forEach((t, i) => setStyledCell(ws, 2, i + 1, t.name, STYLES.headerNavy));
+    const sealTitles = ['院 長', '事務長', '科 長', '担 当'];
+    sealTitles.forEach((title, idx) => {
+      const c = 4 + idx;
+      setStyledCell(ws, 0, c, title, STYLES.headerSub);
+      setStyledCell(ws, 1, c, '', { border: thinBorder(), alignment: { horizontal: 'center', vertical: 'center' } });
+    });
 
-    // 3. スケジュール描画 & 集計
+    // 2. データ集計（セラピスト増員に自動対応する動的マップ）
     const schedule = getDailySchedule(dateStr);
-    const ptStats = { A: { units: 0, patients: new Set() }, B: { units: 0, patients: new Set() }, C: { units: 0, patients: new Set() } };
-    const inPatientsSet = new Set();
-    const outPatientsSet = new Set();
-    let inUnits = 0, outUnits = 0, planCount = 0;
-    const diseaseUnits = { LOCOMOTIVE: 0, CEREBROVASCULAR: 0, DISUSE: 0 };
+    const ptStats = {};
+    THERAPISTS.forEach((t) => {
+      ptStats[t.id] = { name: t.name, units: 0, pSet: new Set() };
+    });
 
-    TIME_SLOTS.forEach((slot, rIdx) => {
-      const r = 3 + rIdx;
-      setStyledCell(ws, r, 0, slot.label, STYLES.cellTime);
+    const breakdown = {
+      IN: { LOCOMOTIVE: { u: 0, p: new Set() }, CEREBROVASCULAR: { u: 0, p: new Set() }, DISUSE: { u: 0, p: new Set() } },
+      OUT: { LOCOMOTIVE: { u: 0, p: new Set() }, CEREBROVASCULAR: { u: 0, p: new Set() }, DISUSE: { u: 0, p: new Set() } }
+    };
+    let planCount = 0;
 
-      THERAPISTS.forEach((t, cIdx) => {
-        const item = schedule[t.id]?.[slot.id];
+    THERAPISTS.forEach((t) => {
+      const slots = schedule[t.id] || {};
+      Object.values(slots).forEach((item) => {
         if (item?.patientId) {
           const p = getPatientById(item.patientId);
           const u = item.units || 1;
-          ptStats[t.id].units += u;
-          ptStats[t.id].patients.add(item.patientId);
-          const isIn = p?.category === 'INPATIENT';
-
-          if (isIn) {
-            inUnits += u;
-            inPatientsSet.add(item.patientId);
-          } else {
-            outUnits += u;
-            outPatientsSet.add(item.patientId);
+          if (ptStats[t.id]) {
+            ptStats[t.id].units += u;
+            ptStats[t.id].pSet.add(item.patientId);
           }
 
-          if (p?.diseaseType && diseaseUnits[p.diseaseType] !== undefined) diseaseUnits[p.diseaseType] += u;
-          if (item.billingPlan) planCount++;
+          const isInput = p?.category === 'INPATIENT';
+          const catKey = isInput ? 'IN' : 'OUT';
+          const dKey = p?.diseaseType in breakdown[catKey] ? p.diseaseType : 'LOCOMOTIVE';
+          breakdown[catKey][dKey].u += u;
+          breakdown[catKey][dKey].p.add(item.patientId);
 
-          const planMark = item.billingPlan ? '★' : '';
-          const text = `${p ? p.name : item.patientId} (${u}u${planMark})`;
-          setStyledCell(ws, r, cIdx + 1, text, isIn ? STYLES.cellInpatient : STYLES.cellOutpatient);
-        } else {
-          setStyledCell(ws, r, cIdx + 1, '', STYLES.cellEmpty);
+          if (item.billingPlan) planCount++;
         }
       });
     });
 
-    // 4. 右側上部：出欠・勤務状況確認ブロック (行 2〜6)
-    setStyledCell(ws, 2, 5, '職種 / 担当', STYLES.headerNavy);
-    setStyledCell(ws, 2, 6, '出欠・勤務区分', STYLES.headerNavy);
+    // 3. 左側上部：勤務状況・出勤確認（セラピスト増員に応じて自動伸縮）
+    setStyledCell(ws, 3, 0, '職種 / 担当', STYLES.headerNavy);
+    setStyledCell(ws, 3, 1, '出欠・勤務区分', STYLES.headerNavy);
+    setStyledCell(ws, 3, 2, '備考', STYLES.headerNavy);
 
-    const staffList = [
-      ['セラピスト PT A', ptStats.A.units > 0 ? '出勤' : '公休 / -'],
-      ['セラピスト PT B', ptStats.B.units > 0 ? '出勤' : '公休 / -'],
-      ['セラピスト PT C', ptStats.C.units > 0 ? '出勤' : '公休 / -'],
-      ['リハビリ助手 1', '出勤 [　　]'],
-      ['リハビリ助手 2', '出勤 [　　]']
-    ];
-
-    staffList.forEach((st, sIdx) => {
-      const r = 3 + sIdx;
-      setStyledCell(ws, r, 5, st[0], STYLES.cellLabel);
-      setStyledCell(ws, r, 6, st[1], STYLES.cellCenter);
+    let curLeftRow = 4;
+    THERAPISTS.forEach((t) => {
+      const isWorking = ptStats[t.id]?.units > 0;
+      setStyledCell(ws, curLeftRow, 0, t.name, STYLES.cellLabel);
+      setStyledCell(ws, curLeftRow, 1, isWorking ? '出勤' : '公休 / -', STYLES.cellCenter);
+      setStyledCell(ws, curLeftRow, 2, '', STYLES.cellCenter);
+      curLeftRow++;
     });
 
-    // 5. 右側中央：入院・外来別 ＆ 実績集計ブロック (行 9〜)
-    setStyledCell(ws, 9, 5, '実績集計項目', STYLES.headerNavy);
-    setStyledCell(ws, 9, 6, '当日実績値', STYLES.headerNavy);
+    ['リハビリ助手 1', 'リハビリ助手 2'].forEach((aide) => {
+      setStyledCell(ws, curLeftRow, 0, aide, STYLES.cellLabel);
+      setStyledCell(ws, curLeftRow, 1, '出勤 [　　]', STYLES.cellCenter);
+      setStyledCell(ws, curLeftRow, 2, '', STYLES.cellCenter);
+      curLeftRow++;
+    });
+
+    // 4. 左側下部：担当セラピスト別実績（増員時も自動展開）
+    curLeftRow++;
+    setStyledCell(ws, curLeftRow, 0, '担当セラピスト', STYLES.headerNavy);
+    setStyledCell(ws, curLeftRow, 1, '実施単位', STYLES.headerNavy);
+    setStyledCell(ws, curLeftRow, 2, '実施患者数', STYLES.headerNavy);
+    curLeftRow++;
+
+    THERAPISTS.forEach((t) => {
+      const stats = ptStats[t.id] || { units: 0, pSet: new Set() };
+      setStyledCell(ws, curLeftRow, 0, t.name, STYLES.cellLabel);
+      setStyledCell(ws, curLeftRow, 1, `${stats.units} 単位`, STYLES.cellVal);
+      setStyledCell(ws, curLeftRow, 2, `${stats.pSet.size} 名`, STYLES.cellVal);
+      curLeftRow++;
+    });
+
+    // 5. 右側：入院・外来別 実績集計表
+    setStyledCell(ws, 3, 4, '区分 / 疾患項目', STYLES.headerNavy);
+    setStyledCell(ws, 3, 5, '単位数', STYLES.headerNavy);
+    setStyledCell(ws, 3, 6, '実施人数', STYLES.headerNavy);
+    setStyledCell(ws, 3, 7, '備考', STYLES.headerNavy);
+
+    const inUnits = breakdown.IN.LOCOMOTIVE.u + breakdown.IN.CEREBROVASCULAR.u + breakdown.IN.DISUSE.u;
+    const inPatients = new Set([...breakdown.IN.LOCOMOTIVE.p, ...breakdown.IN.CEREBROVASCULAR.p, ...breakdown.IN.DISUSE.p]).size;
+    const outUnits = breakdown.OUT.LOCOMOTIVE.u + breakdown.OUT.CEREBROVASCULAR.u + breakdown.OUT.DISUSE.u;
+    const outPatients = new Set([...breakdown.OUT.LOCOMOTIVE.p, ...breakdown.OUT.CEREBROVASCULAR.p, ...breakdown.OUT.DISUSE.p]).size;
 
     const aPatients = Object.values(schedule.analgesia || {}).flat();
-    const analgesiaInCount = aPatients.filter((id) => getPatientById(id)?.category === 'INPATIENT').length;
-    const analgesiaOutCount = aPatients.length - analgesiaInCount;
-    const totalUnits = inUnits + outUnits;
-    const totalPatientsCount = new Set([...inPatientsSet, ...outPatientsSet]).size;
+    const aInCount = aPatients.filter((id) => getPatientById(id)?.category === 'INPATIENT').length;
+    const aOutCount = aPatients.length - aInCount;
 
-    const summaryRows = [
-      ['個別リハ総単位数 (総人数)', `${totalUnits} 単位 (${totalPatientsCount} 名)`],
-      ['─ 入院 実施単位 (人数)', `${inUnits} 単位 (${inPatientsSet.size} 名)`],
-      ['─ 外来 実施単位 (人数)', `${outUnits} 単位 (${outPatientsSet.size} 名)`],
-      ['運動器リハ(Ⅱ)', `${diseaseUnits.LOCOMOTIVE} 単位`],
-      ['脳血管等リハ(Ⅲ)', `${diseaseUnits.CEREBROVASCULAR} 単位`],
-      ['廃用症候群リハ(Ⅲ)', `${diseaseUnits.DISUSE} 単位`],
-      ['消炎鎮痛処置 (物療)', `${aPatients.length} 件 (入${analgesiaInCount}/外${analgesiaOutCount})`],
-      ['総合計画書策定', `${planCount} 件`],
-      ['PT A 実施単位 (患者数)', `${ptStats.A.units} u (${ptStats.A.patients.size}名)`],
-      ['PT B 実施単位 (患者数)', `${ptStats.B.units} u (${ptStats.B.patients.size}名)`],
-      ['PT C 実施単位 (患者数)', `${ptStats.C.units} u (${ptStats.C.patients.size}名)`]
+    const summaryGrid = [
+      ['【入院】運動器リハ(Ⅱ)', `${breakdown.IN.LOCOMOTIVE.u} 単位`, `${breakdown.IN.LOCOMOTIVE.p.size} 名`, ''],
+      ['【入院】脳血管等リハ(Ⅲ)', `${breakdown.IN.CEREBROVASCULAR.u} 単位`, `${breakdown.IN.CEREBROVASCULAR.p.size} 名`, ''],
+      ['【入院】廃用症候群(Ⅲ)', `${breakdown.IN.DISUSE.u} 単位`, `${breakdown.IN.DISUSE.p.size} 名`, ''],
+      ['【入院】小計', `${inUnits} 単位`, `${inPatients} 名`, ''],
+      ['【外来】運動器リハ(Ⅱ)', `${breakdown.OUT.LOCOMOTIVE.u} 単位`, `${breakdown.OUT.LOCOMOTIVE.p.size} 名`, ''],
+      ['【外来】脳血管等リハ(Ⅲ)', `${breakdown.OUT.CEREBROVASCULAR.u} 単位`, `${breakdown.OUT.CEREBROVASCULAR.p.size} 名`, ''],
+      ['【外来】廃用症候群(Ⅲ)', `${breakdown.OUT.DISUSE.u} 単位`, `${breakdown.OUT.DISUSE.p.size} 名`, ''],
+      ['【外来】小計', `${outUnits} 単位`, `${outPatients} 名`, ''],
+      ['消炎鎮痛処置 (物療)', `${aPatients.length} 件`, `${aPatients.length} 名`, `入院${aInCount} / 外来${aOutCount}`],
+      ['総合計画書策定件数', `${planCount} 件`, '-', ''],
+      ['個別リハ 合計実績', `${inUnits + outUnits} 単位`, `${inPatients + outPatients} 名`, '']
     ];
 
-    summaryRows.forEach((row, idx) => {
-      const r = 10 + idx;
-      setStyledCell(ws, r, 5, row[0], STYLES.cellLabel);
-      setStyledCell(ws, r, 6, row[1], STYLES.cellVal);
+    summaryGrid.forEach((row, idx) => {
+      const r = 4 + idx;
+      const isSub = row[0].includes('小計') || row[0].includes('合計');
+      const styleLbl = isSub ? { ...STYLES.cellLabel, font: { ...STYLES.cellLabel.font, bold: true }, fill: { fgColor: { rgb: 'F1F5F9' } } } : STYLES.cellLabel;
+      const styleVal = isSub ? { ...STYLES.cellVal, font: { ...STYLES.cellVal.font, bold: true } } : STYLES.cellVal;
+      setStyledCell(ws, r, 4, row[0], styleLbl);
+      setStyledCell(ws, r, 5, row[1], styleVal);
+      setStyledCell(ws, r, 6, row[2], styleVal);
+      setStyledCell(ws, r, 7, row[3], STYLES.cellCenter);
     });
 
-    // 概算収益
-    const estPoints = (diseaseUnits.LOCOMOTIVE * 170) + (diseaseUnits.CEREBROVASCULAR * 100) + (diseaseUnits.DISUSE * 77) + (aPatients.length * 35);
-    setStyledCell(ws, 21, 5, '当日リハ概算収益', STYLES.cellTotal);
-    setStyledCell(ws, 21, 6, `¥${(estPoints * 10).toLocaleString()}`, STYLES.cellTotal);
+    // 6. 下部：記事・申し送り事項（横幅いっぱいの専用エリア）
+    const noteStartRow = Math.max(curLeftRow, 16) + 1;
+    setStyledCell(ws, noteStartRow, 0, '記事・申し送り事項', STYLES.headerNavy);
+    for (let c = 1; c <= 7; c++) setStyledCell(ws, noteStartRow, c, '', STYLES.headerNavy);
 
-    // 列幅: 時間帯(10), PT A/B/C(17.5ずつ), 余白(1.5), サマリー項目(20), サマリー値(14)
-    setSheetCols(ws, [10, 17.5, 17.5, 17.5, 1.5, 20, 14]);
+    for (let rOffset = 1; rOffset <= 3; rOffset++) {
+      const nr = noteStartRow + rOffset;
+      for (let c = 0; c <= 7; c++) {
+        setStyledCell(ws, nr, c, '', { border: thinBorder(), fill: { fgColor: { rgb: 'FFFFFF' } } });
+      }
+    }
 
-    applyA4PortraitPrintSetup(ws);
+    // 7. 列幅設定（時間割撤廃に伴う8列バランス調整）
+    setSheetCols(ws, [18, 13, 12, 2, 20, 11, 11, 16]);
+
+    applyA4LandscapePrintSetup(ws);
     updateSheetRange(ws);
     window.XLSX.utils.book_append_sheet(wb, ws, `${day}日`);
   }
@@ -193,11 +202,11 @@ export function generateDiaryWorkbook(aggregated) {
   return wb;
 }
 
-function applyA4PortraitPrintSetup(ws) {
+function applyA4LandscapePrintSetup(ws) {
   ws['!properties'] = { pageSetUpPr: { fitToPage: true } };
   ws['!pageSetup'] = {
     paperSize: 9, // A4
-    orientation: 'portrait', // 縦向き
+    orientation: 'landscape', // 原本通りの横向き
     fitToWidth: 1, // 横1ページ
     fitToHeight: 1, // 縦1ページ（1日＝1枚完全収容）
     fitToPage: true
