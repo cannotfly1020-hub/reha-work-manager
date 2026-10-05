@@ -22,18 +22,12 @@
 "build": {
 "appId": "com.reha.workmanager",
 "productName": "リハビリ業務管理システム",
-"asar": true,
+"asar": false,
 "win": {
 "target": "portable"
 },
 "directories": {
 "output": "dist"
-},
-"files": [
-"/*",
-"!dist/",
-"!.github/",
-"!docs/"
-]
+}
 }
 }
