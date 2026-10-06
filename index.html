@@ -87,15 +87,21 @@
     <div class="table-container" id="monthlyTableContainer"></div>
   </section>
 
-  <!-- VIEW 3: 患者台帳 -->
+  <!-- VIEW 3: 患者台帳（ステータス絞り込み対応） -->
   <section id="viewPatient" class="view-panel">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
       <div style="display:flex; gap:8px;">
-        <input type="text" id="patientSearchInput" placeholder="氏名・ID・疾患名で検索..." style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; width:260px;">
+        <input type="text" id="patientSearchInput" placeholder="氏名・ID・疾患名で検索..." style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; width:240px;">
         <select id="patientCategoryFilter" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem;">
           <option value="ALL">全患者区分</option>
           <option value="INPATIENT">入院患者</option>
           <option value="OUTPATIENT">外来患者</option>
+        </select>
+        <!-- ★ステータス絞り込み（通院中 / 終了・退院 / 全体） -->
+        <select id="patientStatusFilter" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; font-weight:600; background:#fff; cursor:pointer;">
+          <option value="ACTIVE" selected>● 継続（通院・入院中）</option>
+          <option value="DISCONTINUED">■ 終了・退院（中止）</option>
+          <option value="ALL">全ステータス（全件表示）</option>
         </select>
       </div>
       <button id="btnNewPatient" style="padding:8px 16px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.85rem; cursor:pointer;">＋ 新規患者登録</button>
@@ -290,13 +296,14 @@
     </div>
   </div>
 
-  <!-- モーダル 2: 患者登録・編集 -->
+  <!-- モーダル 2: 患者登録・編集（ステータス管理対応） -->
   <div id="modalPatientEdit" class="modal-overlay">
     <div class="modal-card">
       <h3 id="patientModalTitle" style="font-size:1rem; font-weight:700; margin-bottom:12px;">患者台帳</h3>
       <div id="patientPlan2Guide" style="display:none; font-size:0.75rem; color:#0369a1; background:#e0f2fe; padding:8px; border-radius:4px; margin-bottom:10px;"></div>
       <form id="patientEditForm" style="display:flex; flex-direction:column; gap:10px; font-size:0.85rem;">
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+        <!-- 患者ID・患者区分・ステータスの3列構成 -->
+        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px;">
           <div>
             <label style="font-size:0.75rem; font-weight:700; display:block;">患者ID (記号) *</label>
             <input type="text" id="patientFormId" required style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
@@ -306,6 +313,13 @@
             <select id="patientFormCategory" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
               <option value="INPATIENT">入院</option>
               <option value="OUTPATIENT">外来</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">ステータス *</label>
+            <select id="patientFormStatus" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:700; background:#f0fdf4; color:#15803d; cursor:pointer;">
+              <option value="ACTIVE" selected>● 継続</option>
+              <option value="DISCONTINUED">■ 終了・退院</option>
             </select>
           </div>
         </div>
