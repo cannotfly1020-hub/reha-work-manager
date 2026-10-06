@@ -134,9 +134,9 @@ function renderRevenueDashboard(aggregated) {
   const unitsMonthEl = document.getElementById('kpiMonthUnits');
 
   if (revTodayEl) revTodayEl.textContent = `¥${todayRevenue.toLocaleString()}`;
-  if (unitsTodayEl) unitsTodayEl.textContent = `(${todayUnits}u)`;
+  if (unitsTodayEl) unitsTodayEl.textContent = `(${todayUnits}単位)`;
   if (revMonthEl) revMonthEl.textContent = `¥${monthRevenue.toLocaleString()}`;
-  if (unitsMonthEl) unitsMonthEl.textContent = `(${monthUnits}u)`;
+  if (unitsMonthEl) unitsMonthEl.textContent = `(${monthUnits}単位)`;
 }
 
 function sortPatients(patients, sortKey) {
