@@ -1,5 +1,5 @@
 // js/views/scheduleView.js
-// VIEW 1: 当日時間割（セラピスト増減に完全追従する動的CSSグリッド対応）・コマ移動・消炎鎮痛来院・患者パレット・疾患タグ・早期期限バッジ・計画書4区分自動判定・動的セラピスト管理
+// VIEW 1: 当日時間割（動的CSSグリッド・コマ配置モーダル内リアルタイム患者検索・ドラッグ＆ドロップ・消炎鎮痛来院・動的セラピスト管理・計画書自動判定）
 
 import { TIME_SLOTS, REHA_RULES } from '../config/rules.js';
 import { sanitizeHtml, safeParseInt } from '../core/dataNormalizer.js';
@@ -156,18 +156,14 @@ function renderTimetableGrid() {
   const gridEl = document.getElementById('timetableGrid');
   if (!gridEl) return;
 
-  // 稼働中セラピストのみを取得
   const therapists = getActiveTherapists();
   const schedule = getDailySchedule(currentDateStr);
-
-  // 【レイアウト崩れ根本解決】セラピストの人数に合わせてグリッド列数を動的に自動適用
-  // 時間帯列: 88px, セラピスト各列: 均等 1fr (最低140px確保), 消炎鎮痛: 100px
   const therapistCount = therapists.length;
+
   gridEl.style.display = 'grid';
   gridEl.style.gridTemplateColumns = `88px repeat(${therapistCount}, minmax(130px, 1fr)) 100px`;
   gridEl.style.overflowX = 'auto';
 
-  // 1. ヘッダー行の描画
   let html = '<div class="timetable-header">時間帯</div>';
   therapists.forEach((t) => { html += `<div class="timetable-header">${sanitizeHtml(t.name)}</div>`; });
   html += '<div class="timetable-header" style="background:#f0fdf4; color:#166534;">消炎鎮痛</div>';
@@ -175,9 +171,7 @@ function renderTimetableGrid() {
   const coveredUntil = {};
   therapists.forEach((t) => { coveredUntil[t.id] = 0; });
 
-  // 2. 各時間帯（22コマ）のセルを描画
   TIME_SLOTS.forEach((slot, index) => {
-    // 各時間行のラッパー自身も、親グリッドと同じ列数で均等展開
     const rowGridStyle = `display:contents;`;
     html += `<div class="time-slot-row" style="${rowGridStyle}"><div class="time-col">${slot.label}</div>`;
 
@@ -300,6 +294,8 @@ function setupSlotModalListeners() {
   const btnClose = document.getElementById('btnCloseSlotModal');
   const btnDelete = document.getElementById('btnDeleteSlot');
   const form = document.getElementById('slotEditForm');
+  const patientSelect = document.getElementById('slotPatientSelect');
+  const searchInput = document.getElementById('slotPatientSearchInput');
 
   btnClose?.addEventListener('click', () => modal.classList.remove('active'));
   btnDelete?.addEventListener('click', () => {
@@ -308,6 +304,18 @@ function setupSlotModalListeners() {
     modal.classList.remove('active');
     showToast('コマの配置を解除しました', 'warn');
     renderScheduleView();
+  });
+
+  // モーダル内リアルタイム患者検索
+  searchInput?.addEventListener('input', () => {
+    populateModalPatientSelect(searchInput.value, document.getElementById('slotPatientId').value);
+  });
+
+  // モーダル内セレクトボックスから患者選択時のイベント連動
+  patientSelect?.addEventListener('change', () => {
+    const selectedId = patientSelect.value;
+    document.getElementById('slotPatientId').value = selectedId;
+    updateModalPatientPlanRecommendation(selectedId);
   });
 
   document.querySelectorAll('.btn-unit-select').forEach((b) => {
@@ -331,7 +339,7 @@ function setupSlotModalListeners() {
     const newTherapistId = document.getElementById('slotModalTherapistSelect')?.value || activeModalSlot.therapistId;
     const newSlotId = document.getElementById('slotModalSlotSelect')?.value || activeModalSlot.slotId;
 
-    if (!patientId) { showToast('患者が選択されていません', 'error'); return; }
+    if (!patientId) { showToast('患者が選択されていません。上部リストから患者を選択してください', 'error'); return; }
 
     const dailySchedule = getDailySchedule(currentDateStr);
     const origTherapist = activeModalSlot.therapistId;
@@ -382,15 +390,78 @@ function setupSlotModalListeners() {
   });
 }
 
+function populateModalPatientSelect(keyword = '', selectId = '') {
+  const patientSelect = document.getElementById('slotPatientSelect');
+  if (!patientSelect) return;
+
+  const patients = searchPatients(keyword, 'ALL');
+  if (patients.length === 0) {
+    patientSelect.innerHTML = '<option value="" disabled>該当する患者がいません</option>';
+    return;
+  }
+
+  patientSelect.innerHTML = patients.map((p) => {
+    const cat = p.category === 'INPATIENT' ? '入' : '外';
+    const isSel = p.id === selectId ? 'selected' : '';
+    return `<option value="${p.id}" ${isSel}>${p.id} : ${sanitizeHtml(p.name)} (${cat} / ${sanitizeHtml(p.diseaseName || '未記入')})</option>`;
+  }).join('');
+}
+
+function updateModalPatientPlanRecommendation(pId) {
+  const patientInfoEl = document.getElementById('slotPatientInfo');
+  const planSelect = document.getElementById('slotBillingPlanSelect');
+  const patient = pId ? getPatientById(pId) : null;
+
+  if (!patient) {
+    if (patientInfoEl) patientInfoEl.textContent = '患者が未選択です';
+    if (planSelect) { planSelect.value = ''; planSelect.disabled = true; }
+    return;
+  }
+
+  const cat = patient.category === 'INPATIENT' ? '入院' : '外来';
+  if (patientInfoEl) {
+    patientInfoEl.innerHTML = `選択中: <strong>${sanitizeHtml(patient.name)}</strong> (${patient.id}) / ${cat} / ${sanitizeHtml(patient.diseaseName || '')}`;
+  }
+
+  if (!planSelect) return;
+  const [year, month] = currentDateStr.split('-').map(Number);
+  const excludeSlot = activeModalSlot?.currentItem ? activeModalSlot.slotId : '';
+  const existingDate = findPatientMonthlyPlanDate(pId, year, month, currentDateStr, excludeSlot);
+
+  if (existingDate) {
+    planSelect.value = '';
+    planSelect.disabled = true;
+    if (patientInfoEl) {
+      patientInfoEl.innerHTML += `<div style="color:#e11d48; font-size:0.75rem; margin-top:4px; font-weight:700;">⚠ 総合計画評価料は当月 ${existingDate} に算定済みのため選択できません</div>`;
+    }
+  } else {
+    planSelect.disabled = false;
+    const rawPlan = activeModalSlot?.currentItem?.billingPlan;
+    if (rawPlan) {
+      planSelect.value = rawPlan === true ? 'PLAN_1_FIRST' : String(rawPlan);
+    } else {
+      const hasPastPlan = hasPatientPastPlan(pId, currentDateStr);
+      const recommendation = evaluateRecommendedPlan(patient, currentDateStr, hasPastPlan);
+      if (recommendation.recommendedPlan) {
+        planSelect.value = recommendation.recommendedPlan;
+        if (patientInfoEl) {
+          patientInfoEl.innerHTML += `<div style="color:#0284c7; font-size:0.75rem; margin-top:4px; font-weight:600; background:#f0f9ff; padding:3px 6px; border-radius:4px; border:1px solid #bae6fd;">💡 推奨: ${recommendation.label}</div>`;
+        }
+      } else {
+        planSelect.value = '';
+      }
+    }
+  }
+}
+
 function openSlotModal(therapistId, slotId, currentItem) {
   activeModalSlot = { therapistId, slotId, currentItem };
   const modal = document.getElementById('modalSlotEdit');
   const titleEl = document.getElementById('slotModalTitle');
-  const patientInfoEl = document.getElementById('slotPatientInfo');
   const btnDelete = document.getElementById('btnDeleteSlot');
-  const planSelect = document.getElementById('slotBillingPlanSelect');
   const therapistSelect = document.getElementById('slotModalTherapistSelect');
   const slotSelect = document.getElementById('slotModalSlotSelect');
+  const searchInput = document.getElementById('slotPatientSearchInput');
 
   const allTherapists = getAllTherapists();
   const activeTherapists = getActiveTherapists();
@@ -414,49 +485,20 @@ function openSlotModal(therapistId, slotId, currentItem) {
   }
 
   const pId = currentItem?.patientId || '';
-  const patient = pId ? getPatientById(pId) : null;
-
   document.getElementById('slotPatientId').value = pId;
   document.getElementById('slotTherapistId').value = therapistId;
   document.getElementById('slotId').value = slotId;
-  patientInfoEl.textContent = patient ? `患者: ${patient.name} (${patient.id}) / ${patient.diseaseName || ''}` : '患者が未選択です';
+
+  // モーダル内の患者候補リストを初期展開＆検索入力初期化
+  if (searchInput) searchInput.value = '';
+  populateModalPatientSelect('', pId);
+  updateModalPatientPlanRecommendation(pId);
 
   const units = currentItem?.units || 1;
   document.getElementById('slotUnitsInput').value = units;
   document.querySelectorAll('.btn-unit-select').forEach((b) => {
     b.style.background = b.dataset.unit == units ? '#e0f2fe' : '#fff';
   });
-
-  if (!planSelect) return;
-  if (!pId) {
-    planSelect.value = '';
-    planSelect.disabled = true;
-  } else {
-    const [year, month] = currentDateStr.split('-').map(Number);
-    const excludeSlot = currentItem ? slotId : '';
-    const existingDate = findPatientMonthlyPlanDate(pId, year, month, currentDateStr, excludeSlot);
-
-    if (existingDate) {
-      planSelect.value = '';
-      planSelect.disabled = true;
-      patientInfoEl.innerHTML += `<div style="color:#e11d48; font-size:0.75rem; margin-top:4px; font-weight:700;">⚠ 総合計画評価料は当月 ${existingDate} に算定済みのため選択できません</div>`;
-    } else {
-      planSelect.disabled = false;
-      const rawPlan = currentItem?.billingPlan;
-      if (rawPlan) {
-        planSelect.value = rawPlan === true ? 'PLAN_1_FIRST' : String(rawPlan);
-      } else {
-        const hasPastPlan = hasPatientPastPlan(pId, currentDateStr);
-        const recommendation = evaluateRecommendedPlan(patient, currentDateStr, hasPastPlan);
-        if (recommendation.recommendedPlan) {
-          planSelect.value = recommendation.recommendedPlan;
-          patientInfoEl.innerHTML += `<div style="color:#0284c7; font-size:0.75rem; margin-top:4px; font-weight:600; background:#f0f9ff; padding:4px 6px; border-radius:4px; border:1px solid #bae6fd;">💡 推奨自動選択: ${recommendation.label} (${recommendation.reason})</div>`;
-        } else {
-          planSelect.value = '';
-        }
-      }
-    }
-  }
 
   document.getElementById('slotNoteInput').value = currentItem?.note || '';
   modal.classList.add('active');
