@@ -1,9 +1,17 @@
 // js/store/patientStore.js
-// 患者マスターCRUD・LocalStorage永続化・計画書ステータス管理・消炎鎮痛制御層（200行制限準拠）
+// 患者マスターCRUD・LocalStorage永続化・ステータス管理(継続/終了・退院)・計画書ステータス同期・消炎鎮痛制御層（200行制限準拠）
 
 import { normalizeString, normalizePatientId, normalizeDateString } from '../core/dataNormalizer.js';
 
 const STORAGE_KEY = 'reha_patients_master';
+
+/**
+ * 患者の通院・入院ステータス定数
+ */
+export const PATIENT_STATUS = {
+  ACTIVE: 'ACTIVE',           // 通院・入院中（継続）
+  DISCONTINUED: 'DISCONTINUED' // 終了・退院（中止）
+};
 
 /**
  * 初期シードデータ（未登録時のフォールバック用サンプル）
@@ -15,9 +23,10 @@ const DEFAULT_PATIENTS = [
     nameKana: 'タナカ タロウ',
     diseaseName: '右大腿骨頸部骨折 術後',
     category: 'INPATIENT',
+    status: PATIENT_STATUS.ACTIVE,
     diseaseType: 'LOCOMOTIVE',
     careInsuranceType: 'CARE',
-    planStatus: 'PLAN_2_FOLLOW', // 計画書2 2回目以降(196点)固定サンプル
+    planStatus: 'PLAN_2_FOLLOW',
     admissionDate: '2026-09-01',
     earlyBonusStartDate: '2026-09-01',
     onsetDate: '2026-08-28',
@@ -29,6 +38,7 @@ const DEFAULT_PATIENTS = [
     nameKana: 'サトウ ハナコ',
     diseaseName: '脳梗塞後遺症（左片麻痺）',
     category: 'INPATIENT',
+    status: PATIENT_STATUS.ACTIVE,
     diseaseType: 'CEREBROVASCULAR',
     careInsuranceType: 'NONE',
     planStatus: 'NOT_YET',
@@ -43,6 +53,7 @@ const DEFAULT_PATIENTS = [
     nameKana: 'スズキ イチロウ',
     diseaseName: '腰部脊柱管狭窄症',
     category: 'OUTPATIENT',
+    status: PATIENT_STATUS.ACTIVE,
     diseaseType: 'LOCOMOTIVE',
     careInsuranceType: 'SUPPORT',
     planStatus: 'PLAN_1_FOLLOW',
@@ -57,6 +68,7 @@ const DEFAULT_PATIENTS = [
     nameKana: 'タカハシ ケンジ',
     diseaseName: '変形性膝関節症（物療）',
     category: 'OUTPATIENT',
+    status: PATIENT_STATUS.ACTIVE,
     diseaseType: 'ANALGESIA',
     careInsuranceType: 'NONE',
     planStatus: 'NOT_YET',
@@ -71,6 +83,7 @@ const DEFAULT_PATIENTS = [
     nameKana: 'イトウ サチコ',
     diseaseName: '頸椎症性神経根症（入院物療）',
     category: 'INPATIENT',
+    status: PATIENT_STATUS.ACTIVE,
     diseaseType: 'ANALGESIA',
     careInsuranceType: 'NONE',
     planStatus: 'NOT_YET',
@@ -81,7 +94,7 @@ const DEFAULT_PATIENTS = [
   }
 ];
 
-export function getAllPatients() {
+export function getAllPatients(includeDiscontinued = true) {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
@@ -89,7 +102,16 @@ export function getAllPatients() {
       return [...DEFAULT_PATIENTS];
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+
+    // 既存データに status がない場合は自動で ACTIVE（継続）を補完
+    const normalized = parsed.map((p) => ({
+      ...p,
+      status: p.status || PATIENT_STATUS.ACTIVE
+    }));
+
+    if (includeDiscontinued) return normalized;
+    return normalized.filter((p) => p.status !== PATIENT_STATUS.DISCONTINUED);
   } catch (error) {
     console.error('getAllPatients error:', error);
     return [];
@@ -99,7 +121,7 @@ export function getAllPatients() {
 export function getPatientById(id) {
   if (!id) return null;
   const targetId = normalizePatientId(id);
-  const patients = getAllPatients();
+  const patients = getAllPatients(true);
   return patients.find((p) => p.id === targetId) || null;
 }
 
@@ -128,6 +150,7 @@ export function upsertPatient(rawData) {
     nameKana: normalizeString(rawData.nameKana || ''),
     diseaseName: normalizeString(rawData.diseaseName || '未記入'),
     category: rawData.category === 'OUTPATIENT' ? 'OUTPATIENT' : 'INPATIENT',
+    status: rawData.status === PATIENT_STATUS.DISCONTINUED ? PATIENT_STATUS.DISCONTINUED : PATIENT_STATUS.ACTIVE,
     diseaseType: ['LOCOMOTIVE', 'CEREBROVASCULAR', 'DISUSE', 'ANALGESIA'].includes(rawData.diseaseType)
       ? rawData.diseaseType : 'LOCOMOTIVE',
     careInsuranceType: ['NONE', 'SUPPORT', 'CARE'].includes(rawData.careInsuranceType)
@@ -141,7 +164,7 @@ export function upsertPatient(rawData) {
     notes: normalizeString(rawData.notes || '')
   };
 
-  const list = getAllPatients();
+  const list = getAllPatients(true);
   const existingIndex = list.findIndex((p) => p.id === id);
   if (existingIndex >= 0) list[existingIndex] = cleanPatient;
   else list.push(cleanPatient);
@@ -167,7 +190,7 @@ export function updatePatientPlanStatus(patientId, planType) {
 
   if (patient.planStatus !== newStatus) {
     patient.planStatus = newStatus;
-    const list = getAllPatients();
+    const list = getAllPatients(true);
     const idx = list.findIndex((p) => p.id === patient.id);
     if (idx >= 0) {
       list[idx] = patient;
@@ -180,14 +203,19 @@ export function updatePatientPlanStatus(patientId, planType) {
 export function deletePatient(id) {
   if (!id) return false;
   const targetId = normalizePatientId(id);
-  const list = getAllPatients();
+  const list = getAllPatients(true);
   const filtered = list.filter((p) => p.id !== targetId);
   if (filtered.length === list.length) return false;
   return saveAllPatients(filtered);
 }
 
-export function searchPatients(keyword = '', category = 'ALL') {
-  let list = getAllPatients();
+export function searchPatients(keyword = '', category = 'ALL', includeDiscontinued = false) {
+  let list = getAllPatients(includeDiscontinued);
+
+  if (!includeDiscontinued) {
+    list = list.filter((p) => p.status !== PATIENT_STATUS.DISCONTINUED);
+  }
+
   if (category === 'ANALGESIA') {
     list = list.filter((p) => p.diseaseType === 'ANALGESIA');
   } else if (category && category !== 'ALL') {
