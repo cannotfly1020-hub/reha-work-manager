@@ -161,7 +161,9 @@
           </div>
           <button id="btnExportDiary" style="padding:12px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.9rem; cursor:pointer; transition:background 0.2s;" onmouseover="this.style.background='#0369a1'" onmouseout="this.style.background='#0284c7'">業務日誌Excelを出力</button>
         </div>
-      </div><!-- 3. システム全データ バックアップ & 復元 (セーフティネット) -->
+      </div>
+
+      <!-- 3. システム全データ バックアップ & 復元 (セーフティネット) -->
       <div style="margin-top:28px; border-top:1px dashed #cbd5e1; padding-top:24px;">
         <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
           <span style="font-size:1.1rem;">📦</span>
@@ -201,16 +203,32 @@
     </div>
   </section>
 
-  <!-- モーダル 1: 時間割コマ編集 -->
+  <!-- モーダル 1: 時間割コマ編集（患者リアルタイム検索・直接選択対応） -->
   <div id="modalSlotEdit" class="modal-overlay">
     <div class="modal-card">
       <h3 id="slotModalTitle" style="font-size:1rem; font-weight:700; margin-bottom:12px;">コマ配置</h3>
-      <div id="slotPatientInfo" style="font-size:0.85rem; color:#475569; margin-bottom:12px; background:#f8fafc; padding:8px; border-radius:4px;"></div>
+      
       <form id="slotEditForm" style="display:flex; flex-direction:column; gap:12px;">
         <input type="hidden" id="slotTherapistId">
         <input type="hidden" id="slotId">
         <input type="hidden" id="slotPatientId">
         <input type="hidden" id="slotUnitsInput" value="1">
+
+        <!-- ★患者選択・リアルタイム検索エリア -->
+        <div style="background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; padding:10px;">
+          <label for="slotPatientSearchInput" style="font-size:0.8rem; font-weight:800; color:#0f172a; display:block; margin-bottom:6px;">
+            👤 対象患者の選択 <span style="font-size:0.7rem; color:#64748b; font-weight:normal;">(検索または一覧から選択)</span>
+          </label>
+          <div style="display:flex; gap:6px; margin-bottom:6px;">
+            <input type="text" id="slotPatientSearchInput" placeholder="氏名またはIDで即座に絞り込み..." style="flex:1; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff;">
+          </div>
+          <select id="slotPatientSelect" size="4" style="width:100%; padding:4px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff; cursor:pointer;">
+            <!-- JSで動的に患者候補を流し込み -->
+          </select>
+        </div>
+
+        <!-- 選択中患者サマリー & 計画書レコメンド案内 -->
+        <div id="slotPatientInfo" style="font-size:0.82rem; color:#475569; background:#f8fafc; padding:8px; border-radius:4px; border:1px solid #e2e8f0;"></div>
         
         <!-- 担当セラピスト ＆ 時間帯選択 -->
         <div style="display:grid; grid-template-columns: 1fr 1.6fr; gap:8px;">
