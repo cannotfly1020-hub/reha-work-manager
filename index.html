@@ -24,6 +24,11 @@
         <button class="nav-tab" data-target="viewLoan">物品貸出</button>
         <button class="nav-tab" data-target="viewExport">Excel出力</button>
       </nav>
+      <!-- ★1箇所目：ヘッダー更新ボタン（どの画面からでもワンクリック全体更新） -->
+      <button id="btnRefreshHeader" type="button" style="display:flex; align-items:center; gap:5px; padding:6px 12px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; font-size:0.82rem; font-weight:700; color:#0369a1; cursor:pointer; transition:all 0.15s ease;" onmouseover="this.style.background='#e0f2fe'" onmouseout="this.style.background='#f8fafc'">
+        <span>🔄</span>
+        <span>最新に更新</span>
+      </button>
       <!-- スタッフ設定ボタン -->
       <button id="btnOpenStaffSettings" type="button" style="display:flex; align-items:center; gap:5px; padding:6px 12px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; font-size:0.82rem; font-weight:700; color:#334155; cursor:pointer; transition:all 0.15s ease;" onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f8fafc'">
         <span>⚙</span>
@@ -38,12 +43,20 @@
       <div style="display:flex; align-items:center; gap:8px;">
         <input type="date" id="scheduleDateInput" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.9rem;">
         <button id="btnTodaySchedule" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; cursor:pointer;">今日</button>
+        <!-- ★2箇所目：時間割専用更新ボタン（手元ですぐ最新化） -->
+        <button id="btnRefreshSchedule" type="button" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; font-weight:600; color:#0369a1; cursor:pointer; transition:background 0.15s ease;" onmouseover="this.style.background='#e0f2fe'" onmouseout="this.style.background='#f1f5f9'">🔄 更新</button>
       </div>
       <div id="dailyKpiStrip" style="display:flex; gap:16px; font-size:0.88rem; font-weight:600; background:#fff; padding:6px 16px; border-radius:6px; border:1px solid #e2e8f0;"></div>
     </div>
     <div style="display:grid; grid-template-columns: 240px 1fr; gap:16px;">
       <aside style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:8px; max-height:80vh; overflow-y:auto;">
         <input type="text" id="paletteSearch" placeholder="患者名・ID検索..." style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem;">
+        <!-- ★患者パレット並び替えドロップダウン -->
+        <select id="paletteSortSelect" style="width:100%; padding:5px 6px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.75rem; background:#fff; font-weight:600; color:#334155; cursor:pointer;">
+          <option value="CATEGORY" selected>並べ替え: 区分順 (入院→外来→消炎)</option>
+          <option value="KANA">並べ替え: 五十音順 (あいうえお)</option>
+          <option value="ID">並べ替え: 患者ID順</option>
+        </select>
         <div style="display:flex; gap:4px;">
           <button class="palette-cat-btn active" data-cat="ALL" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">全て</button>
           <button class="palette-cat-btn" data-cat="INPATIENT" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">入院</button>
@@ -75,11 +88,11 @@
             <span>本日収益見込 (単位)</span>
             <span style="font-size:0.68rem; background:#e0f2fe; color:#0369a1; padding:1px 4px; border-radius:3px; font-weight:700;">内訳🔍</span>
           </div>
-          <div style="font-size:1.1rem; font-weight:800; color:#0369a1;"><span id="kpiTodayRevenue">¥0</span> <span id="kpiTodayUnits" style="font-size:0.8rem; font-weight:600; color:#64748b;">(0u)</span></div>
+          <div style="font-size:1.1rem; font-weight:800; color:#0369a1;"><span id="kpiTodayRevenue">¥0</span> <span id="kpiTodayUnits" style="font-size:0.8rem; font-weight:600; color:#64748b;">(0単位)</span></div>
         </div>
         <div style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:8px 16px; text-align:center;">
           <div style="font-size:0.75rem; color:#64748b;">当月累計収益 (総単位)</div>
-          <div style="font-size:1.1rem; font-weight:800; color:#059669;"><span id="kpiMonthRevenue">¥0</span> <span id="kpiMonthUnits" style="font-size:0.8rem; font-weight:600; color:#64748b;">(0u)</span></div>
+          <div style="font-size:1.1rem; font-weight:800; color:#059669;"><span id="kpiMonthRevenue">¥0</span> <span id="kpiMonthUnits" style="font-size:0.8rem; font-weight:600; color:#64748b;">(0単位)</span></div>
         </div>
       </div>
     </div>
@@ -97,7 +110,7 @@
           <option value="INPATIENT">入院患者</option>
           <option value="OUTPATIENT">外来患者</option>
         </select>
-        <!-- ★ステータス絞り込み（通院中 / 終了・退院 / 全体） -->
+        <!-- ステータス絞り込み（通院中 / 終了・退院 / 全体） -->
         <select id="patientStatusFilter" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; font-weight:600; background:#fff; cursor:pointer;">
           <option value="ACTIVE" selected>● 継続（通院・入院中）</option>
           <option value="DISCONTINUED">■ 終了・退院（中止）</option>
@@ -130,7 +143,7 @@
     <div class="table-container" id="loanTableContainer"></div>
   </section>
 
-  <!-- VIEW 5: Excel出力（ファイル選択完全撤廃・1クリック快適仕様） -->
+  <!-- VIEW 5: Excel出力 & バックアップ復元 -->
   <section id="viewExport" class="view-panel">
     <div style="max-width:720px; margin:0 auto; background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:32px; box-shadow:var(--shadow-sm);">
       <h2 style="font-size:1.15rem; font-weight:800; margin-bottom:8px; color:#0f172a;">提出用Excel原本 自動生成</h2>
@@ -220,7 +233,7 @@
         <input type="hidden" id="slotPatientId">
         <input type="hidden" id="slotUnitsInput" value="1">
 
-        <!-- ★患者選択・リアルタイム検索エリア -->
+        <!-- 患者選択・リアルタイム検索エリア -->
         <div style="background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; padding:10px;">
           <label for="slotPatientSearchInput" style="font-size:0.8rem; font-weight:800; color:#0f172a; display:block; margin-bottom:6px;">
             👤 対象患者の選択 <span style="font-size:0.7rem; color:#64748b; font-weight:normal;">(検索または一覧から選択)</span>
@@ -503,7 +516,7 @@
           <tfoot>
             <tr style="background:#f8fafc; font-weight:800; border-top:2px solid #cbd5e1;">
               <td style="padding:8px 10px; text-align:left; color:#0f172a;">本日 合計見込</td>
-              <td id="breakdownTotalUnitsCell" style="padding:8px 8px; text-align:center; color:#0369a1;">0 u</td>
+              <td id="breakdownTotalUnitsCell" style="padding:8px 8px; text-align:center; color:#0369a1;">0 単位</td>
               <td style="padding:8px 8px; text-align:right; color:#64748b;">-</td>
               <td id="breakdownTotalAmountCell" style="padding:8px 10px; text-align:right; color:#059669; font-size:0.95rem;">¥0</td>
             </tr>
