@@ -15,9 +15,11 @@ import {
 import { calculatePatientDeadlines, evaluateRecommendedPlan } from '../core/deadlineCalc.js';
 import { validateTimeConflict, validateDailyLimit, validateTherapistWorkload, validateMonthlyPlanLimit } from '../core/validator.js';
 import { showToast } from './exportView.js';
+import { normalizeToKatakana } from '../core/dataNormalizer.js';
 
 let currentDateStr = new Date().toISOString().split('T')[0];
 let paletteCategory = 'ALL';
+let paletteSortKey = 'CATEGORY'; // 'CATEGORY' | 'KANA' | 'ID'
 let activeModalSlot = null;
 let activeAnalgesiaSlotId = null;
 
@@ -25,6 +27,7 @@ export function initScheduleView() {
   const dateInput = document.getElementById('scheduleDateInput');
   const btnToday = document.getElementById('btnTodaySchedule');
   const searchInput = document.getElementById('paletteSearch');
+  const sortSelect = document.getElementById('paletteSortSelect');
 
   if (dateInput) {
     dateInput.value = currentDateStr;
@@ -38,6 +41,13 @@ export function initScheduleView() {
     });
   }
   if (searchInput) searchInput.addEventListener('input', () => renderPatientPalette());
+
+  if (sortSelect) {
+    sortSelect.addEventListener('change', (e) => {
+      paletteSortKey = e.target.value;
+      renderPatientPalette();
+    });
+  }
 
   document.querySelectorAll('.palette-cat-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
@@ -60,6 +70,7 @@ export function renderScheduleView() {
 }
 
 function renderDailyKPIStrip() {
+function renderDailyKPIStrip() {
   const container = document.getElementById('dailyKpiStrip');
   if (!container) return;
   const stats = getDailyStats(currentDateStr);
@@ -72,18 +83,42 @@ function renderDailyKPIStrip() {
   `;
 }
 
+function sortPalettePatients(list, sortKey) {
+  return [...list].sort((a, b) => {
+    if (sortKey === 'KANA') {
+      const kanaA = normalizeToKatakana(a.nameKana || a.name || '');
+      const kanaB = normalizeToKatakana(b.nameKana || b.name || '');
+      return kanaA.localeCompare(kanaB, 'ja');
+    }
+    if (sortKey === 'ID') {
+      return (a.id || '').localeCompare(b.id || '', undefined, { numeric: true });
+    }
+    // デフォルト: CATEGORY (入院 → 外来 → 消炎)
+    const getCatScore = (p) => {
+      if (p.diseaseType === 'ANALGESIA') return 3;
+      if (p.category === 'INPATIENT') return 1;
+      return 2;
+    };
+    const diff = getCatScore(a) - getCatScore(b);
+    if (diff !== 0) return diff;
+    return (a.id || '').localeCompare(b.id || '', undefined, { numeric: true });
+  });
+}
+
 function renderPatientPalette() {
   const listEl = document.getElementById('palettePatientList');
   const searchInput = document.getElementById('paletteSearch');
   if (!listEl) return;
 
   const keyword = searchInput ? searchInput.value : '';
-  const patients = searchPatients(keyword, paletteCategory);
+  const rawPatients = searchPatients(keyword, paletteCategory);
 
-  if (patients.length === 0) {
+  if (rawPatients.length === 0) {
     listEl.innerHTML = '<div style="font-size:0.75rem; color:#94a3b8; text-align:center; padding:16px;">該当する患者がいません</div>';
     return;
   }
+
+  const patients = sortPalettePatients(rawPatients, paletteSortKey);
 
   listEl.innerHTML = patients.map((p) => {
     const isOut = p.category === 'OUTPATIENT';
