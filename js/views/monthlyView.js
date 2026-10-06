@@ -289,15 +289,15 @@ function renderDailyDiaryPreview(aggregated) {
       <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:10px; text-align:center;">
         <div style="background:#f8fafc; padding:8px; border-radius:6px;">
           <div style="color:#64748b; font-size:0.72rem;">当日総単位</div>
-          <div style="font-size:1.05rem; font-weight:700; color:#0369a1;">${dayData.totalUnits} u</div>
+          <div style="font-size:1.05rem; font-weight:700; color:#0369a1;">${dayData.totalUnits} 単位</div>
         </div>
         <div style="background:#f8fafc; padding:8px; border-radius:6px;">
           <div style="color:#64748b; font-size:0.72rem;">入院実施単位</div>
-          <div style="font-size:1.05rem; font-weight:700; color:#d97706;">${dayData.inpatients} u</div>
+          <div style="font-size:1.05rem; font-weight:700; color:#d97706;">${dayData.inpatients} 単位</div>
         </div>
         <div style="background:#f8fafc; padding:8px; border-radius:6px;">
           <div style="color:#64748b; font-size:0.72rem;">外来実施単位</div>
-          <div style="font-size:1.05rem; font-weight:700; color:#2563eb;">${dayData.outpatients} u</div>
+          <div style="font-size:1.05rem; font-weight:700; color:#2563eb;">${dayData.outpatients} 単位</div>
         </div>
         <div style="background:#f8fafc; padding:8px; border-radius:6px;">
           <div style="color:#64748b; font-size:0.72rem;">消炎鎮痛来院</div>
