@@ -115,9 +115,9 @@ export const REHA_RULES = {
   POINT_RATE: 10
 };
 
-// タイムテーブルスロット定義（全22コマ: 午前10コマ / 午後12コマ）
+// タイムテーブルスロット定義（全24コマ: 午前12コマ[13:00まで] / 午後12コマ）
 export const TIME_SLOTS = [
-  // 午前枠（9:00〜12:20）
+  // 午前枠（9:00〜13:00 / 12:00〜13:00枠完備）
   { id: 'am_1',  period: 'am', label: '09:00 - 09:20', start: '09:00', end: '09:20', order: 1 },
   { id: 'am_2',  period: 'am', label: '09:20 - 09:40', start: '09:20', end: '09:40', order: 2 },
   { id: 'am_3',  period: 'am', label: '09:40 - 10:00', start: '09:40', end: '10:00', order: 3 },
@@ -128,20 +128,22 @@ export const TIME_SLOTS = [
   { id: 'am_8',  period: 'am', label: '11:20 - 11:40', start: '11:20', end: '11:40', order: 8 },
   { id: 'am_9',  period: 'am', label: '11:40 - 12:00', start: '11:40', end: '12:00', order: 9 },
   { id: 'am_10', period: 'am', label: '12:00 - 12:20', start: '12:00', end: '12:20', order: 10 },
+  { id: 'am_11', period: 'am', label: '12:20 - 12:40', start: '12:20', end: '12:40', order: 11 },
+  { id: 'am_12', period: 'am', label: '12:40 - 13:00', start: '12:40', end: '13:00', order: 12 },
 
   // 午後枠（14:00〜18:00、夕方枠完備）
-  { id: 'pm_1',  period: 'pm', label: '14:00 - 14:20', start: '14:00', end: '14:20', order: 11 },
-  { id: 'pm_2',  period: 'pm', label: '14:20 - 14:40', start: '14:20', end: '14:40', order: 12 },
-  { id: 'pm_3',  period: 'pm', label: '14:40 - 15:00', start: '14:40', end: '15:00', order: 13 },
-  { id: 'pm_4',  period: 'pm', label: '15:00 - 15:20', start: '15:00', end: '15:20', order: 14 },
-  { id: 'pm_5',  period: 'pm', label: '15:20 - 15:40', start: '15:20', end: '15:40', order: 15 },
-  { id: 'pm_6',  period: 'pm', label: '15:40 - 16:00', start: '15:40', end: '16:00', order: 16 },
-  { id: 'pm_7',  period: 'pm', label: '16:00 - 16:20', start: '16:00', end: '16:20', order: 17 },
-  { id: 'pm_8',  period: 'pm', label: '16:20 - 16:40', start: '16:20', end: '16:40', order: 18 },
-  { id: 'pm_9',  period: 'pm', label: '16:40 - 17:00', start: '16:40', end: '17:00', order: 19 },
-  { id: 'pm_10', period: 'pm', label: '17:00 - 17:20', start: '17:00', end: '17:20', order: 20 },
-  { id: 'pm_11', period: 'pm', label: '17:20 - 17:40', start: '17:20', end: '17:40', order: 21 },
-  { id: 'pm_12', period: 'pm', label: '17:40 - 18:00', start: '17:40', end: '18:00', order: 22 }
+  { id: 'pm_1',  period: 'pm', label: '14:00 - 14:20', start: '14:00', end: '14:20', order: 13 },
+  { id: 'pm_2',  period: 'pm', label: '14:20 - 14:40', start: '14:20', end: '14:40', order: 14 },
+  { id: 'pm_3',  period: 'pm', label: '14:40 - 15:00', start: '14:40', end: '15:00', order: 15 },
+  { id: 'pm_4',  period: 'pm', label: '15:00 - 15:20', start: '15:00', end: '15:20', order: 16 },
+  { id: 'pm_5',  period: 'pm', label: '15:20 - 15:40', start: '15:20', end: '15:40', order: 17 },
+  { id: 'pm_6',  period: 'pm', label: '15:40 - 16:00', start: '15:40', end: '16:00', order: 18 },
+  { id: 'pm_7',  period: 'pm', label: '16:00 - 16:20', start: '16:00', end: '16:20', order: 19 },
+  { id: 'pm_8',  period: 'pm', label: '16:20 - 16:40', start: '16:20', end: '16:40', order: 20 },
+  { id: 'pm_9',  period: 'pm', label: '16:40 - 17:00', start: '16:40', end: '17:00', order: 21 },
+  { id: 'pm_10', period: 'pm', label: '17:00 - 17:20', start: '17:00', end: '17:20', order: 22 },
+  { id: 'pm_11', period: 'pm', label: '17:20 - 17:40', start: '17:20', end: '17:40', order: 23 },
+  { id: 'pm_12', period: 'pm', label: '17:40 - 18:00', start: '17:40', end: '18:00', order: 24 }
 ];
 
 // 対象セラピストリスト定義
