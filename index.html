@@ -192,23 +192,40 @@
           患者台帳・時間割・スタッフ設定・物品貸出などの全データを1つのファイルとしてPCに保存、または過去のバックアップから完全復元できます。
         </p>
 
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; background:#f8fafc; padding:16px; border-radius:8px; border:1px solid #e2e8f0;">
-          <!-- バックアップ保存 -->
-          <div style="display:flex; flex-direction:column; justify-content:space-between;">
-            <div>
-              <div style="font-weight:700; font-size:0.82rem; color:#334155; margin-bottom:4px;">全データをPCへ保存</div>
-              <div style="font-size:0.72rem; color:#64748b; margin-bottom:10px;">現在の全データを日付付きJSONファイルとしてダウンロードします。</div>
+        <div style="display:grid; grid-template-columns: 1.1fr 0.9fr; gap:16px; background:#f8fafc; padding:16px; border-radius:8px; border:1px solid #e2e8f0;">
+          <!-- バックアップ保存エリア（日常随時 ＆ 5/31年度確定） -->
+          <div style="display:flex; flex-direction:column; gap:12px;">
+            <!-- 通常バックアップ -->
+            <div style="background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div style="font-weight:700; font-size:0.82rem; color:#334155;">全データをPCへ保存 (随時)</div>
+                <div style="font-size:0.7rem; color:#64748b;">PC移行や大型点検時にいつでも保存できます。</div>
+              </div>
+              <button id="btnBackupDownload" type="button" style="padding:7px 12px; background:#334155; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer; white-space:nowrap; transition:background 0.15s ease;" onmouseover="this.style.background='#1e293b'" onmouseout="this.style.background='#334155'">
+                📦 保存
+              </button>
             </div>
-            <button id="btnBackupDownload" type="button" style="padding:9px 12px; background:#334155; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.82rem; cursor:pointer; transition:background 0.15s ease;" onmouseover="this.style.background='#1e293b'" onmouseout="this.style.background='#334155'">
-              📦 バックアップファイルを保存
-            </button>
+
+            <!-- ★5/31年度確定バックアップ -->
+            <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div style="font-weight:700; font-size:0.82rem; color:#166534; display:flex; align-items:center; gap:4px;">
+                  <span>🏛 5/31 年度確定バックアップ</span>
+                  <span style="font-size:0.65rem; background:#dcfce7; color:#15803d; padding:1px 4px; border-radius:3px; border:1px solid #86efac;">年1回</span>
+                </div>
+                <div style="font-size:0.7rem; color:#15803d;">診療報酬改定(6/1)前の旧点数データを冷凍保存します。</div>
+              </div>
+              <button id="btnFiscalYearBackup" type="button" style="padding:7px 12px; background:#16a34a; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer; white-space:nowrap; transition:background 0.15s ease;" onmouseover="this.style.background='#15803d'" onmouseout="this.style.background='#16a34a'">
+                🏛 確定保存
+              </button>
+            </div>
           </div>
 
           <!-- バックアップ復元 -->
           <div style="display:flex; flex-direction:column; justify-content:space-between; border-left:1px solid #e2e8f0; padding-left:16px;">
             <div>
               <div style="font-weight:700; font-size:0.82rem; color:#334155; margin-bottom:4px;">ファイルから復元</div>
-              <div style="font-size:0.72rem; color:#64748b; margin-bottom:10px;">保存したJSONファイルを選択し、データを復元します（上書き）。</div>
+              <div style="font-size:0.72rem; color:#64748b; margin-bottom:10px;">保存したJSONファイル（通常バックアップまたは年度確定ファイル）を選択し、データを復元します（上書き）。</div>
             </div>
             <div style="display:flex; gap:6px;">
               <input type="file" id="backupFileInput" accept=".json" style="display:none;">
