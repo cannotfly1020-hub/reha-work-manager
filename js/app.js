@@ -1,11 +1,11 @@
 // js/app.js
-// 全体初期化・タブ切替ルーティング・全体再描画司令塔（50行以下制限準拠）
+// 全体初期化・タブ切替自動再同期・ヘッダー＆時間割更新ボタン連動・全体再描画司令塔
 
 import { initScheduleView, renderScheduleView } from './views/scheduleView.js';
 import { initMonthlyView, renderMonthlyView } from './views/monthlyView.js';
 import { initPatientView, renderPatientView } from './views/patientView.js';
 import { initLoanView, renderLoanView } from './views/loanView.js';
-import { initExportView } from './views/exportView.js';
+import { initExportView, showToast } from './views/exportView.js';
 
 document.addEventListener('DOMContentLoaded', () => {
   initScheduleView();
@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initLoanView();
   initExportView();
   initNavigationTabs();
+  initRefreshButtons();
 
   renderAllViews();
 });
@@ -35,7 +36,24 @@ function initNavigationTabs() {
       panels.forEach((p) => p.classList.remove('active'));
       tab.classList.add('active');
       const targetPanel = document.getElementById(tab.dataset.target);
-      if (targetPanel) targetPanel.classList.add('active');
+      if (targetPanel) {
+        targetPanel.classList.add('active');
+        // ★タブ切り替え時に全ビューを自動再同期・最新化（他画面の変更が即座に反映されます）
+        renderAllViews();
+      }
     });
   });
+}
+
+function initRefreshButtons() {
+  const btnHeader = document.getElementById('btnRefreshHeader');
+  const btnSchedule = document.getElementById('btnRefreshSchedule');
+
+  const handleRefresh = (sourceLabel) => {
+    renderAllViews();
+    showToast('🔄 画面表示と集計データを最新化しました', 'success');
+  };
+
+  btnHeader?.addEventListener('click', () => handleRefresh('header'));
+  btnSchedule?.addEventListener('click', () => handleRefresh('schedule'));
 }
