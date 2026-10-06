@@ -1,6 +1,6 @@
 // js/core/validator.js
-// 13単位制限・1日上限・人員基準・重複予約・計画書月1回算定の5重バリデーションガード
-// DOM・Storageに非依存の純粋検証ロジック（200行制限準拠）
+// 13単位制限・1日上限・人員基準・重複予約・計画書月1回算定の多重バリデーションガード
+// DOM・Storageに非依存の純粋検証ロジック（200行制限準拠・18単位警告撤廃・週108単位超過判定対応版）
 
 import { REHA_RULES, TIME_SLOTS } from '../config/rules.js';
 import { getDiffDays } from './deadlineCalc.js';
@@ -141,7 +141,7 @@ export function validateMonthlyPlanLimit(billingPlan, existingPlanDate) {
 
 /**
  * 5. セラピスト人員基準ガード
- * 1日標準18単位、最大特例24単位（24超は完全遮断）、週108単位
+ * 1日最大特例24単位（24超は完全遮断）、週108単位超過警告（18単位警告は撤廃）
  */
 export function validateTherapistWorkload(dailySchedule, therapistId, newUnits, currentSlotUnits = 0, weeklyTotalBefore = 0) {
   let therapistDaily = 0;
@@ -153,6 +153,7 @@ export function validateTherapistWorkload(dailySchedule, therapistId, newUnits, 
   const nextDaily = therapistDaily - currentSlotUnits + newUnits;
   const nextWeekly = weeklyTotalBefore - currentSlotUnits + newUnits;
 
+  // 1日特例上限（24単位）を超過した場合は物理的に遮断
   if (nextDaily > REHA_RULES.LIMITS.THERAPIST_DAILY_MAX) {
     return {
       valid: false,
@@ -161,6 +162,7 @@ export function validateTherapistWorkload(dailySchedule, therapistId, newUnits, 
     };
   }
 
+  // 週累計が108単位を超過した場合のみ警告ポップアップを出す
   if (nextWeekly > REHA_RULES.LIMITS.THERAPIST_WEEKLY_MAX) {
     return {
       valid: true,
@@ -169,13 +171,7 @@ export function validateTherapistWorkload(dailySchedule, therapistId, newUnits, 
     };
   }
 
-  if (nextDaily > REHA_RULES.LIMITS.THERAPIST_DAILY_STANDARD) {
-    return {
-      valid: true,
-      level: 'WARN',
-      message: `セラピスト(${therapistId})の1日標準単位（${REHA_RULES.LIMITS.THERAPIST_DAILY_STANDARD}単位）を超過しています。（変更後: ${nextDaily}単位）`
-    };
-  }
+  // ★18単位超過での警告（ポップアップ）は不要のため完全撤廃
 
   return { valid: true, level: 'OK', message: '' };
 }
