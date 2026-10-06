@@ -1,9 +1,11 @@
 // js/views/patientView.js
-// VIEW 3: 患者台帳・算定期限管理・計画書2行表示・患者登録編集モーダル制御層（200行制限準拠）
+// VIEW 3: 患者台帳・算定期限管理・計画書2行表示・通院中/終了ステータス管理・患者登録編集モーダル制御層（200行制限準拠）
 
 import { sanitizeHtml } from '../core/dataNormalizer.js';
 import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
-import { getPatientById, upsertPatient, deletePatient, searchPatients } from '../store/patientStore.js';
+import {
+  getPatientById, upsertPatient, deletePatient, searchPatients, PATIENT_STATUS
+} from '../store/patientStore.js';
 import { showToast } from './exportView.js';
 
 let editingPatientId = null;
@@ -11,10 +13,12 @@ let editingPatientId = null;
 export function initPatientView() {
   const searchInput = document.getElementById('patientSearchInput');
   const catFilter = document.getElementById('patientCategoryFilter');
+  const statusFilter = document.getElementById('patientStatusFilter');
   const btnNew = document.getElementById('btnNewPatient');
 
   searchInput?.addEventListener('input', () => renderPatientView());
   catFilter?.addEventListener('change', () => renderPatientView());
+  statusFilter?.addEventListener('change', () => renderPatientView());
   btnNew?.addEventListener('click', () => openPatientModal(null));
 
   setupPatientModalListeners();
@@ -48,7 +52,17 @@ export function renderPatientView() {
 
   const keyword = document.getElementById('patientSearchInput')?.value || '';
   const category = document.getElementById('patientCategoryFilter')?.value || 'ALL';
-  const patients = searchPatients(keyword, category);
+  const statusFilter = document.getElementById('patientStatusFilter')?.value || 'ACTIVE';
+
+  // 終了患者も含めて検索し、ステータス条件で精密に絞り込み
+  const includeDiscontinued = statusFilter !== 'ACTIVE';
+  let patients = searchPatients(keyword, category, includeDiscontinued);
+
+  if (statusFilter === 'ACTIVE') {
+    patients = patients.filter((p) => p.status !== PATIENT_STATUS.DISCONTINUED);
+  } else if (statusFilter === 'DISCONTINUED') {
+    patients = patients.filter((p) => p.status === PATIENT_STATUS.DISCONTINUED);
+  }
 
   if (patients.length === 0) {
     container.innerHTML = '<div style="padding:32px; text-align:center; color:#94a3b8; font-size:0.85rem;">該当する患者データがありません</div>';
@@ -59,6 +73,7 @@ export function renderPatientView() {
     <table class="modern-table" style="width:100%; table-layout:auto; font-size:0.78rem;">
       <thead>
         <tr>
+          <th style="padding:6px 6px; text-align:center; width:64px;">状態</th>
           <th style="padding:6px 6px;">ID</th>
           <th style="padding:6px 8px;">患者氏名</th>
           <th style="padding:6px 6px;">疾患名</th>
@@ -80,6 +95,12 @@ export function renderPatientView() {
   patients.forEach((p) => {
     const dl = calculatePatientDeadlines(p, today);
     const isOut = p.category === 'OUTPATIENT';
+    const isDiscontinued = p.status === PATIENT_STATUS.DISCONTINUED;
+
+    const statusBadge = isDiscontinued
+      ? '<span style="background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1; padding:2px 5px; border-radius:3px; font-weight:700; font-size:0.68rem;">■ 終了</span>'
+      : '<span style="background:#dcfce7; color:#15803d; border:1px solid #86efac; padding:2px 5px; border-radius:3px; font-weight:700; font-size:0.68rem;">● 継続</span>';
+
     const catBadge = isOut ? '<span style="color:#2563eb; font-weight:700;">外</span>' : '<span style="color:#d97706; font-weight:700;">入</span>';
 
     let earlyBadge = '<span style="color:#94a3b8;">-</span>';
@@ -102,8 +123,11 @@ export function renderPatientView() {
     if (p.careInsuranceType === 'CARE') careDisplay = '<span style="color:#7c3aed; font-weight:700;">要介護</span>';
     else if (p.careInsuranceType === 'SUPPORT') careDisplay = '<span style="color:#059669; font-weight:700;">要支援</span>';
 
+    const rowStyle = isDiscontinued ? 'opacity:0.68; background:#f8fafc;' : '';
+
     html += `
-      <tr>
+      <tr style="${rowStyle}">
+        <td style="padding:6px 6px; text-align:center;">${statusBadge}</td>
         <td style="padding:6px 6px;"><strong>${p.id}</strong></td>
         <td style="padding:6px 8px; white-space:nowrap;"><strong>${sanitizeHtml(p.name)}</strong><br><span style="font-size:0.68rem; color:#64748b;">${sanitizeHtml(p.nameKana || '')}</span></td>
         <td style="padding:6px 6px; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${sanitizeHtml(p.diseaseName || '')}">${sanitizeHtml(p.diseaseName || '-')}</td>
@@ -134,6 +158,7 @@ function setupPatientModalListeners() {
   const btnClose = document.getElementById('btnClosePatientModal');
   const btnDelete = document.getElementById('btnDeletePatient');
   const form = document.getElementById('patientEditForm');
+  const statusSelect = document.getElementById('patientFormStatus');
 
   btnClose?.addEventListener('click', () => modal.classList.remove('active'));
 
@@ -143,6 +168,10 @@ function setupPatientModalListeners() {
     modal.classList.remove('active');
     showToast('患者レコードを削除しました', 'warn');
     renderPatientView();
+  });
+
+  statusSelect?.addEventListener('change', (e) => {
+    syncStatusSelectStyle(e.target);
   });
 
   ['patientFormCareType', 'patientFormDiseaseType', 'patientFormAdmissionDate', 'patientFormOnsetDate'].forEach((id) => {
@@ -157,6 +186,7 @@ function setupPatientModalListeners() {
       nameKana: document.getElementById('patientFormKana').value,
       diseaseName: document.getElementById('patientFormDiseaseName').value,
       category: document.getElementById('patientFormCategory').value,
+      status: document.getElementById('patientFormStatus')?.value || PATIENT_STATUS.ACTIVE,
       diseaseType: document.getElementById('patientFormDiseaseType').value,
       careInsuranceType: document.getElementById('patientFormCareType').value,
       planStatus: document.getElementById('patientFormPlanStatus')?.value || 'NOT_YET',
@@ -179,12 +209,20 @@ function setupPatientModalListeners() {
   });
 }
 
+function syncStatusSelectStyle(selectEl) {
+  if (!selectEl) return;
+  const isDisc = selectEl.value === PATIENT_STATUS.DISCONTINUED;
+  selectEl.style.background = isDisc ? '#f1f5f9' : '#f0fdf4';
+  selectEl.style.color = isDisc ? '#64748b' : '#15803d';
+}
+
 function openPatientModal(patientId) {
   editingPatientId = patientId;
   const modal = document.getElementById('modalPatientEdit');
   const titleEl = document.getElementById('patientModalTitle');
   const btnDelete = document.getElementById('btnDeletePatient');
   const idInput = document.getElementById('patientFormId');
+  const statusSelect = document.getElementById('patientFormStatus');
 
   titleEl.textContent = patientId ? `患者台帳編集 (${patientId})` : '新規患者登録';
   btnDelete.style.display = patientId ? 'block' : 'none';
@@ -196,6 +234,12 @@ function openPatientModal(patientId) {
   document.getElementById('patientFormKana').value = p ? (p.nameKana || '') : '';
   document.getElementById('patientFormDiseaseName').value = p ? (p.diseaseName || '') : '';
   document.getElementById('patientFormCategory').value = p ? p.category : 'INPATIENT';
+
+  if (statusSelect) {
+    statusSelect.value = p ? (p.status || PATIENT_STATUS.ACTIVE) : PATIENT_STATUS.ACTIVE;
+    syncStatusSelectStyle(statusSelect);
+  }
+
   document.getElementById('patientFormDiseaseType').value = p ? p.diseaseType : 'LOCOMOTIVE';
   document.getElementById('patientFormCareType').value = p ? p.careInsuranceType : 'NONE';
   
