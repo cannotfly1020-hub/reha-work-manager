@@ -1,9 +1,10 @@
 // js/excel/diaryWriter.js
-// 業務日誌Excel生成層（原本R8.6準拠 / 検印欄 / 時間割撤廃 / セラピスト増員動的対応 / 入外別実績 / 担当別実績 / A4横1枚収容 / 200行制限準拠）
+// 業務日誌Excel生成層（原本R8.6準拠 / 検印欄 / 動的スタッフ名完全反映 / セラピスト増員対応 / 入外別実績 / 担当別実績 / A4横1枚収容 / 200行制限準拠）
 
-import { THERAPISTS, REHA_RULES } from '../config/rules.js';
+import { REHA_RULES } from '../config/rules.js';
 import { getDailySchedule } from '../store/scheduleStore.js';
 import { getPatientById } from '../store/patientStore.js';
+import { getAllTherapists, THERAPIST_STATUS } from '../store/therapistStore.js';
 
 const STYLES = {
   headerNavy: {
@@ -46,6 +47,10 @@ export function generateDiaryWorkbook(aggregated) {
   const wb = window.XLSX.utils.book_new();
   const { year, month, daysInMonth } = aggregated;
 
+  // ★設定された最新のセラピストリスト（稼働中・休職中を含む）を動的に取得
+  const allTherapists = getAllTherapists();
+  const activeStaffList = allTherapists.filter((t) => t.status !== THERAPIST_STATUS.RETIRED);
+
   for (let day = 1; day <= daysInMonth; day++) {
     const ws = {};
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -68,10 +73,10 @@ export function generateDiaryWorkbook(aggregated) {
       setStyledCell(ws, 1, c, '', { border: thinBorder(), alignment: { horizontal: 'center', vertical: 'center' } });
     });
 
-    // 2. データ集計（セラピスト増員に自動対応する動的マップ）
+    // 2. データ集計（最新セラピスト設定に自動連動する動的マップ）
     const schedule = getDailySchedule(dateStr);
     const ptStats = {};
-    THERAPISTS.forEach((t) => {
+    activeStaffList.forEach((t) => {
       ptStats[t.id] = { name: t.name, units: 0, pSet: new Set() };
     });
 
@@ -81,7 +86,7 @@ export function generateDiaryWorkbook(aggregated) {
     };
     let planCount = 0;
 
-    THERAPISTS.forEach((t) => {
+    activeStaffList.forEach((t) => {
       const slots = schedule[t.id] || {};
       Object.values(slots).forEach((item) => {
         if (item?.patientId) {
@@ -103,13 +108,13 @@ export function generateDiaryWorkbook(aggregated) {
       });
     });
 
-    // 3. 左側上部：勤務状況・出勤確認（セラピスト増員に応じて自動伸縮）
+    // 3. 左側上部：勤務状況・出勤確認（最新セラピスト氏名を完全反映）
     setStyledCell(ws, 3, 0, '職種 / 担当', STYLES.headerNavy);
     setStyledCell(ws, 3, 1, '出欠・勤務区分', STYLES.headerNavy);
     setStyledCell(ws, 3, 2, '備考', STYLES.headerNavy);
 
     let curLeftRow = 4;
-    THERAPISTS.forEach((t) => {
+    activeStaffList.forEach((t) => {
       const isWorking = ptStats[t.id]?.units > 0;
       setStyledCell(ws, curLeftRow, 0, t.name, STYLES.cellLabel);
       setStyledCell(ws, curLeftRow, 1, isWorking ? '出勤' : '公休 / -', STYLES.cellCenter);
@@ -124,14 +129,14 @@ export function generateDiaryWorkbook(aggregated) {
       curLeftRow++;
     });
 
-    // 4. 左側下部：担当セラピスト別実績（増員時も自動展開）
+    // 4. 左側下部：担当セラピスト別実績（最新セラピスト氏名で自動印字）
     curLeftRow++;
     setStyledCell(ws, curLeftRow, 0, '担当セラピスト', STYLES.headerNavy);
     setStyledCell(ws, curLeftRow, 1, '実施単位', STYLES.headerNavy);
     setStyledCell(ws, curLeftRow, 2, '実施患者数', STYLES.headerNavy);
     curLeftRow++;
 
-    THERAPISTS.forEach((t) => {
+    activeStaffList.forEach((t) => {
       const stats = ptStats[t.id] || { units: 0, pSet: new Set() };
       setStyledCell(ws, curLeftRow, 0, t.name, STYLES.cellLabel);
       setStyledCell(ws, curLeftRow, 1, `${stats.units} 単位`, STYLES.cellVal);
@@ -191,7 +196,7 @@ export function generateDiaryWorkbook(aggregated) {
       }
     }
 
-    // 7. 列幅設定（時間割撤廃に伴う8列バランス調整）
+    // 7. 列幅設定（8列バランス調整）
     setSheetCols(ws, [18, 13, 12, 2, 20, 11, 11, 16]);
 
     applyA4LandscapePrintSetup(ws);
