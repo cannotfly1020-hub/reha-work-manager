@@ -1,5 +1,5 @@
 // js/excel/uketsukeWriter.js
-// 受付提出用Excel生成層（重複宣言解消 / 氏名100px / 区分頭文字「運脳廃消」/ 早期加算単位数表示 / 基本列限定オートフィルター / A4横1枚収容）
+// 受付提出用Excel生成層（同一ID月内複数回往復・消炎鎮痛/疾患別リハ完全自動分離対応 / 氏名100px / 区分頭文字「運脳廃消」/ 早期加算単位数表示 / 基本列限定オートフィルター / A4横1枚収容完全版）
 
 import { REHA_RULES } from '../config/rules.js';
 import { evaluateEarlyBonusPhase } from '../core/deadlineCalc.js';
@@ -121,8 +121,11 @@ function writeExecutiveSummarySheet(wb, aggregated) {
       }
     });
 
-    if (p.diseaseType !== 'ANALGESIA') {
-      if (diseaseStats[p.diseaseType] !== undefined) diseaseStats[p.diseaseType] += item.totalUnits;
+    // 個別リハビリ単位数の集計（マスター病名に関わらず、純粋な個別リハ単位 rehaTotalUnits を最優先集計）
+    const rehaUnits = item.rehaTotalUnits !== undefined ? item.rehaTotalUnits : (p.diseaseType !== 'ANALGESIA' ? item.totalUnits : 0);
+    if (rehaUnits > 0) {
+      const dType = (p.diseaseType && p.diseaseType !== 'ANALGESIA') ? p.diseaseType : 'LOCOMOTIVE';
+      if (diseaseStats[dType] !== undefined) diseaseStats[dType] += rehaUnits;
     }
   });
 
@@ -218,8 +221,12 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
     setStyledCell(ws, 1, extraCol, '計画日', STYLES.headerNavy);
   }
 
+  // マスター病名に関わらず、月内に「個別リハビリ実績（rehaTotalUnits > 0）」がある患者を漏れなく抽出
   const patients = Object.values(patientMap)
-    .filter((item) => item.patient.category === category && item.patient.diseaseType !== 'ANALGESIA' && item.totalUnits > 0)
+    .filter((item) => {
+      const rehaUnits = item.rehaTotalUnits !== undefined ? item.rehaTotalUnits : (item.patient.diseaseType !== 'ANALGESIA' ? item.totalUnits : 0);
+      return item.patient.category === category && rehaUnits > 0;
+    })
     .sort((a, b) => a.patient.id.localeCompare(b.patient.id, 'ja', { numeric: true }));
 
   let curRow = 2;
@@ -254,12 +261,16 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
       }
     });
 
+    // 疾患区分頭文字（マスターが消炎の場合でも個別枠実施時は「運」等として出力）
+    const displayDisType = (p.diseaseType && p.diseaseType !== 'ANALGESIA') ? p.diseaseType : 'LOCOMOTIVE';
+    const totalRehaUnits = item.rehaTotalUnits !== undefined ? item.rehaTotalUnits : item.totalUnits;
+
     setStyledCell(ws, curRow, 0, p.id, { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true } });
     setStyledCell(ws, curRow, 1, p.name, { ...STYLES.cellNormal, fill: zebraBg, font: { bold: true } });
-    setStyledCell(ws, curRow, 2, getDiseaseInitial(p.diseaseType), { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true } });
+    setStyledCell(ws, curRow, 2, getDiseaseInitial(displayDisType), { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true } });
     setStyledCell(ws, curRow, 3, p.careInsuranceType === 'CARE' ? '介護' : (p.careInsuranceType === 'SUPPORT' ? '支援' : '-'), { ...STYLES.cellCenter, fill: zebraBg });
     
-    setStyledCell(ws, curRow, 4, item.totalUnits, {
+    setStyledCell(ws, curRow, 4, totalRehaUnits, {
       ...STYLES.cellCenter,
       fill: { fgColor: { rgb: 'E0F2FE' } },
       font: { name: 'Meiryo UI', sz: 8.5, bold: true, color: { rgb: '0369A1' } },
@@ -270,7 +281,8 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
       const dateObj = new Date(year, month - 1, d);
       const dayOfWeek = dateObj.getDay();
       const col = dayColStart + (d - 1);
-      const u = item.dailyUnits[d] || 0;
+      // 日別個別リハ単位数を正確に出力（消炎鎮痛来院日は 0 または空欄となり混入を完全遮断）
+      const u = item.dailyRehaUnits ? (item.dailyRehaUnits[d] || 0) : (item.dailyUnits[d] || 0);
       const isPlanDay = planDatesSet.has(d);
       const isEarly1Day = early1DatesSet.has(d);
       const isEarly2Day = early2DatesSet.has(d);
@@ -327,9 +339,8 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
   ws['!cols'] = colProps;
 
   // オートフィルターを「患者ID」「患者氏名」「区分」「介護」（col 0〜3）のみに限定
-  // 総単位、日付、早期加算、計画日には▼マークを表示しない
   ws['!autofilter'] = {
-    ref: window.XLSX.utils.encode_range({ r: 1, c: 0 }, { r: curRow - 1, c: 3 })
+    ref: window.XLSX.utils.encode_range({ r: 1, c: 0 }, { r: Math.max(1, curRow - 1), c: 3 })
   };
 
   ws['!freeze'] = { xSplit: 'E', ySplit: '2', topLeftCell: 'F3', activePane: 'bottomRight', state: 'frozen' };
@@ -371,8 +382,12 @@ function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
   const extraCol = dayColStart + daysInMonth;
   setStyledCell(ws, 1, extraCol, '備考', STYLES.headerNavy);
 
+  // 月内に消炎鎮痛の来院事実がある患者を確実に抽出（病名が運動器に変更されていても漏らさず抽出）
   const analgesiaPatients = Object.values(patientMap)
-    .filter((item) => item.patient.diseaseType === 'ANALGESIA' || item.slots.some((s) => s.isAnalgesia))
+    .filter((item) => {
+      const anaDays = item.totalAnalgesiaDays !== undefined ? item.totalAnalgesiaDays : (item.slots ? item.slots.filter((s) => s.isAnalgesia).length : 0);
+      return anaDays > 0 || (item.patient.diseaseType === 'ANALGESIA' && item.totalUnits > 0);
+    })
     .sort((a, b) => a.patient.id.localeCompare(b.patient.id, 'ja', { numeric: true }));
 
   let curRow = 2;
@@ -381,18 +396,24 @@ function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
     const zebraBg = (pIdx % 2 === 1) ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } };
 
     const analgesiaDaysSet = new Set();
-    item.slots.forEach((s) => {
-      if (s.isAnalgesia && s.date) analgesiaDaysSet.add(parseInt(s.date.split('-')[2], 10));
-    });
-
-    if (p.diseaseType === 'ANALGESIA' && analgesiaDaysSet.size === 0) {
+    if (item.dailyAnalgesia) {
+      for (let d = 1; d <= daysInMonth; d++) {
+        if (item.dailyAnalgesia[d] > 0) analgesiaDaysSet.add(d);
+      }
+    }
+    if (analgesiaDaysSet.size === 0 && item.slots) {
+      item.slots.forEach((s) => {
+        if (s.isAnalgesia && s.date) analgesiaDaysSet.add(parseInt(s.date.split('-')[2], 10));
+      });
+    }
+    if (analgesiaDaysSet.size === 0 && p.diseaseType === 'ANALGESIA') {
       for (let d = 1; d <= daysInMonth; d++) {
         if (item.dailyUnits[d] > 0) analgesiaDaysSet.add(d);
       }
     }
 
     const catLabel = p.category === 'INPATIENT' ? '入' : '外';
-    const totalDays = analgesiaDaysSet.size;
+    const totalDays = item.totalAnalgesiaDays !== undefined && item.totalAnalgesiaDays > 0 ? item.totalAnalgesiaDays : analgesiaDaysSet.size;
     const totalPoints = totalDays * 35;
 
     setStyledCell(ws, curRow, 0, p.id, { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true } });
@@ -450,7 +471,7 @@ function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
 
   // 消炎鎮痛シートも基本列（col 0〜3: ID、氏名、区分、疾患名）のみにオートフィルターを限定
   ws['!autofilter'] = {
-    ref: window.XLSX.utils.encode_range({ r: 1, c: 0 }, { r: curRow - 1, c: 3 })
+    ref: window.XLSX.utils.encode_range({ r: 1, c: 0 }, { r: Math.max(1, curRow - 1), c: 3 })
   };
 
   ws['!freeze'] = { xSplit: 'F', ySplit: '2', topLeftCell: 'G3', activePane: 'bottomRight', state: 'frozen' };
