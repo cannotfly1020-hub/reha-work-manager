@@ -70,7 +70,6 @@ export function renderScheduleView() {
 }
 
 function renderDailyKPIStrip() {
-function renderDailyKPIStrip() {
   const container = document.getElementById('dailyKpiStrip');
   if (!container) return;
   const stats = getDailyStats(currentDateStr);
