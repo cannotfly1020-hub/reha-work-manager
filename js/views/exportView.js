@@ -1,16 +1,11 @@
 // js/views/exportView.js
-// VIEW 5: 月末Excel原本出力アクション制御・全データバックアップ＆復元(JSON)・トースト通知管理層（200行制限準拠）
+// VIEW 5: 月末Excel原本出力・全データバックアップ＆復元・日次14日ローテーション自動保存・5/31年度確定バックアップ対応層（200行制限準拠）
 
 import { safeParseInt } from '../core/dataNormalizer.js';
 import { aggregateFromAppSchedule } from '../store/scheduleStore.js';
 import { generateUketsukeWorkbook } from '../excel/uketsukeWriter.js';
 import { generateDiaryWorkbook } from '../excel/diaryWriter.js';
 
-/**
- * トースト通知を表示する（3.5秒で自動フェードアウト）
- * @param {string} message 
- * @param {'info'|'success'|'warn'|'error'} type 
- */
 export function showToast(message, type = 'info') {
   let container = document.getElementById('toastContainer');
   if (!container) {
@@ -23,7 +18,6 @@ export function showToast(message, type = 'info') {
   const toast = document.createElement('div');
   toast.className = `toast-item ${type}`;
   toast.textContent = message;
-
   container.appendChild(toast);
 
   setTimeout(() => {
@@ -39,7 +33,6 @@ export function initExportView() {
   const btnUketsuke = document.getElementById('btnExportUketsuke');
   const btnDiary = document.getElementById('btnExportDiary');
 
-  // 初期年月設定（当月 YYYY-MM）
   if (monthInput && !monthInput.value) {
     const today = new Date();
     const y = today.getFullYear();
@@ -47,37 +40,24 @@ export function initExportView() {
     monthInput.value = `${y}-${m}`;
   }
 
-  // 1. 受付提出用Excel出力ボタン（テンプレート選択完全撤廃・ワンクリック生成）
-  btnUketsuke?.addEventListener('click', () => {
-    handleExportUketsuke(monthInput);
-  });
+  btnUketsuke?.addEventListener('click', () => handleExportUketsuke(monthInput));
+  btnDiary?.addEventListener('click', () => handleExportDiary(monthInput));
 
-  // 2. 業務日誌Excel出力ボタン
-  btnDiary?.addEventListener('click', () => {
-    handleExportDiary(monthInput);
-  });
-
-  // 3. システム全データ バックアップ保存 & 復元イベントリスナー
   setupBackupAndRestoreListeners();
+
+  // ★【第1層】起動時に日次自動バックアップを実行（直近14日ローテーション自動管理）
+  performDailyAutoBackup();
 }
 
 function handleExportUketsuke(monthInput) {
   const [year, month] = parseYearMonth(monthInput?.value);
-  if (!year || !month) {
-    showToast('出力対象年月を正しく選択してください', 'warn');
-    return;
-  }
+  if (!year || !month) return showToast('出力対象年月を正しく選択してください', 'warn');
 
   showToast(`${year}年${month}月 受付提出用Excelを集計・生成中...`, 'info');
-
   try {
     const aggregated = aggregateFromAppSchedule(year, month);
     const wb = generateUketsukeWorkbook(aggregated, null);
-
-    if (!wb) {
-      showToast('受付提出用Excelの生成に失敗しました', 'error');
-      return;
-    }
+    if (!wb) return showToast('受付提出用Excelの生成に失敗しました', 'error');
 
     const filename = `受付提出用_実施リスト_${year}年${String(month).padStart(2, '0')}月.xlsx`;
     window.XLSX.writeFile(wb, filename);
@@ -90,21 +70,13 @@ function handleExportUketsuke(monthInput) {
 
 function handleExportDiary(monthInput) {
   const [year, month] = parseYearMonth(monthInput?.value);
-  if (!year || !month) {
-    showToast('出力対象年月を正しく選択してください', 'warn');
-    return;
-  }
+  if (!year || !month) return showToast('出力対象年月を正しく選択してください', 'warn');
 
   showToast(`${year}年${month}月 業務日誌Excelを集計・生成中...`, 'info');
-
   try {
     const aggregated = aggregateFromAppSchedule(year, month);
     const wb = generateDiaryWorkbook(aggregated, null);
-
-    if (!wb) {
-      showToast('業務日誌Excelの生成に失敗しました', 'error');
-      return;
-    }
+    if (!wb) return showToast('業務日誌Excelの生成に失敗しました', 'error');
 
     const filename = `業務日誌_${year}年${String(month).padStart(2, '0')}月.xlsx`;
     window.XLSX.writeFile(wb, filename);
@@ -121,45 +93,78 @@ function parseYearMonth(val) {
   return [safeParseInt(parts[0]), safeParseInt(parts[1])];
 }
 
+function createSystemDump(meta = {}) {
+  const dump = {
+    app: 'reha-work-manager',
+    version: '1.0.0',
+    exportedAt: new Date().toISOString(),
+    ...meta,
+    storage: {}
+  };
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    // 自動バックアップ自体の肥大化防止のため、内部ローテーションキーは除外して純粋データのみ収集
+    if (key && key.startsWith('reha_') && !key.startsWith('reha_autobackup_')) {
+      dump.storage[key] = localStorage.getItem(key);
+    }
+  }
+  return dump;
+}
+
+function downloadJsonBlob(blob, filename) {
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(link.href);
+}
+
 /**
- * システム全データのバックアップ(JSON)保存 & 復元リスナー設定
+ * ★【第1層：日常】日次自動バックアップ ＆ 直近14日自動ローテーション消去
  */
+function performDailyAutoBackup() {
+  try {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const backupKey = `reha_autobackup_${todayStr}`;
+
+    // 当日分の自動バックアップが未作成の場合に記録
+    if (!localStorage.getItem(backupKey)) {
+      const dump = createSystemDump({ backupType: 'DAILY_AUTO', targetDate: todayStr });
+      localStorage.setItem(backupKey, JSON.stringify(dump));
+    }
+
+    // 14日を超過した古い自動バックアップを自動消去（容量頭打ち処理）
+    const autoKeys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('reha_autobackup_')) autoKeys.push(k);
+    }
+    autoKeys.sort(); // 日付文字列昇順
+    while (autoKeys.length > 14) {
+      const oldestKey = autoKeys.shift();
+      if (oldestKey) localStorage.removeItem(oldestKey);
+    }
+  } catch (e) {
+    console.warn('Daily auto backup error:', e);
+  }
+}
+
 function setupBackupAndRestoreListeners() {
   const btnBackup = document.getElementById('btnBackupDownload');
+  const btnFiscalBackup = document.getElementById('btnFiscalYearBackup');
   const btnTriggerRestore = document.getElementById('btnTriggerRestore');
   const fileInput = document.getElementById('backupFileInput');
 
-  // A: 全データ一括バックアップ (ダウンロード)
+  // A: 通常の手動全データバックアップ
   btnBackup?.addEventListener('click', () => {
     try {
-      const dumpData = {
-        app: 'reha-work-manager',
-        version: '1.0.0',
-        exportedAt: new Date().toISOString(),
-        storage: {}
-      };
-
-      // reha_ で始まる全データ（患者台帳、時間割、スタッフ設定、物品貸出等）を安全に収集
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith('reha_')) {
-          dumpData.storage[key] = localStorage.getItem(key);
-        }
-      }
-
-      const jsonStr = JSON.stringify(dumpData, null, 2);
-      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const dumpData = createSystemDump({ backupType: 'MANUAL' });
+      const blob = new Blob([JSON.stringify(dumpData, null, 2)], { type: 'application/json' });
       const nowStr = new Date().toISOString().slice(0, 10);
       const fileName = `reha_backup_${nowStr}.json`;
-
-      const downloadLink = document.createElement('a');
-      downloadLink.href = URL.createObjectURL(blob);
-      downloadLink.download = fileName;
-      document.body.appendChild(downloadLink);
-      downloadLink.click();
-      downloadLink.remove();
-      URL.revokeObjectURL(downloadLink.href);
-
+      downloadJsonBlob(blob, fileName);
       showToast(`全データを保存しました: ${fileName}`, 'success');
     } catch (err) {
       console.error('Backup error:', err);
@@ -167,15 +172,35 @@ function setupBackupAndRestoreListeners() {
     }
   });
 
-  // B: 復元ファイル選択トリガー
-  btnTriggerRestore?.addEventListener('click', () => {
-    if (fileInput) {
-      fileInput.value = '';
-      fileInput.click();
+  // ★B: 【第2層：年次】5月31日 年度確定バックアップ（改定サイクル準拠）
+  btnFiscalBackup?.addEventListener('click', () => {
+    try {
+      const today = new Date();
+      const y = today.getFullYear();
+      const m = today.getMonth() + 1;
+      // 6月1日〜翌5月31日サイクル判定（1〜5月は前年年度、6〜12月は当年年度）
+      const fiscalYear = m <= 5 ? y - 1 : y;
+      const dumpData = createSystemDump({
+        backupType: 'FISCAL_YEAR_FINAL',
+        fiscalYear: fiscalYear,
+        cycleNote: '5月31日確定_診療報酬改定対応'
+      });
+      const blob = new Blob([JSON.stringify(dumpData, null, 2)], { type: 'application/json' });
+      const fileName = `reha_${fiscalYear}年度確定_5月31日改定締め.json`;
+      downloadJsonBlob(blob, fileName);
+      showToast(`🏛 ${fiscalYear}年度確定バックアップ(5/31締め)を保存しました`, 'success');
+    } catch (err) {
+      console.error('Fiscal backup error:', err);
+      showToast('年度確定バックアップの作成に失敗しました', 'error');
     }
   });
 
-  // C: 復元ファイルの読み込み & LocalStorage展開
+  // C: 復元ファイル選択トリガー
+  btnTriggerRestore?.addEventListener('click', () => {
+    if (fileInput) { fileInput.value = ''; fileInput.click(); }
+  });
+
+  // D: バックアップファイルの読み込み & 完全復元
   fileInput?.addEventListener('change', (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -184,15 +209,12 @@ function setupBackupAndRestoreListeners() {
     reader.onload = (event) => {
       try {
         const text = event.target?.result;
-        if (typeof text !== 'string') throw new Error('ファイルを読み込めませんでした');
-
+        if (typeof text !== 'string') throw new Error('読込失敗');
         const parsed = JSON.parse(text);
         if (!parsed || parsed.app !== 'reha-work-manager' || !parsed.storage) {
-          showToast('無効なファイル形式です。reha-work-managerのバックアップJSONを選択してください。', 'error');
-          return;
+          return showToast('無効なファイルです。正しいバックアップJSONを選択してください。', 'error');
         }
 
-        // 既存の reha_ 関連キーを一旦クリアしてバックアップ内容で完全復元
         const keysToRemove = [];
         for (let i = 0; i < localStorage.length; i++) {
           const k = localStorage.key(i);
@@ -200,15 +222,12 @@ function setupBackupAndRestoreListeners() {
         }
         keysToRemove.forEach((k) => localStorage.removeItem(k));
 
-        // バックアップの全キーを展開
         Object.entries(parsed.storage).forEach(([k, v]) => {
           if (typeof v === 'string') localStorage.setItem(k, v);
         });
 
         showToast('データを完全復元しました。画面を再読み込みします...', 'success');
-        setTimeout(() => {
-          window.location.reload();
-        }, 1200);
+        setTimeout(() => window.location.reload(), 1200);
       } catch (err) {
         console.error('Restore error:', err);
         showToast('ファイルの復元に失敗しました。正しいJSONファイルかご確認ください。', 'error');
