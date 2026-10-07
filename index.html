@@ -75,7 +75,7 @@
       <div style="display:flex; align-items:center; gap:8px;">
         <button id="btnPrevMonth" style="padding:6px 12px; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer;">◀ 前月</button>
         <input type="month" id="monthlyMonthInput" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.95rem; font-weight:700;">
-        <button id="btnNextMonth" style="padding:6px 12px; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer;">次月 ▶</button>
+        <button id="btnNextMonth" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; cursor:pointer;">次月 ▶</button>
         <select id="monthlySortSelect" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; background:#fff; font-weight:600; color:#334155; cursor:pointer; margin-left:8px;">
           <option value="CATEGORY" selected>並べ替え: 区分順 (入院→外来→消炎)</option>
           <option value="KANA">並べ替え: 五十音順 (あいうえお)</option>
@@ -547,15 +547,15 @@
     </div>
   </div>
 
-  <!-- モーダル 6: セラピストマスター設定（名称変更・動的登録・ステータス管理・リアルタイム検索・退職者折りたたみ） -->
+  <!-- モーダル 6: セラピストマスター設定（名称変更・動的登録・ステータス管理・リアルタイム検索・退職者折りたたみ ＋ ★リハビリ助手設定） -->
   <div id="modalStaffSettings" class="modal-overlay">
     <div class="modal-card" style="max-width:560px; max-height:85vh; display:flex; flex-direction:column;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-        <h3 style="font-size:1.05rem; font-weight:800; color:#0f172a; margin:0;">⚙ セラピストマスター設定</h3>
+        <h3 style="font-size:1.05rem; font-weight:800; color:#0f172a; margin:0;">⚙ セラピスト・助手設定</h3>
         <button type="button" id="btnCloseStaffModalX" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:#64748b;">✕</button>
       </div>
       <p style="font-size:0.75rem; color:#64748b; margin-bottom:12px;">
-        時間割には「稼働中」のセラピストのみが表示されます。休職・退職ステータスにより過去データを完全保持しながら柔軟に管理できます。
+        時間割には「稼働中」のセラピストのみが表示されます。リハビリ助手の氏名は業務日誌の出勤確認欄に自動反映されます。
       </p>
 
       <!-- リアルタイム検索 & 新規セラピスト追加バー -->
@@ -573,6 +573,26 @@
         <!-- 現役（稼働中・休職中）セラピストリスト -->
         <div id="staffSettingsListContainer" style="display:flex; flex-direction:column; gap:8px;">
           <!-- JSで動的にセラピストIDごとの入力欄およびステータス切替を展開 -->
+        </div>
+
+        <!-- ★リハビリ助手設定（業務日誌の出勤欄へ自動反映） -->
+        <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:10px; margin-top:4px;">
+          <div style="font-size:0.8rem; font-weight:800; color:#0f172a; margin-bottom:4px; display:flex; align-items:center; gap:6px;">
+            <span>🤝 リハビリ助手設定</span>
+            <span style="font-size:0.68rem; color:#64748b; font-weight:normal;">(業務日誌の出勤欄に氏名が自動反映されます)</span>
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+            <div>
+              <label for="assistant1NameInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">助手 1 氏名</label>
+              <input type="text" id="assistant1NameInput" placeholder="例: 佐々木 花子 (空欄時: リハビリ助手 1)"
+                     style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
+            </div>
+            <div>
+              <label for="assistant2NameInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">助手 2 氏名</label>
+              <input type="text" id="assistant2NameInput" placeholder="例: 高橋 恵美 (空欄時: リハビリ助手 2)"
+                     style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
+            </div>
+          </div>
         </div>
 
         <!-- 過去・退職者（非表示スタッフ）折りたたみアコーディオン（トップを汚さず一番下に配置） -->
