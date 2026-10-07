@@ -1,5 +1,5 @@
 // js/views/modals/staffModal.js
-// セラピストマスター設定モーダル制御層（スタッフ検索・追加・名称変更・休職退職管理・初期復帰）
+// セラピストマスター設定モーダル制御層（スタッフ検索・追加・名称変更・休職退職管理・初期復帰 ＋ ★リハビリ助手1・2設定・自動保存）
 
 import { sanitizeHtml } from '../../core/dataNormalizer.js';
 import {
@@ -7,6 +7,46 @@ import {
   saveAllTherapists, THERAPIST_STATUS
 } from '../../store/therapistStore.js';
 import { showToast } from '../exportView.js';
+
+const ASSISTANT_STORAGE_KEY = 'reha_assistant_settings';
+
+/**
+ * リハビリ助手の最新設定（助手1・助手2氏名）を取得する
+ * @returns {{ assistant1: string, assistant2: string }}
+ */
+export function getAssistantSettings() {
+  try {
+    const raw = localStorage.getItem(ASSISTANT_STORAGE_KEY);
+    if (!raw) return { assistant1: '', assistant2: '' };
+    const parsed = JSON.parse(raw);
+    return {
+      assistant1: (parsed.assistant1 || '').trim(),
+      assistant2: (parsed.assistant2 || '').trim()
+    };
+  } catch (e) {
+    console.error('getAssistantSettings error:', e);
+    return { assistant1: '', assistant2: '' };
+  }
+}
+
+/**
+ * リハビリ助手の設定（助手1・助手2氏名）を保存する
+ * @param {string} a1 助手1氏名
+ * @param {string} a2 助手2氏名
+ */
+export function saveAssistantSettings(a1 = '', a2 = '') {
+  try {
+    const data = {
+      assistant1: String(a1).trim(),
+      assistant2: String(a2).trim()
+    };
+    localStorage.setItem(ASSISTANT_STORAGE_KEY, JSON.stringify(data));
+    return true;
+  } catch (e) {
+    console.error('saveAssistantSettings error:', e);
+    return false;
+  }
+}
 
 let onStaffUpdatedCallback = null;
 
@@ -22,10 +62,18 @@ export function setupStaffSettingsModalListeners(onUpdate) {
   const searchInput = document.getElementById('staffSearchInput');
   const btnAdd = document.getElementById('btnAddNewStaff');
   const newNameInput = document.getElementById('newStaffNameInput');
+  const assistant1Input = document.getElementById('assistant1NameInput');
+  const assistant2Input = document.getElementById('assistant2NameInput');
 
   btnOpen?.addEventListener('click', () => {
     if (searchInput) searchInput.value = '';
     renderStaffSettingsFields();
+
+    // ★保存済みのリハビリ助手氏名をフォームに反映
+    const assistants = getAssistantSettings();
+    if (assistant1Input) assistant1Input.value = assistants.assistant1;
+    if (assistant2Input) assistant2Input.value = assistants.assistant2;
+
     modal?.classList.add('active');
   });
 
@@ -71,8 +119,14 @@ export function setupStaffSettingsModalListeners(onUpdate) {
       { id: 'C', name: 'PT C', color: '#7c3aed', status: THERAPIST_STATUS.ACTIVE }
     ];
     saveAllTherapists(defaultList);
+
+    // ★リハビリ助手設定も初期化
+    saveAssistantSettings('', '');
+    if (assistant1Input) assistant1Input.value = '';
+    if (assistant2Input) assistant2Input.value = '';
+
     renderStaffSettingsFields();
-    showToast('セラピスト設定を初期デフォルトに戻しました', 'info');
+    showToast('セラピスト・助手設定を初期デフォルトに戻しました', 'info');
     if (typeof onStaffUpdatedCallback === 'function') onStaffUpdatedCallback();
   });
 
@@ -93,8 +147,14 @@ export function setupStaffSettingsModalListeners(onUpdate) {
     });
 
     updateTherapistSettings(updateMap);
+
+    // ★リハビリ助手設定の保存
+    const a1Val = assistant1Input ? assistant1Input.value.trim() : '';
+    const a2Val = assistant2Input ? assistant2Input.value.trim() : '';
+    saveAssistantSettings(a1Val, a2Val);
+
     closeModal();
-    showToast('セラピスト設定（名称・ステータス）を更新・保存しました', 'success');
+    showToast('スタッフ設定（セラピスト・助手）を更新・保存しました', 'success');
     if (typeof onStaffUpdatedCallback === 'function') onStaffUpdatedCallback();
   });
 }
