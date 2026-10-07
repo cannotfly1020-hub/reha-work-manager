@@ -1,12 +1,10 @@
 // js/excel/uketsukeWriter.js
-// 受付提出用Excel生成層（同一ID月内複数回往復・消炎鎮痛/疾患別リハ完全自動分離対応 / 氏名100px / 区分頭文字「運脳廃消」/ 早期加算単位数表示 / 基本列限定オートフィルター / A4横1枚収容完全版）
+// 受付提出用Excel生成層（疾患別シート細分化[入院:運・脳・廃 / 外来:運①・運②・脳・廃 / 消炎] / 横1枚固定・縦自然改ページ / 氏名100px / 早期加算・計画書完全連携 / A4横最適化版）
 
 import { REHA_RULES } from '../config/rules.js';
 import { evaluateEarlyBonusPhase } from '../core/deadlineCalc.js';
 
 const SUMMARY_SHEET = 'レセプト収益サマリー';
-const INPATIENT_SHEET = '実施ﾘｽﾄ 入院';
-const OUTPATIENT_SHEET = '実施ﾘｽﾄ 外来';
 const ANALGESIA_SHEET = '実施ﾘｽﾄ 消炎鎮痛';
 
 const STYLES = {
@@ -86,9 +84,50 @@ export function generateUketsukeWorkbook(aggregated) {
   if (!window.XLSX) throw new Error('SheetJS (xlsx-js-style) が読み込まれていません。');
   const wb = window.XLSX.utils.book_new();
 
+  // 1. 全体経営・レセプト収益サマリー
   writeExecutiveSummarySheet(wb, aggregated);
-  writeRehaPatientSheet(wb, aggregated, 'INPATIENT', INPATIENT_SHEET);
-  writeRehaPatientSheet(wb, aggregated, 'OUTPATIENT', OUTPATIENT_SHEET);
+
+  // 月内個別リハビリ実績がある患者を抽出
+  const allRehaPatients = Object.values(aggregated.patientMap)
+    .filter((item) => {
+      const rehaUnits = item.rehaTotalUnits !== undefined ? item.rehaTotalUnits : (item.patient.diseaseType !== 'ANALGESIA' ? item.totalUnits : 0);
+      return rehaUnits > 0;
+    })
+    .sort((a, b) => a.patient.id.localeCompare(b.patient.id, 'ja', { numeric: true }));
+
+  const filterByCatAndDisease = (cat, dType) => {
+    return allRehaPatients.filter((item) => {
+      if (item.patient.category !== cat) return false;
+      const targetDis = (item.patient.diseaseType && item.patient.diseaseType !== 'ANALGESIA') ? item.patient.diseaseType : 'LOCOMOTIVE';
+      return targetDis === dType;
+    });
+  };
+
+  // 2. 入院シート（運動器・脳血管・廃用）
+  const inLoco = filterByCatAndDisease('INPATIENT', 'LOCOMOTIVE');
+  const inCerebro = filterByCatAndDisease('INPATIENT', 'CEREBROVASCULAR');
+  const inDisuse = filterByCatAndDisease('INPATIENT', 'DISUSE');
+
+  writeRehaPatientSheet(wb, aggregated, 'INPATIENT', '入院 運動器', inLoco);
+  writeRehaPatientSheet(wb, aggregated, 'INPATIENT', '入院 脳血管', inCerebro);
+  writeRehaPatientSheet(wb, aggregated, 'INPATIENT', '入院 廃用', inDisuse);
+
+  // 3. 外来シート（運動器①・運動器②・脳血管・廃用）
+  const outLocoAll = filterByCatAndDisease('OUTPATIENT', 'LOCOMOTIVE');
+  const outCerebro = filterByCatAndDisease('OUTPATIENT', 'CEREBROVASCULAR');
+  const outDisuse = filterByCatAndDisease('OUTPATIENT', 'DISUSE');
+
+  // 外来 運動器を前半・後半にバランスよく分割（案A）
+  const mid = Math.ceil(outLocoAll.length / 2);
+  const outLoco1 = outLocoAll.slice(0, mid);
+  const outLoco2 = outLocoAll.slice(mid);
+
+  writeRehaPatientSheet(wb, aggregated, 'OUTPATIENT', '外来 運動器①', outLoco1);
+  writeRehaPatientSheet(wb, aggregated, 'OUTPATIENT', '外来 運動器②', outLoco2);
+  writeRehaPatientSheet(wb, aggregated, 'OUTPATIENT', '外来 脳血管', outCerebro);
+  writeRehaPatientSheet(wb, aggregated, 'OUTPATIENT', '外来 廃用', outDisuse);
+
+  // 4. 消炎鎮痛 専用シート
   writeAnalgesiaDedicatedSheet(wb, aggregated, ANALGESIA_SHEET);
 
   return wb;
@@ -121,7 +160,6 @@ function writeExecutiveSummarySheet(wb, aggregated) {
       }
     });
 
-    // 個別リハビリ単位数の集計（マスター病名に関わらず、純粋な個別リハ単位 rehaTotalUnits を最優先集計）
     const rehaUnits = item.rehaTotalUnits !== undefined ? item.rehaTotalUnits : (p.diseaseType !== 'ANALGESIA' ? item.totalUnits : 0);
     if (rehaUnits > 0) {
       const dType = (p.diseaseType && p.diseaseType !== 'ANALGESIA') ? p.diseaseType : 'LOCOMOTIVE';
@@ -178,13 +216,13 @@ function writeExecutiveSummarySheet(wb, aggregated) {
   setStyledCell(ws, rIdx, 6, 'レセプト総収益（保険点数×10円）', { font: { sz: 7.5, color: { rgb: '047857' }, bold: true }, fill: totalFill, border: totalBorder });
 
   setSheetCols(ws, [26, 12, 9, 11, 15, 22]);
-  applyA4LandscapePrintSetup(ws);
+  applyA4LandscapePrintSetup(ws, true); // サマリーは1枚収容
   updateSheetRange(ws);
   appendOrReplaceSheet(wb, ws, SUMMARY_SHEET);
 }
 
-function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
-  const { daysInMonth, patientMap, year, month } = aggregated;
+function writeRehaPatientSheet(wb, aggregated, category, sheetName, patients) {
+  const { daysInMonth, year, month } = aggregated;
   const isInput = category === 'INPATIENT';
   const ws = {};
   const dayOfWeekNames = ['日', '月', '火', '水', '木', '金', '土'];
@@ -221,14 +259,6 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
     setStyledCell(ws, 1, extraCol, '計画日', STYLES.headerNavy);
   }
 
-  // マスター病名に関わらず、月内に「個別リハビリ実績（rehaTotalUnits > 0）」がある患者を漏れなく抽出
-  const patients = Object.values(patientMap)
-    .filter((item) => {
-      const rehaUnits = item.rehaTotalUnits !== undefined ? item.rehaTotalUnits : (item.patient.diseaseType !== 'ANALGESIA' ? item.totalUnits : 0);
-      return item.patient.category === category && rehaUnits > 0;
-    })
-    .sort((a, b) => a.patient.id.localeCompare(b.patient.id, 'ja', { numeric: true }));
-
   let curRow = 2;
   patients.forEach((item, pIdx) => {
     const p = item.patient;
@@ -261,7 +291,6 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
       }
     });
 
-    // 疾患区分頭文字（マスターが消炎の場合でも個別枠実施時は「運」等として出力）
     const displayDisType = (p.diseaseType && p.diseaseType !== 'ANALGESIA') ? p.diseaseType : 'LOCOMOTIVE';
     const totalRehaUnits = item.rehaTotalUnits !== undefined ? item.rehaTotalUnits : item.totalUnits;
 
@@ -281,7 +310,6 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
       const dateObj = new Date(year, month - 1, d);
       const dayOfWeek = dateObj.getDay();
       const col = dayColStart + (d - 1);
-      // 日別個別リハ単位数を正確に出力（消炎鎮痛来院日は 0 または空欄となり混入を完全遮断）
       const u = item.dailyRehaUnits ? (item.dailyRehaUnits[d] || 0) : (item.dailyUnits[d] || 0);
       const isPlanDay = planDatesSet.has(d);
       const isEarly1Day = early1DatesSet.has(d);
@@ -345,7 +373,8 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName) {
 
   ws['!freeze'] = { xSplit: 'E', ySplit: '2', topLeftCell: 'F3', activePane: 'bottomRight', state: 'frozen' };
 
-  applyA4LandscapePrintSetup(ws);
+  // 横1枚固定・縦方向は自然改ページ許可
+  applyA4LandscapePrintSetup(ws, false);
   updateSheetRange(ws);
   appendOrReplaceSheet(wb, ws, sheetName);
 }
@@ -382,7 +411,6 @@ function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
   const extraCol = dayColStart + daysInMonth;
   setStyledCell(ws, 1, extraCol, '備考', STYLES.headerNavy);
 
-  // 月内に消炎鎮痛の来院事実がある患者を確実に抽出（病名が運動器に変更されていても漏らさず抽出）
   const analgesiaPatients = Object.values(patientMap)
     .filter((item) => {
       const anaDays = item.totalAnalgesiaDays !== undefined ? item.totalAnalgesiaDays : (item.slots ? item.slots.filter((s) => s.isAnalgesia).length : 0);
@@ -469,26 +497,25 @@ function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
   colProps.push({ wch: 5.0 });
   ws['!cols'] = colProps;
 
-  // 消炎鎮痛シートも基本列（col 0〜3: ID、氏名、区分、疾患名）のみにオートフィルターを限定
   ws['!autofilter'] = {
     ref: window.XLSX.utils.encode_range({ r: 1, c: 0 }, { r: Math.max(1, curRow - 1), c: 3 })
   };
 
   ws['!freeze'] = { xSplit: 'F', ySplit: '2', topLeftCell: 'G3', activePane: 'bottomRight', state: 'frozen' };
 
-  applyA4LandscapePrintSetup(ws);
+  applyA4LandscapePrintSetup(ws, false);
   updateSheetRange(ws);
   appendOrReplaceSheet(wb, ws, sheetName);
 }
 
-function applyA4LandscapePrintSetup(ws) {
+function applyA4LandscapePrintSetup(ws, singlePageOnly = false) {
   ws['!sheetPr'] = { pageSetUpPr: { fitToPage: true } };
   ws['!properties'] = { pageSetUpPr: { fitToPage: true } };
   ws['!pageSetup'] = {
     paperSize: 9, // A4
     orientation: 'landscape',
-    fitToWidth: 1,
-    fitToHeight: 99,
+    fitToWidth: 1, // 横幅は必ず1ページ幅に自動収容
+    fitToHeight: singlePageOnly ? 1 : 0, // サマリーは1枚収容、リスト系は縦の自然改ページを許可
     fitToPage: true
   };
   ws['!margins'] = { left: 0.1, right: 0.1, top: 0.2, bottom: 0.2, header: 0.05, footer: 0.05 };
