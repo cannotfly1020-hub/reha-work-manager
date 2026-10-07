@@ -1,5 +1,5 @@
 // js/views/modals/slotModal.js
-// コマ配置モーダル制御層（患者リアルタイム検索・単位数選択・計画書チェックボックス連動・各種制約バリデーション・保存解除）
+// コマ配置モーダル制御層（患者リアルタイム検索・単位数選択・計画書チェックボックス連動・各種制約バリデーション・保存解除・日次自動上書きトリガー連動）
 
 import { TIME_SLOTS } from '../../config/rules.js';
 import { sanitizeHtml, safeParseInt } from '../../core/dataNormalizer.js';
@@ -38,6 +38,12 @@ export function setupSlotModalListeners(onUpdate) {
     clearScheduleSlot(currentDateStr, activeModalSlot.therapistId, activeModalSlot.slotId);
     modal?.classList.remove('active');
     showToast('コマの配置を解除しました', 'warn');
+
+    // ★解除後の最新確定データを当日バックアップファイルへ自動上書きトリガー
+    if (typeof window.triggerDailyBackup === 'function') {
+      window.triggerDailyBackup();
+    }
+
     if (typeof onScheduleUpdatedCallback === 'function') onScheduleUpdatedCallback();
   });
 
@@ -195,6 +201,12 @@ function handleSlotFormSubmit() {
 
   modal?.classList.remove('active');
   showToast('スケジュールを保存しました', 'success');
+
+  // ★時間割保存後の最新データを当日バックアップファイルへ自動上書きトリガー
+  if (typeof window.triggerDailyBackup === 'function') {
+    window.triggerDailyBackup();
+  }
+
   if (typeof onScheduleUpdatedCallback === 'function') onScheduleUpdatedCallback();
 }
 
