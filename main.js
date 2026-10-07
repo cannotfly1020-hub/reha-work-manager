@@ -57,21 +57,36 @@ function setupIpcHandlers() {
   // 1. 自動バックアップJSONの直接書き出し
   ipcMain.handle('save-daily-backup-file', async (event, payload) => {
     try {
-      if (!payload || !payload.targetDate || !payload.data) {
-        return { success: false, message: 'バックアップデータが不正です。' };
+      if (!payload) {
+        return { success: false, message: 'バックアップデータが空です。' };
+      }
+
+      // ★重要：dumpオブジェクト直渡し / { targetDate, data } 包み渡しの両方を自動吸収
+      let targetDate = '';
+      let dumpData = null;
+
+      if (payload.data && typeof payload.data === 'object') {
+        // パターンA: { targetDate: '...', data: dump } で渡された場合
+        targetDate = payload.targetDate || new Date().toISOString().slice(0, 10);
+        dumpData = payload.data;
+      } else {
+        // パターンB: dump オブジェクトそのものが渡された場合 (exportView.js の呼び出し形式)
+        targetDate = payload.targetDate || (payload.exportedAt ? payload.exportedAt.slice(0, 10) : new Date().toISOString().slice(0, 10));
+        dumpData = payload;
       }
 
       const backupDir = getBackupDirectoryPath();
-      const fileName = `reha_autobackup_${payload.targetDate}.json`;
+      const fileName = `reha_autobackup_${targetDate}.json`;
       const filePath = path.join(backupDir, fileName);
 
       // JSON文字列をインデント付きで整形してファイル書き出し
-      const jsonStr = typeof payload.data === 'string' ? payload.data : JSON.stringify(payload.data, null, 2);
+      const jsonStr = typeof dumpData === 'string' ? dumpData : JSON.stringify(dumpData, null, 2);
       fs.writeFileSync(filePath, jsonStr, 'utf8');
 
       // 14日を超過した過去ファイルを自動消去
       cleanOldBackupFiles(backupDir, 14);
 
+      console.log(`[IPC] バックアップ書き出し成功: ${filePath}`);
       return {
         success: true,
         filePath,
