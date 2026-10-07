@@ -311,6 +311,12 @@ function attachGridEventListeners(gridEl) {
 
         moveScheduleSlot(currentDateStr, fromTherapist, fromSlot, targetTId, targetSId);
         showToast('コマを移動しました', 'success');
+
+        // ★ドラッグ移動後の最新確定データを当日バックアップファイルへ自動上書きトリガー
+        if (typeof window.triggerDailyBackup === 'function') {
+          window.triggerDailyBackup();
+        }
+
         renderScheduleView();
         return;
       }
@@ -342,6 +348,12 @@ function attachGridEventListeners(gridEl) {
       if (pId && sId && !pId.includes(':')) {
         addAnalgesiaPatient(currentDateStr, sId, pId);
         showToast('消炎鎮痛に患者を追加しました', 'success');
+
+        // ★消炎鎮痛追加後の最新確定データを当日バックアップファイルへ自動上書きトリガー
+        if (typeof window.triggerDailyBackup === 'function') {
+          window.triggerDailyBackup();
+        }
+
         renderScheduleView();
       }
     });
