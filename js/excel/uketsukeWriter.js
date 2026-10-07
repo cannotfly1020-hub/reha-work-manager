@@ -652,6 +652,13 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName, patients) {
     curRow++;
   });
 
+  // 各行の高さを行列へ適用（ヘッダー: 26pt、データ行: 20pt）
+  const rHeights = [{ hpt: 26 }, { hpt: 26 }];
+  for (let r = 2; r < curRow; r++) {
+    rHeights.push({ hpt: 20.5 });
+  }
+  ws['!rows'] = rHeights;
+
   const colProps = [
     { wch: 4.2 },       // 患者ID
     { wpx: 100 },       // 患者氏名 (100px固定)
@@ -782,6 +789,13 @@ function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
     setStyledCell(ws, curRow, extraCol, p.notes || '', { ...STYLES.cellNormal, fill: zebraBg });
     curRow++;
   });
+
+  // 消炎鎮痛シートの行高もゆったり20.5ptに統一
+  const aHeights = [{ hpt: 26 }, { hpt: 26 }];
+  for (let r = 2; r < curRow; r++) {
+    aHeights.push({ hpt: 20.5 });
+  }
+  ws['!rows'] = aHeights;
 
   const colProps = [
     { wch: 4.0 },       // 患者ID
