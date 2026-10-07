@@ -1,5 +1,6 @@
 // js/views/exportView.js
-// VIEW 5: 月末Excel原本出力・全データバックアップ＆復元・日次14日ローテーション自動保存・5/31年度確定バックアップ対応層（200行制限準拠）
+// VIEW 5: 月末Excel原本出力・全データバックアップ＆復元・日次14日ローテーション自動保存(PCフォルダ直接書き出し連携)・5/31年度確定バックアップ対応層（200行制限準拠）
+
 
 import { safeParseInt } from '../core/dataNormalizer.js';
 import { aggregateFromAppSchedule } from '../store/scheduleStore.js';
@@ -123,19 +124,32 @@ function downloadJsonBlob(blob, filename) {
 
 /**
  * ★【第1層：日常】日次自動バックアップ ＆ 直近14日自動ローテーション消去
+ * （アプリ内部LocalStorage保護 ＋ PCドキュメントフォルダへの直接JSON書き出しの二重防衛）
  */
-function performDailyAutoBackup() {
+async function performDailyAutoBackup() {
   try {
     const todayStr = new Date().toISOString().slice(0, 10);
     const backupKey = `reha_autobackup_${todayStr}`;
+    const dump = createSystemDump({ backupType: 'DAILY_AUTO', targetDate: todayStr });
 
-    // 当日分の自動バックアップが未作成の場合に記録
+    // 1. アプリ内部LocalStorageへの保管
     if (!localStorage.getItem(backupKey)) {
-      const dump = createSystemDump({ backupType: 'DAILY_AUTO', targetDate: todayStr });
       localStorage.setItem(backupKey, JSON.stringify(dump));
     }
 
-    // 14日を超過した古い自動バックアップを自動消去（容量頭打ち処理）
+    // 2. PCの専用フォルダ（ドキュメント/リハ業務管理_自動バックアップ/）へ直接JSONファイルを書き出し
+    if (window.desktopApp && typeof window.desktopApp.saveDailyBackup === 'function') {
+      try {
+        const res = await window.desktopApp.saveDailyBackup(dump);
+        if (res?.success) {
+          console.log(`[自動バックアップ] PCフォルダへ直接保存完了: ${res.filePath}`);
+        }
+      } catch (ipcErr) {
+        console.warn('Desktop file auto-backup IPC error:', ipcErr);
+      }
+    }
+
+    // 3. 内部LocalStorage側も14日を超過した古い自動バックアップを自動消去（容量頭打ち処理）
     const autoKeys = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
