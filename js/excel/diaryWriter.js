@@ -1,5 +1,5 @@
 // js/excel/diaryWriter.js
-// 業務日誌Excel生成層（原本R8.6準拠 / 検印欄 / 動的スタッフ名完全反映 / セラピスト増員対応 / 入外別実績 / 担当別実績 / A4横1枚収容 / 200行制限準拠）
+// 業務日誌Excel生成層（原本R8.6準拠 / 検印欄 / 動的スタッフ名完全反映 / 当日までの累積シート生成 / 外来0名・公休スマート自動記録 / A4横1枚収容）
 
 import { REHA_RULES } from '../config/rules.js';
 import { getDailySchedule } from '../store/scheduleStore.js';
@@ -42,7 +42,12 @@ function thinBorder() {
   return { top: b, bottom: b, left: b, right: b };
 }
 
-export function generateDiaryWorkbook(aggregated) {
+/**
+ * 業務日誌ワークブック生成
+ * @param {Object} aggregated 集計データ
+ * @param {number|null} targetDay 指定日（nullの場合は当日、過去月なら月末まで自動判定）
+ */
+export function generateDiaryWorkbook(aggregated, targetDay = null) {
   if (!window.XLSX) throw new Error('SheetJS (xlsx-js-style) が読み込まれていません。');
   const wb = window.XLSX.utils.book_new();
   const { year, month, daysInMonth } = aggregated;
@@ -51,12 +56,25 @@ export function generateDiaryWorkbook(aggregated) {
   const allTherapists = getAllTherapists();
   const activeStaffList = allTherapists.filter((t) => t.status !== THERAPIST_STATUS.RETIRED);
 
-  for (let day = 1; day <= daysInMonth; day++) {
+  // ★「当日までの累積シート」の上限日を決定
+  const now = new Date();
+  const isCurrentMonth = (now.getFullYear() === year && (now.getMonth() + 1) === month);
+  let endDay = daysInMonth;
+
+  if (targetDay !== null && targetDay !== undefined) {
+    endDay = Math.min(daysInMonth, Math.max(1, targetDay));
+  } else if (isCurrentMonth) {
+    // 当月であれば「今日の日付」までのみ出力（未来日の空シートは作らない）
+    endDay = Math.min(daysInMonth, now.getDate());
+  }
+
+  for (let day = 1; day <= endDay; day++) {
     const ws = {};
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const dayOfWeek = new Date(year, month - 1, day).getDay();
     const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
     const reiwaYear = year - 2018;
+    const isSunday = dayOfWeek === 0;
 
     // 1. タイトル & 日付 & 検印枠（右上）
     setStyledCell(ws, 0, 0, 'リハビリテーション科 業務日誌', {
@@ -116,15 +134,24 @@ export function generateDiaryWorkbook(aggregated) {
     let curLeftRow = 4;
     activeStaffList.forEach((t) => {
       const isWorking = ptStats[t.id]?.units > 0;
+      // 日曜日は実績がなければ「公休」、平日・土曜は実績0でも配置出勤として扱う
+      let statusStr = '出勤';
+      if (isSunday && !isWorking) {
+        statusStr = '公休';
+      } else if (t.status === THERAPIST_STATUS.LEAVE) {
+        statusStr = '休職';
+      }
+
       setStyledCell(ws, curLeftRow, 0, t.name, STYLES.cellLabel);
-      setStyledCell(ws, curLeftRow, 1, isWorking ? '出勤' : '公休 / -', STYLES.cellCenter);
+      setStyledCell(ws, curLeftRow, 1, statusStr, STYLES.cellCenter);
       setStyledCell(ws, curLeftRow, 2, '', STYLES.cellCenter);
       curLeftRow++;
     });
 
     ['リハビリ助手 1', 'リハビリ助手 2'].forEach((aide) => {
+      const aideStatus = isSunday ? '公休' : '出勤 [　　]';
       setStyledCell(ws, curLeftRow, 0, aide, STYLES.cellLabel);
-      setStyledCell(ws, curLeftRow, 1, '出勤 [　　]', STYLES.cellCenter);
+      setStyledCell(ws, curLeftRow, 1, aideStatus, STYLES.cellCenter);
       setStyledCell(ws, curLeftRow, 2, '', STYLES.cellCenter);
       curLeftRow++;
     });
@@ -184,14 +211,30 @@ export function generateDiaryWorkbook(aggregated) {
       setStyledCell(ws, r, 7, row[3], STYLES.cellCenter);
     });
 
-    // 6. 下部：記事・申し送り事項（横幅いっぱいの専用エリア）
+    // 6. 下部：記事・申し送り事項（外来0名・休日のスマート自動フォロー文）
     const noteStartRow = Math.max(curLeftRow, 16) + 1;
     setStyledCell(ws, noteStartRow, 0, '記事・申し送り事項', STYLES.headerNavy);
     for (let c = 1; c <= 7; c++) setStyledCell(ws, noteStartRow, c, '', STYLES.headerNavy);
 
+    // ★外来患者0名・休診日のスマート自動フォロー文を判定
+    let autoNoteText = '';
+    const totalDayUnits = inUnits + outUnits;
+    if (isSunday && totalDayUnits === 0 && aPatients.length === 0) {
+      autoNoteText = '※ 休診日 (公休)';
+    } else if (!isSunday && outUnits === 0 && aOutCount === 0) {
+      // 平日・土曜で外来が0名だった場合
+      autoNoteText = '※ 本日は外来患者来院なし（配置・待機・院内リハ業務実施）';
+    }
+
     for (let rOffset = 1; rOffset <= 3; rOffset++) {
       const nr = noteStartRow + rOffset;
-      for (let c = 0; c <= 7; c++) {
+      const rowText = (rOffset === 1 && autoNoteText) ? autoNoteText : '';
+      setStyledCell(ws, nr, 0, rowText, {
+        border: thinBorder(),
+        fill: { fgColor: { rgb: 'FFFFFF' } },
+        font: { name: 'Meiryo UI', sz: 8, color: { rgb: '475569' }, italic: Boolean(autoNoteText && rOffset === 1) }
+      });
+      for (let c = 1; c <= 7; c++) {
         setStyledCell(ws, nr, c, '', { border: thinBorder(), fill: { fgColor: { rgb: 'FFFFFF' } } });
       }
     }
