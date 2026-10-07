@@ -82,15 +82,21 @@ function handleExportDiary(monthInput) {
   const [year, month] = parseYearMonth(monthInput?.value);
   if (!year || !month) return showToast('出力対象年月を正しく選択してください', 'warn');
 
-  showToast(`${year}年${month}月 業務日誌Excelを集計・生成中...`, 'info');
+  const now = new Date();
+  const isCurrentMonth = (now.getFullYear() === year && (now.getMonth() + 1) === month);
+  const targetDay = isCurrentMonth ? now.getDate() : null;
+
+  const targetRangeStr = isCurrentMonth ? `1日〜${targetDay}日 (当日累積)` : '1日〜月末';
+  showToast(`${year}年${month}月 業務日誌Excelを集計中 (${targetRangeStr})...`, 'info');
+
   try {
     const aggregated = aggregateFromAppSchedule(year, month);
-    const wb = generateDiaryWorkbook(aggregated, null);
+    const wb = generateDiaryWorkbook(aggregated, targetDay);
     if (!wb) return showToast('業務日誌Excelの生成に失敗しました', 'error');
 
     const filename = `業務日誌_${year}年${String(month).padStart(2, '0')}月.xlsx`;
     window.XLSX.writeFile(wb, filename);
-    showToast(`業務日誌Excelを出力しました: ${filename}`, 'success');
+    showToast(`業務日誌Excelを出力しました (${targetRangeStr}): ${filename}`, 'success');
   } catch (error) {
     console.error('Diary Export Error:', error);
     showToast(`出力エラー: ${error.message || '日誌集計に失敗しました'}`, 'error');
