@@ -1,5 +1,5 @@
 // js/excel/uketsukeWriter.js
-// 受付提出用Excel生成層（レセプト収益サマリー入外細分化・年間推移1〜12月シート完備・疾患別シート細分化・A列開始＆列幅最適化版）
+// 受付提出用Excel生成層（レセプト収益サマリー入外細分化・年間推移1〜12月シート完備・疾患別シート細分化・日付列幅拡大・A4横堂々美麗版）
 
 import { REHA_RULES } from '../config/rules.js';
 import { evaluateEarlyBonusPhase } from '../core/deadlineCalc.js';
@@ -17,32 +17,34 @@ const STYLES = {
     border: thinBorder()
   },
   headerSat: {
-    font: { name: 'Meiryo UI', sz: 7.5, bold: true, color: { rgb: '1E40AF' } },
+    font: { name: 'Meiryo UI', sz: 8.5, bold: true, color: { rgb: '1E40AF' } },
     fill: { fgColor: { rgb: 'DBEAFE' } },
-    alignment: { horizontal: 'center', vertical: 'center', wrapText: true }
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+    border: thinBorder()
   },
   headerSun: {
-    font: { name: 'Meiryo UI', sz: 7.5, bold: true, color: { rgb: '991B1B' } },
+    font: { name: 'Meiryo UI', sz: 8.5, bold: true, color: { rgb: '991B1B' } },
     fill: { fgColor: { rgb: 'FEE2E2' } },
-    alignment: { horizontal: 'center', vertical: 'center', wrapText: true }
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+    border: thinBorder()
   },
   cellNormal: {
-    font: { name: 'Meiryo UI', sz: 8.5 },
+    font: { name: 'Meiryo UI', sz: 9 },
     alignment: { vertical: 'center' },
     border: thinBorder()
   },
   cellCenter: {
-    font: { name: 'Meiryo UI', sz: 8.5 },
+    font: { name: 'Meiryo UI', sz: 9 },
     alignment: { horizontal: 'center', vertical: 'center' },
     border: thinBorder()
   },
   cellRight: {
-    font: { name: 'Meiryo UI', sz: 8.5 },
+    font: { name: 'Meiryo UI', sz: 9 },
     alignment: { horizontal: 'right', vertical: 'center' },
     border: thinBorder()
   },
   cellSubTotal: {
-    font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '0F172A' } },
+    font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: '0F172A' } },
     fill: { fgColor: { rgb: 'F1F5F9' } },
     border: {
       top: { style: 'thin', color: { rgb: '64748B' } },
@@ -52,24 +54,24 @@ const STYLES = {
     }
   },
   cellUnit: {
-    font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: '0F172A' } },
+    font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '0F172A' } },
     alignment: { horizontal: 'center', vertical: 'center' },
     border: thinBorder()
   },
   cellEarly1: {
-    font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: '065F46' } },
+    font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '065F46' } },
     fill: { fgColor: { rgb: 'D1FAE5' } },
     alignment: { horizontal: 'center', vertical: 'center' },
     border: thinBorder()
   },
   cellEarly2: {
-    font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: '1E40AF' } },
+    font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '1E40AF' } },
     fill: { fgColor: { rgb: 'DBEAFE' } },
     alignment: { horizontal: 'center', vertical: 'center' },
     border: thinBorder()
   },
   cellPlanStar: {
-    font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: 'B45309' } },
+    font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: 'B45309' } },
     fill: { fgColor: { rgb: 'FEF3C7' } },
     alignment: { horizontal: 'center', vertical: 'center' },
     border: thinBorder()
@@ -156,9 +158,8 @@ export function generateUketsukeWorkbook(aggregated) {
 function writeExecutiveSummarySheet(wb, aggregated) {
   const { patientMap, year, month } = aggregated;
   const ws = {};
-  const rowHeights = []; // 各行のゆったり高さを記録する配列
+  const rowHeights = [];
 
-  // 入院・外来別の集計コンテナ
   const inStats = {
     LOCOMOTIVE: 0, CEREBROVASCULAR: 0, DISUSE: 0,
     early1: 0, early2: 0,
@@ -201,25 +202,25 @@ function writeExecutiveSummarySheet(wb, aggregated) {
     }
   });
 
-  // タイトル（A列1行目から開始）
+  // タイトル（A列から開始、ゆったり36pt）
   setStyledCell(ws, 0, 0, `【${year}年${month}月 リハビリテーション科 レセプト確定・経営収益サマリー (入院・外来別内訳)】`, {
-    font: { name: 'Meiryo UI', sz: 13, bold: true, color: { rgb: '0F172A' } },
+    font: { name: 'Meiryo UI', sz: 14, bold: true, color: { rgb: '0F172A' } },
     alignment: { vertical: 'center' }
   });
-  rowHeights[0] = 36; // タイトル行：36pt（堂々とした見栄え）
-  rowHeights[1] = 14; // タイトル下余白：14pt
+  rowHeights[0] = 36;
+  rowHeights[1] = 14;
 
   const headers = ['項目 / 算定区分', '算定対象 (単位/回)', '単価点数', '総点数', '総売上金額 (¥)', '備考・算定区分'];
   headers.forEach((h, idx) => setStyledCell(ws, 2, idx, h, {
     ...STYLES.headerNavy,
     font: { ...STYLES.headerNavy.font, sz: 10 }
   }));
-  rowHeights[2] = 28; // ヘッダー行：28pt
+  rowHeights[2] = 28;
 
   let rIdx = 3;
 
   const renderSectionHeader = (title, bgColor) => {
-    rowHeights[rIdx] = 26; // 見出し行：26pt（しっかりした太さ）
+    rowHeights[rIdx] = 26;
     setStyledCell(ws, rIdx, 0, title, {
       font: { name: 'Meiryo UI', sz: 10, bold: true, color: { rgb: 'FFFFFF' } },
       fill: { fgColor: { rgb: bgColor } },
@@ -233,7 +234,7 @@ function writeExecutiveSummarySheet(wb, aggregated) {
   };
 
   const renderDataRow = (name, qty, unitPts, customPts = null, note = '') => {
-    rowHeights[rIdx] = 25; // データ行：さらに太くゆったりとした25pt
+    rowHeights[rIdx] = 25;
     const totPts = customPts !== null ? customPts : qty * unitPts;
     const totYen = totPts * 10;
     const bg = (rIdx % 2 === 1) ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } };
@@ -249,7 +250,7 @@ function writeExecutiveSummarySheet(wb, aggregated) {
   };
 
   const renderSubTotalRow = (title, units, totPts, totYen) => {
-    rowHeights[rIdx] = 28; // 小計行：28pt（目立つ太さ）
+    rowHeights[rIdx] = 28;
     setStyledCell(ws, rIdx, 0, title, { ...STYLES.cellSubTotal, font: { ...STYLES.cellSubTotal.font, sz: 10 }, alignment: { vertical: 'center' } });
     setStyledCell(ws, rIdx, 1, units, { ...STYLES.cellSubTotal, font: { ...STYLES.cellSubTotal.font, sz: 10 }, alignment: { horizontal: 'center', vertical: 'center' }, numFmt: '#,##0' });
     setStyledCell(ws, rIdx, 2, '-', { ...STYLES.cellSubTotal, font: { ...STYLES.cellSubTotal.font, sz: 10 }, alignment: { horizontal: 'center', vertical: 'center' } });
@@ -260,7 +261,7 @@ function writeExecutiveSummarySheet(wb, aggregated) {
   };
 
   // 1. 【入院セクション】
-  renderSectionHeader('■ 【入院】リハビリテーション算定項目', '0284C7'); // Sky Blue
+  renderSectionHeader('■ 【入院】リハビリテーション算定項目', '0284C7');
   let inTotalUnits = inStats.LOCOMOTIVE + inStats.CEREBROVASCULAR + inStats.DISUSE;
   let inTotalPts = 0;
   let inTotalYen = 0;
@@ -276,11 +277,11 @@ function writeExecutiveSummarySheet(wb, aggregated) {
   inTotalYen = r1.yen + r2.yen + r3.yen + r4.yen + r5.yen + r6.yen;
   renderSubTotalRow('★【入院 総単位・収益 小計】', inTotalUnits, inTotalPts, inTotalYen);
 
-  rowHeights[rIdx] = 14; // セクション間空行：14pt
-  rIdx++; // 空白行
+  rowHeights[rIdx] = 14;
+  rIdx++;
 
   // 2. 【外来セクション】
-  renderSectionHeader('■ 【外来】リハビリテーション算定項目', '0369A1'); // Blue
+  renderSectionHeader('■ 【外来】リハビリテーション算定項目', '0369A1');
   let outTotalUnits = outStats.LOCOMOTIVE + outStats.CEREBROVASCULAR + outStats.DISUSE;
   let outTotalPts = 0;
   let outTotalYen = 0;
@@ -295,8 +296,8 @@ function writeExecutiveSummarySheet(wb, aggregated) {
   outTotalYen = ro1.yen + ro2.yen + ro3.yen + ro4.yen + ro5.yen;
   renderSubTotalRow('★【外来 総単位・収益 小計】', outTotalUnits, outTotalPts, outTotalYen);
 
-  rowHeights[rIdx] = 14; // セクション間空行：14pt
-  rIdx++; // 空白行
+  rowHeights[rIdx] = 14;
+  rIdx++;
 
   // 3. 【全体総合計セクション】
   const grandTotalUnits = inTotalUnits + outTotalUnits;
@@ -305,7 +306,7 @@ function writeExecutiveSummarySheet(wb, aggregated) {
   const totalBorder = { top: { style: 'thin', color: { rgb: '0F172A' } }, bottom: { style: 'double', color: { rgb: '0F172A' } } };
   const totalFill = { fgColor: { rgb: 'ECFDF5' } };
 
-  rowHeights[rIdx] = 34; // 総合計行：最高峰の存在感 34pt
+  rowHeights[rIdx] = 34;
   setStyledCell(ws, rIdx, 0, '★★★【レセプト総確定 合計 (入院＋外来)】', { font: { name: 'Meiryo UI', sz: 10.5, bold: true, color: { rgb: '0F172A' } }, fill: totalFill, border: totalBorder, alignment: { vertical: 'center' } });
   setStyledCell(ws, rIdx, 1, grandTotalUnits, { alignment: { horizontal: 'center', vertical: 'center' }, font: { name: 'Meiryo UI', sz: 10.5, bold: true }, fill: totalFill, border: totalBorder, numFmt: '#,##0' });
   setStyledCell(ws, rIdx, 2, '-', { alignment: { horizontal: 'center', vertical: 'center' }, fill: totalFill, border: totalBorder });
@@ -313,13 +314,10 @@ function writeExecutiveSummarySheet(wb, aggregated) {
   setStyledCell(ws, rIdx, 4, grandTotalYen, { alignment: { horizontal: 'right', vertical: 'center' }, font: { name: 'Meiryo UI', sz: 11.5, bold: true, color: { rgb: '047857' } }, fill: totalFill, border: totalBorder, numFmt: '¥#,##0' });
   setStyledCell(ws, rIdx, 5, '総点数×10円（保険請求確定）', { font: { name: 'Meiryo UI', sz: 9, color: { rgb: '047857' }, bold: true }, fill: totalFill, border: totalBorder, alignment: { vertical: 'center' } });
 
-  // A列(0)から始まる列幅をゆったり十分な余白付きで設定（文字切れ完全防止）
   setSheetCols(ws, [38, 14, 10, 14, 18, 28]);
-
-  // 各行の高さを適用（A4横1枚の上下余白にぴったりバランス良く収容）
   ws['!rows'] = rowHeights.map((h) => ({ hpt: h || 24 }));
 
-  applyA4LandscapePrintSetup(ws, true); // サマリーは1枚収容（横1枚×縦1枚）
+  applyA4LandscapePrintSetup(ws, true);
   updateSheetRange(ws);
   appendOrReplaceSheet(wb, ws, SUMMARY_SHEET);
 }
@@ -329,7 +327,6 @@ function writeYearlyTrendSheet(wb, targetYear) {
   const months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
   const rowHeights = [];
 
-  // 当年1月〜12月の集計データを一括収集
   const monthlyData = months.map((m) => {
     try {
       return aggregateFromAppSchedule(targetYear, m);
@@ -338,7 +335,6 @@ function writeYearlyTrendSheet(wb, targetYear) {
     }
   });
 
-  // 月別スタッツ集計コンテナ
   const statsList = months.map(() => ({
     inUnits: 0, outUnits: 0, totalUnits: 0,
     analgesiaCount: 0,
@@ -407,21 +403,17 @@ function writeYearlyTrendSheet(wb, targetYear) {
     });
   });
 
-  // タイトル
   setStyledCell(ws, 0, 0, `【${targetYear}年 リハビリテーション科 年間推移表 (1月〜12月 グラフ自動作成対応マトリクス)】`, {
     font: { name: 'Meiryo UI', sz: 12, bold: true, color: { rgb: '0F172A' } }
   });
   rowHeights[0] = 30;
 
-  // ガイド文
   setStyledCell(ws, 1, 0, `💡【グラフのワンクリック作成方法】 下記の「表①」または「表②」の範囲を選び、キーボードの「Alt + F1」（またはメニューの「挿入」→「おすすめグラフ」）を押すと、一瞬で綺麗な折れ線・棒グラフが完成します。`, {
     font: { name: 'Meiryo UI', sz: 8.5, color: { rgb: '0369A1' }, bold: true }
   });
   rowHeights[1] = 20;
 
-  // ==========================================
-  // 【表①：月別 単位数・消炎件数 推移】（積み上げ棒 / 集合棒グラフ用）
-  // ==========================================
+  // 表①：単位数推移
   setStyledCell(ws, 3, 0, '■ 表①：月別 リハビリ実施単位数 推移 (棒グラフ用)', {
     font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: '1E40AF' } }
   });
@@ -455,7 +447,6 @@ function writeYearlyTrendSheet(wb, targetYear) {
     rIdx++;
   });
 
-  // 表① 年間合計行
   setStyledCell(ws, rIdx, 0, '年間合計', { ...STYLES.cellSubTotal, alignment: { horizontal: 'center' } });
   setStyledCell(ws, rIdx, 1, sumInU, { ...STYLES.cellSubTotal, alignment: { horizontal: 'right' }, numFmt: '#,##0' });
   setStyledCell(ws, rIdx, 2, sumOutU, { ...STYLES.cellSubTotal, alignment: { horizontal: 'right' }, numFmt: '#,##0' });
@@ -464,10 +455,8 @@ function writeYearlyTrendSheet(wb, targetYear) {
   rowHeights[rIdx] = 24;
   rIdx++;
 
-  // ==========================================
-  // 【表②：月別 売上金額 推移】（折れ線 / 複合グラフ用）
-  // ==========================================
-  rIdx++; // 空行
+  // 表②：売上推移
+  rIdx++;
   rowHeights[rIdx - 1] = 14;
 
   setStyledCell(ws, rIdx, 0, '■ 表②：月別 リハビリ科 売上金額 推移 (折れ線グラフ用)', {
@@ -502,19 +491,16 @@ function writeYearlyTrendSheet(wb, targetYear) {
     rIdx++;
   });
 
-  // 表② 年間合計行
   setStyledCell(ws, rIdx, 0, '年間合計', { ...STYLES.cellSubTotal, alignment: { horizontal: 'center' } });
   setStyledCell(ws, rIdx, 1, sumInY, { ...STYLES.cellSubTotal, alignment: { horizontal: 'right' }, numFmt: '¥#,##0' });
   setStyledCell(ws, rIdx, 2, sumOutY, { ...STYLES.cellSubTotal, alignment: { horizontal: 'right' }, numFmt: '¥#,##0' });
   setStyledCell(ws, rIdx, 3, sumTotY, { ...STYLES.cellSubTotal, alignment: { horizontal: 'right' }, numFmt: '¥#,##0', font: { bold: true, color: { rgb: '047857' } } });
   rowHeights[rIdx] = 24;
 
-  // 列幅設定（文字切れせず、グラフ認識にも最適なバランス幅）
   setSheetCols(ws, [14, 18, 18, 22, 18]);
-
   ws['!rows'] = rowHeights.map((h) => ({ hpt: h || 20 }));
 
-  applyA4LandscapePrintSetup(ws, false); // 印刷時もA4横で綺麗に収容
+  applyA4LandscapePrintSetup(ws, false);
   updateSheetRange(ws);
   appendOrReplaceSheet(wb, ws, YEARLY_TREND_SHEET);
 }
@@ -526,7 +512,7 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName, patients) {
   const dayOfWeekNames = ['日', '月', '火', '水', '木', '金', '土'];
 
   setStyledCell(ws, 0, 0, `【${year}年${month}月 ${sheetName} (個別リハビリ実施リスト)】`, {
-    font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: '0F172A' } }
+    font: { name: 'Meiryo UI', sz: 12, bold: true, color: { rgb: '0F172A' } }
   });
 
   setStyledCell(ws, 1, 0, '患者ID', STYLES.headerNavy);
@@ -600,7 +586,7 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName, patients) {
     setStyledCell(ws, curRow, 4, totalRehaUnits, {
       ...STYLES.cellCenter,
       fill: { fgColor: { rgb: 'E0F2FE' } },
-      font: { name: 'Meiryo UI', sz: 8.5, bold: true, color: { rgb: '0369A1' } },
+      font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: '0369A1' } },
       numFmt: '#,##0'
     });
 
@@ -652,33 +638,34 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName, patients) {
     curRow++;
   });
 
-  // 各行の高さを行列へ適用（ヘッダー: 26pt、データ行: 20pt）
-  const rHeights = [{ hpt: 26 }, { hpt: 26 }];
+  // 行高設定：ヘッダーは30ptで改行潰れゼロ、データ行はゆったり25ptで堂々とした見栄えに
+  const rHeights = [{ hpt: 30 }, { hpt: 32 }];
   for (let r = 2; r < curRow; r++) {
-    rHeights.push({ hpt: 20.5 });
+    rHeights.push({ hpt: 25 });
   }
   ws['!rows'] = rHeights;
 
+  // 列幅設定：日付列を 3.6 へ拡大し、2桁数字＋曜日が絶対に潰れない幅を確保
   const colProps = [
-    { wch: 4.2 },       // 患者ID
-    { wpx: 100 },       // 患者氏名 (100px固定)
-    { wch: 2.8 },       // 区分
-    { wch: 3.0 },       // 介護
-    { wch: 4.5 }        // 総単位
+    { wch: 7.5 },       // 患者ID
+    { wpx: 130 },       // 患者氏名 (130px固定)
+    { wch: 4.5 },       // 区分
+    { wch: 5.5 },       // 介護
+    { wch: 7.5 }        // 総単位
   ];
-  for (let d = 1; d <= daysInMonth; d++) colProps.push({ wch: 1.9 });
-  if (isInput) colProps.push({ wch: 3.5 }, { wch: 3.5 }, { wch: 4.2 });
-  else colProps.push({ wch: 4.2 });
+  for (let d = 1; d <= daysInMonth; d++) {
+    colProps.push({ wch: 3.6 });
+  }
+  if (isInput) colProps.push({ wch: 6.5 }, { wch: 6.5 }, { wch: 8.5 });
+  else colProps.push({ wch: 8.5 });
   ws['!cols'] = colProps;
 
-  // オートフィルターを「患者ID」「患者氏名」「区分」「介護」（col 0〜3）のみに限定
   ws['!autofilter'] = {
     ref: window.XLSX.utils.encode_range({ r: 1, c: 0 }, { r: Math.max(1, curRow - 1), c: 3 })
   };
 
   ws['!freeze'] = { xSplit: 'E', ySplit: '2', topLeftCell: 'F3', activePane: 'bottomRight', state: 'frozen' };
 
-  // 横1枚固定・縦方向は自然改ページ許可
   applyA4LandscapePrintSetup(ws, false);
   updateSheetRange(ws);
   appendOrReplaceSheet(wb, ws, sheetName);
@@ -690,7 +677,7 @@ function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
   const dayOfWeekNames = ['日', '月', '火', '水', '木', '金', '土'];
 
   setStyledCell(ws, 0, 0, `【${year}年${month}月 ${sheetName} (1日1回35点 / 入外合同)】`, {
-    font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: '15803D' } }
+    font: { name: 'Meiryo UI', sz: 12, bold: true, color: { rgb: '15803D' } }
   });
 
   setStyledCell(ws, 1, 0, '患者ID', STYLES.headerNavy);
@@ -752,19 +739,19 @@ function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
     setStyledCell(ws, curRow, 0, p.id, { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true } });
     setStyledCell(ws, curRow, 1, p.name, { ...STYLES.cellNormal, fill: zebraBg, font: { bold: true } });
     setStyledCell(ws, curRow, 2, catLabel, { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true } });
-    setStyledCell(ws, curRow, 3, p.diseaseName || '消炎鎮痛等処置', { ...STYLES.cellNormal, fill: zebraBg, font: { sz: 7 } });
+    setStyledCell(ws, curRow, 3, p.diseaseName || '消炎鎮痛等処置', { ...STYLES.cellNormal, fill: zebraBg, font: { sz: 8 } });
 
     setStyledCell(ws, curRow, 4, totalDays, {
       ...STYLES.cellCenter,
       fill: { fgColor: { rgb: 'DCFCE7' } },
-      font: { name: 'Meiryo UI', sz: 8.5, bold: true, color: { rgb: '15803D' } },
+      font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: '15803D' } },
       numFmt: '#,##0'
     });
 
     setStyledCell(ws, curRow, 5, totalPoints, {
       ...STYLES.cellCenter,
       fill: { fgColor: { rgb: 'DCFCE7' } },
-      font: { name: 'Meiryo UI', sz: 8.5, bold: true, color: { rgb: '15803D' } },
+      font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: '15803D' } },
       numFmt: '#,##0'
     });
 
@@ -790,23 +777,22 @@ function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
     curRow++;
   });
 
-  // 消炎鎮痛シートの行高もゆったり20.5ptに統一
-  const aHeights = [{ hpt: 26 }, { hpt: 26 }];
+  const aHeights = [{ hpt: 30 }, { hpt: 32 }];
   for (let r = 2; r < curRow; r++) {
-    aHeights.push({ hpt: 20.5 });
+    aHeights.push({ hpt: 25 });
   }
   ws['!rows'] = aHeights;
 
   const colProps = [
-    { wch: 4.0 },       // 患者ID
-    { wpx: 100 },       // 患者氏名 (100px固定)
-    { wch: 2.8 },       // 区分
-    { wch: 8.5 },       // 疾患名
-    { wch: 3.8 },       // 回数
-    { wch: 4.5 }        // 総点数
+    { wch: 7.5 },       // 患者ID
+    { wpx: 130 },       // 患者氏名 (130px固定)
+    { wch: 4.5 },       // 区分
+    { wch: 14.0 },      // 疾患名
+    { wch: 6.5 },       // 回数
+    { wch: 7.5 }        // 総点数
   ];
-  for (let d = 1; d <= daysInMonth; d++) colProps.push({ wch: 1.85 });
-  colProps.push({ wch: 5.0 });
+  for (let d = 1; d <= daysInMonth; d++) colProps.push({ wch: 3.6 });
+  colProps.push({ wch: 10.0 });
   ws['!cols'] = colProps;
 
   ws['!autofilter'] = {
@@ -830,7 +816,7 @@ function applyA4LandscapePrintSetup(ws, singlePageOnly = false) {
     fitToHeight: singlePageOnly ? 1 : 0, // サマリーは1枚収容、リスト系は縦の自然改ページを許可
     fitToPage: true
   };
-  ws['!margins'] = { left: 0.1, right: 0.1, top: 0.2, bottom: 0.2, header: 0.05, footer: 0.05 };
+  ws['!margins'] = { left: 0.2, right: 0.2, top: 0.3, bottom: 0.3, header: 0.1, footer: 0.1 };
 }
 
 function setStyledCell(ws, r, c, val, style = {}) {
