@@ -1,5 +1,5 @@
 // js/excel/diaryWriter.js
-// 業務日誌Excel生成層（原本R8.6準拠 / 検印欄 / 動的スタッフ名完全反映 / 当日までの累積シート生成 / 外来0名・公休スマート自動記録 / A4横1枚極上美麗レイアウト版）
+// 業務日誌Excel生成層（原本R8.6準拠 / 検印欄 / 動的スタッフ名完全反映 / 当日までの累積シート生成 / 外来0名・公休スマート自動記録 / A4横用紙完全均整・堂々美麗レイアウト版）
 
 import { REHA_RULES } from '../config/rules.js';
 import { getDailySchedule } from '../store/scheduleStore.js';
@@ -8,30 +8,30 @@ import { getAllTherapists, THERAPIST_STATUS } from '../store/therapistStore.js';
 
 const STYLES = {
   headerNavy: {
-    font: { name: 'Meiryo UI', sz: 8.5, bold: true, color: { rgb: 'FFFFFF' } },
+    font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: 'FFFFFF' } },
     fill: { fgColor: { rgb: '1E293B' } },
     alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
     border: thinBorder('475569')
   },
   headerSub: {
-    font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: '1E293B' } },
+    font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '1E293B' } },
     fill: { fgColor: { rgb: 'F1F5F9' } },
     alignment: { horizontal: 'center', vertical: 'center' },
     border: thinBorder('94A3B8')
   },
   cellLabel: {
-    font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: '334155' } },
+    font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '334155' } },
     fill: { fgColor: { rgb: 'F8FAFC' } },
     alignment: { vertical: 'center' },
     border: thinBorder('CBD5E1')
   },
   cellVal: {
-    font: { name: 'Meiryo UI', sz: 8 },
+    font: { name: 'Meiryo UI', sz: 9 },
     alignment: { horizontal: 'right', vertical: 'center' },
     border: thinBorder('CBD5E1')
   },
   cellCenter: {
-    font: { name: 'Meiryo UI', sz: 8 },
+    font: { name: 'Meiryo UI', sz: 9 },
     alignment: { horizontal: 'center', vertical: 'center' },
     border: thinBorder('CBD5E1')
   }
@@ -43,7 +43,7 @@ function thinBorder(colorHex = 'CBD5E1') {
 }
 
 /**
- * 業務日誌ワークブック生成（A4横1枚完全収容・極上美麗レイアウト）
+ * 業務日誌ワークブック生成（A4横用紙を贅沢に使った堂々美麗レイアウト）
  */
 export function generateDiaryWorkbook(aggregated, targetDay = null) {
   if (!window.XLSX) throw new Error('SheetJS (xlsx-js-style) が読み込まれていません。');
@@ -65,7 +65,6 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
 
   for (let day = 1; day <= endDay; day++) {
     const ws = {};
-    const rowHeights = []; // 行の高さをきめ細かく制御
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const dayOfWeek = new Date(year, month - 1, day).getDay();
     const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
@@ -73,16 +72,14 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
     const isSunday = dayOfWeek === 0;
 
     // 1. タイトル & 日付 & 検印枠（右上）
-    rowHeights[0] = 24;
     setStyledCell(ws, 0, 0, 'リハビリテーション科 業務日誌', {
-      font: { name: 'Meiryo UI', sz: 13, bold: true, color: { rgb: '0F172A' } },
+      font: { name: 'Meiryo UI', sz: 15, bold: true, color: { rgb: '0F172A' } },
       alignment: { vertical: 'center' }
     });
 
-    rowHeights[1] = 22;
     const dayColor = isSunday ? { rgb: 'DC2626' } : (dayOfWeek === 6 ? { rgb: '2563EB' } : { rgb: '334155' });
     setStyledCell(ws, 1, 0, `令和${reiwaYear}年 ${month}月 ${day}日 (${dayNames[dayOfWeek]})`, {
-      font: { name: 'Meiryo UI', sz: 10, bold: true, color: dayColor },
+      font: { name: 'Meiryo UI', sz: 11.5, bold: true, color: dayColor },
       alignment: { vertical: 'center' }
     });
 
@@ -93,8 +90,6 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
       setStyledCell(ws, 0, c, title, STYLES.headerSub);
       setStyledCell(ws, 1, c, '', { border: thinBorder('94A3B8'), alignment: { horizontal: 'center', vertical: 'center' } });
     });
-
-    rowHeights[2] = 8; // 表との間の上品な余白
 
     // 2. データ集計
     const schedule = getDailySchedule(dateStr);
@@ -132,14 +127,12 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
     });
 
     // 3. 左側上部：勤務状況・出勤確認
-    rowHeights[3] = 22;
     setStyledCell(ws, 3, 0, '職種 / 担当', STYLES.headerNavy);
     setStyledCell(ws, 3, 1, '出欠・勤務区分', STYLES.headerNavy);
     setStyledCell(ws, 3, 2, '備考', STYLES.headerNavy);
 
     let curLeftRow = 4;
     activeStaffList.forEach((t) => {
-      rowHeights[curLeftRow] = 19;
       const isWorking = ptStats[t.id]?.units > 0;
       let statusStr = '出勤';
       let statusColor = { rgb: '15803D' };
@@ -155,14 +148,13 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
       setStyledCell(ws, curLeftRow, 0, t.name, STYLES.cellLabel);
       setStyledCell(ws, curLeftRow, 1, statusStr, {
         ...STYLES.cellCenter,
-        font: { name: 'Meiryo UI', sz: 8, bold: true, color: statusColor }
+        font: { name: 'Meiryo UI', sz: 9, bold: true, color: statusColor }
       });
       setStyledCell(ws, curLeftRow, 2, '', STYLES.cellCenter);
       curLeftRow++;
     });
 
     ['リハビリ助手 1', 'リハビリ助手 2'].forEach((aide) => {
-      rowHeights[curLeftRow] = 19;
       const aideStatus = isSunday ? '公休' : '出勤 [　　]';
       setStyledCell(ws, curLeftRow, 0, aide, STYLES.cellLabel);
       setStyledCell(ws, curLeftRow, 1, aideStatus, STYLES.cellCenter);
@@ -170,21 +162,16 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
       curLeftRow++;
     });
 
-    // 4. 左側下部：担当セラピスト別実績
-    rowHeights[curLeftRow] = 6; // 余白
-    curLeftRow++;
-
-    rowHeights[curLeftRow] = 22;
+    // 4. 左側下部：担当セラピスト別実績（行潰れの原因だった極小空行を排除）
     setStyledCell(ws, curLeftRow, 0, '担当セラピスト', STYLES.headerNavy);
     setStyledCell(ws, curLeftRow, 1, '実施単位', STYLES.headerNavy);
     setStyledCell(ws, curLeftRow, 2, '実施患者数', STYLES.headerNavy);
     curLeftRow++;
 
     activeStaffList.forEach((t) => {
-      rowHeights[curLeftRow] = 19;
       const stats = ptStats[t.id] || { units: 0, pSet: new Set() };
       setStyledCell(ws, curLeftRow, 0, t.name, STYLES.cellLabel);
-      setStyledCell(ws, curLeftRow, 1, `${stats.units} 単位`, { ...STYLES.cellVal, font: { name: 'Meiryo UI', sz: 8, bold: stats.units > 0 } });
+      setStyledCell(ws, curLeftRow, 1, `${stats.units} 単位`, { ...STYLES.cellVal, font: { name: 'Meiryo UI', sz: 9, bold: stats.units > 0 } });
       setStyledCell(ws, curLeftRow, 2, `${stats.pSet.size} 名`, STYLES.cellVal);
       curLeftRow++;
     });
@@ -220,7 +207,6 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
 
     summaryGrid.forEach((row, idx) => {
       const r = 4 + idx;
-      if (!rowHeights[r]) rowHeights[r] = 19;
       const isSub = row[0].includes('小計');
       const isTotal = row[0].includes('合計');
 
@@ -228,11 +214,11 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
       let styleVal = STYLES.cellVal;
 
       if (isSub) {
-        styleLbl = { ...STYLES.cellLabel, font: { name: 'Meiryo UI', sz: 8, bold: true }, fill: { fgColor: { rgb: 'F1F5F9' } } };
-        styleVal = { ...STYLES.cellVal, font: { name: 'Meiryo UI', sz: 8, bold: true }, fill: { fgColor: { rgb: 'F1F5F9' } } };
+        styleLbl = { ...STYLES.cellLabel, font: { name: 'Meiryo UI', sz: 9, bold: true }, fill: { fgColor: { rgb: 'F1F5F9' } } };
+        styleVal = { ...STYLES.cellVal, font: { name: 'Meiryo UI', sz: 9, bold: true }, fill: { fgColor: { rgb: 'F1F5F9' } } };
       } else if (isTotal) {
-        styleLbl = { ...STYLES.cellLabel, font: { name: 'Meiryo UI', sz: 8.5, bold: true, color: { rgb: '0F172A' } }, fill: { fgColor: { rgb: 'E0F2FE' } } };
-        styleVal = { ...STYLES.cellVal, font: { name: 'Meiryo UI', sz: 8.5, bold: true, color: { rgb: '0369A1' } }, fill: { fgColor: { rgb: 'E0F2FE' } } };
+        styleLbl = { ...STYLES.cellLabel, font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: '0F172A' } }, fill: { fgColor: { rgb: 'E0F2FE' } } };
+        styleVal = { ...STYLES.cellVal, font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: '0369A1' } }, fill: { fgColor: { rgb: 'E0F2FE' } } };
       }
 
       setStyledCell(ws, r, 4, row[0], styleLbl);
@@ -241,9 +227,8 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
       setStyledCell(ws, r, 7, row[3], isTotal ? { ...STYLES.cellCenter, fill: { fgColor: { rgb: 'E0F2FE' } } } : STYLES.cellCenter);
     });
 
-    // 6. 下部：記事・申し送り事項
-    const noteStartRow = Math.max(curLeftRow, 16);
-    rowHeights[noteStartRow] = 20;
+    // 6. 下部：記事・申し送り事項（用紙下部の白紙余白を埋める堂々としたエリア）
+    const noteStartRow = Math.max(curLeftRow, 4 + summaryGrid.length) + 1;
     setStyledCell(ws, noteStartRow, 0, '記事・申し送り事項', STYLES.headerNavy);
     for (let c = 1; c <= 7; c++) setStyledCell(ws, noteStartRow, c, '', STYLES.headerNavy);
 
@@ -255,14 +240,13 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
       autoNoteText = '※ 本日は外来患者来院なし（配置・待機・院内リハ業務実施）';
     }
 
-    for (let rOffset = 1; rOffset <= 3; rOffset++) {
+    for (let rOffset = 1; rOffset <= 4; rOffset++) {
       const nr = noteStartRow + rOffset;
-      rowHeights[nr] = 20;
       const rowText = (rOffset === 1 && autoNoteText) ? autoNoteText : '';
       setStyledCell(ws, nr, 0, rowText, {
         border: thinBorder('CBD5E1'),
         fill: { fgColor: { rgb: 'FFFFFF' } },
-        font: { name: 'Meiryo UI', sz: 8, color: { rgb: '475569' }, italic: Boolean(autoNoteText && rOffset === 1) },
+        font: { name: 'Meiryo UI', sz: 9.5, color: { rgb: '334155' }, bold: Boolean(autoNoteText && rOffset === 1) },
         alignment: { vertical: 'center' }
       });
       for (let c = 1; c <= 7; c++) {
@@ -270,11 +254,23 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
       }
     }
 
-    // 7. 列幅設定（A4横いっぱいに広がる最適幅）
-    setSheetCols(ws, [18, 14, 12, 3, 22, 12, 12, 17]);
+    const maxRowIndex = noteStartRow + 4;
 
-    // 8. 行高の適用
-    ws['!rows'] = rowHeights.map((h) => ({ hpt: h || 19 }));
+    // 各行の高さを一括最適化（タイトル32pt、見出し26pt、データ行23.5pt、申し送り28pt）
+    // A4横（有効高約520pt）の上下を満たし、下部余白の偏りを解消
+    const finalRowHeights = [];
+    for (let r = 0; r <= maxRowIndex; r++) {
+      if (r === 0) finalRowHeights[r] = { hpt: 32 };
+      else if (r === 1) finalRowHeights[r] = { hpt: 26 };
+      else if (r === 2) finalRowHeights[r] = { hpt: 12 };
+      else if (r === 3 || r === noteStartRow) finalRowHeights[r] = { hpt: 26 };
+      else if (r > noteStartRow) finalRowHeights[r] = { hpt: 28 };
+      else finalRowHeights[r] = { hpt: 23.5 };
+    }
+    ws['!rows'] = finalRowHeights;
+
+    // 列幅設定（A4横いっぱいに広がる最適バランス幅：合計約115wch）
+    setSheetCols(ws, [20, 15, 14, 3, 24, 13, 13, 18]);
 
     applyA4LandscapePrintSetup(ws);
     updateSheetRange(ws);
@@ -294,7 +290,7 @@ function applyA4LandscapePrintSetup(ws) {
     fitToHeight: 1, // 縦1ページ（1日＝1枚完全収容）
     fitToPage: true
   };
-  ws['!margins'] = { left: 0.2, right: 0.2, top: 0.25, bottom: 0.25, header: 0.05, footer: 0.05 };
+  ws['!margins'] = { left: 0.25, right: 0.25, top: 0.3, bottom: 0.3, header: 0.1, footer: 0.1 };
 }
 
 function setStyledCell(ws, r, c, val, style = {}) {
