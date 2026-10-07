@@ -1,5 +1,5 @@
 // js/excel/uketsukeWriter.js
-// 受付提出用Excel生成層（レセプト収益サマリー入外細分化・年間推移1〜12月シート完備・疾患別シート細分化・日付列幅拡大・A4横堂々美麗版）
+// 受付提出用Excel生成層（レセプト収益サマリー入外細分化・年間推移1〜12月シート完備・疾患別シート細分化・列幅ピクセル逆算補正・A4横堂々美麗版）
 
 import { REHA_RULES } from '../config/rules.js';
 import { evaluateEarlyBonusPhase } from '../core/deadlineCalc.js';
@@ -515,6 +515,7 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName, patients) {
     font: { name: 'Meiryo UI', sz: 12, bold: true, color: { rgb: '0F172A' } }
   });
 
+  // 短縮ヘッダー名適用
   setStyledCell(ws, 1, 0, 'ID', STYLES.headerNavy);
   setStyledCell(ws, 1, 1, '患者氏名', STYLES.headerNavy);
   setStyledCell(ws, 1, 2, '区分', STYLES.headerNavy);
@@ -645,19 +646,19 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName, patients) {
   }
   ws['!rows'] = rHeights;
 
-  // 列幅設定：すべてご指定のピクセル（wpx）で厳密設定
+  // ★列幅設定：Excel内部展開比率（約1.165倍）を逆算補正し、目標ピクセル（42, 80, 29, 23, 29, 23, 34, 38px）にジャスト調整
   const colProps = [
-    { wpx: 42 },        // ID (42px)
-    { wpx: 80 },        // 患者氏名 (80px)
-    { wpx: 29 },        // 区分 (29px)
-    { wpx: 23 },        // 介 (23px)
-    { wpx: 29 }         // 総 (29px)
+    { wpx: 36 },        // ID (目標 42px 狙い: 36 * 1.167 ≒ 42px)
+    { wpx: 69 },        // 患者氏名 (目標 80px 狙い: 69 * 1.163 ≒ 80px)
+    { wpx: 25 },        // 区分 (目標 29px 狙い: 25 * 1.172 ≒ 29px)
+    { wpx: 20 },        // 介 (目標 23px 狙い: 20 * 1.17 ≒ 23px)
+    { wpx: 25 }         // 総 (目標 29px 狙い: 25 * 1.172 ≒ 29px)
   ];
   for (let d = 1; d <= daysInMonth; d++) {
-    colProps.push({ wpx: 23 }); // 日付（すべて23px）
+    colProps.push({ wpx: 20 }); // 日付 (目標 23px 狙い: 20 * 1.17 ≒ 23px)
   }
-  if (isInput) colProps.push({ wpx: 34 }, { wpx: 34 }, { wpx: 38 }); // 早Ⅰ(34px), 早Ⅱ(34px), 計画(38px)
-  else colProps.push({ wpx: 38 });                                     // 計画(38px)
+  if (isInput) colProps.push({ wpx: 29 }, { wpx: 29 }, { wpx: 33 }); // 早Ⅰ(34px), 早Ⅱ(34px), 計画(38px)
+  else colProps.push({ wpx: 33 });                                     // 計画(38px)
   ws['!cols'] = colProps;
 
   ws['!autofilter'] = {
