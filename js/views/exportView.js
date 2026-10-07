@@ -1,277 +1,326 @@
-// js/views/exportView.js
-// VIEW 5: 月末Excel原本出力・全データバックアップ＆復元・日次14日ローテーション自動保存(PCフォルダ直接書き出し・当日リアルタイム上書き・終了時保存対応)・5/31年度確定バックアップ対応層（200行制限準拠）
+// js/excel/diaryWriter.js
+// 業務日誌Excel生成層（原本R8.6準拠 / 検印欄 / 動的スタッフ名完全反映 / 当日までの累積シート生成 / 外来0名・公休スマート自動記録 / A4横1枚極上美麗レイアウト版）
 
-import { safeParseInt } from '../core/dataNormalizer.js';
-import { aggregateFromAppSchedule } from '../store/scheduleStore.js';
-import { generateUketsukeWorkbook } from '../excel/uketsukeWriter.js';
-import { generateDiaryWorkbook } from '../excel/diaryWriter.js';
+import { REHA_RULES } from '../config/rules.js';
+import { getDailySchedule } from '../store/scheduleStore.js';
+import { getPatientById } from '../store/patientStore.js';
+import { getAllTherapists, THERAPIST_STATUS } from '../store/therapistStore.js';
 
-let autoBackupDebounceTimer = null;
-
-export function showToast(message, type = 'info') {
-  let container = document.getElementById('toastContainer');
-  if (!container) {
-    container = document.createElement('div');
-    container.id = 'toastContainer';
-    container.className = 'toast-container';
-    document.body.appendChild(container);
+const STYLES = {
+  headerNavy: {
+    font: { name: 'Meiryo UI', sz: 8.5, bold: true, color: { rgb: 'FFFFFF' } },
+    fill: { fgColor: { rgb: '1E293B' } },
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+    border: thinBorder('475569')
+  },
+  headerSub: {
+    font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: '1E293B' } },
+    fill: { fgColor: { rgb: 'F1F5F9' } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: thinBorder('94A3B8')
+  },
+  cellLabel: {
+    font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: '334155' } },
+    fill: { fgColor: { rgb: 'F8FAFC' } },
+    alignment: { vertical: 'center' },
+    border: thinBorder('CBD5E1')
+  },
+  cellVal: {
+    font: { name: 'Meiryo UI', sz: 8 },
+    alignment: { horizontal: 'right', vertical: 'center' },
+    border: thinBorder('CBD5E1')
+  },
+  cellCenter: {
+    font: { name: 'Meiryo UI', sz: 8 },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: thinBorder('CBD5E1')
   }
+};
 
-  const toast = document.createElement('div');
-  toast.className = `toast-item ${type}`;
-  toast.textContent = message;
-  container.appendChild(toast);
-
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    toast.style.transform = 'translateX(100%)';
-    toast.style.transition = 'all 0.3s ease';
-    setTimeout(() => toast.remove(), 300);
-  }, 3500);
+function thinBorder(colorHex = 'CBD5E1') {
+  const b = { style: 'thin', color: { rgb: colorHex } };
+  return { top: b, bottom: b, left: b, right: b };
 }
 
-export function initExportView() {
-  const monthInput = document.getElementById('exportMonthInput');
-  const btnUketsuke = document.getElementById('btnExportUketsuke');
-  const btnDiary = document.getElementById('btnExportDiary');
+/**
+ * 業務日誌ワークブック生成（A4横1枚完全収容・極上美麗レイアウト）
+ */
+export function generateDiaryWorkbook(aggregated, targetDay = null) {
+  if (!window.XLSX) throw new Error('SheetJS (xlsx-js-style) が読み込まれていません。');
+  const wb = window.XLSX.utils.book_new();
+  const { year, month, daysInMonth } = aggregated;
 
-  if (monthInput && !monthInput.value) {
-    const today = new Date();
-    const y = today.getFullYear();
-    const m = String(today.getMonth() + 1).padStart(2, '0');
-    monthInput.value = `${y}-${m}`;
-  }
-
-  btnUketsuke?.addEventListener('click', () => handleExportUketsuke(monthInput));
-  btnDiary?.addEventListener('click', () => handleExportDiary(monthInput));
-
-  setupBackupAndRestoreListeners();
-
-  // ★【第1層：起動時】当日の最新ファイルを作成・上書き保存（前日のファイルはそのまま確定保持）
-  performDailyAutoBackup();
-
-  // ★【第1層：終了時】アプリ終了（画面を閉じる）直前に、当日の最終確定データを当日ファイルへ上書き保存
-  window.addEventListener('beforeunload', () => {
-    performDailyAutoBackup();
-  });
-
-  // グローバルに関数を公開し、時間割保存時などから安全に即時/遅延上書きを呼べるように設定
-  window.triggerDailyBackup = triggerDailyAutoBackup;
-}
-
-function handleExportUketsuke(monthInput) {
-  const [year, month] = parseYearMonth(monthInput?.value);
-  if (!year || !month) return showToast('出力対象年月を正しく選択してください', 'warn');
-
-  showToast(`${year}年${month}月 受付提出用Excelを集計・生成中...`, 'info');
-  try {
-    const aggregated = aggregateFromAppSchedule(year, month);
-    const wb = generateUketsukeWorkbook(aggregated, null);
-    if (!wb) return showToast('受付提出用Excelの生成に失敗しました', 'error');
-
-    const filename = `受付提出用_実施リスト_${year}年${String(month).padStart(2, '0')}月.xlsx`;
-    window.XLSX.writeFile(wb, filename);
-    showToast(`受付提出用Excelを出力しました: ${filename}`, 'success');
-  } catch (error) {
-    console.error('Uketsuke Export Error:', error);
-    showToast(`出力エラー: ${error.message || 'データ集計に失敗しました'}`, 'error');
-  }
-}
-
-function handleExportDiary(monthInput) {
-  const [year, month] = parseYearMonth(monthInput?.value);
-  if (!year || !month) return showToast('出力対象年月を正しく選択してください', 'warn');
+  const allTherapists = getAllTherapists();
+  const activeStaffList = allTherapists.filter((t) => t.status !== THERAPIST_STATUS.RETIRED);
 
   const now = new Date();
   const isCurrentMonth = (now.getFullYear() === year && (now.getMonth() + 1) === month);
-  const targetDay = isCurrentMonth ? now.getDate() : null;
+  let endDay = daysInMonth;
 
-  const targetRangeStr = isCurrentMonth ? `1日〜${targetDay}日 (当日累積)` : '1日〜月末';
-  showToast(`${year}年${month}月 業務日誌Excelを集計中 (${targetRangeStr})...`, 'info');
-
-  try {
-    const aggregated = aggregateFromAppSchedule(year, month);
-    const wb = generateDiaryWorkbook(aggregated, targetDay);
-    if (!wb) return showToast('業務日誌Excelの生成に失敗しました', 'error');
-
-    const filename = `業務日誌_${year}年${String(month).padStart(2, '0')}月.xlsx`;
-    window.XLSX.writeFile(wb, filename);
-    showToast(`業務日誌Excelを出力しました (${targetRangeStr}): ${filename}`, 'success');
-  } catch (error) {
-    console.error('Diary Export Error:', error);
-    showToast(`出力エラー: ${error.message || '日誌集計に失敗しました'}`, 'error');
+  if (targetDay !== null && targetDay !== undefined) {
+    endDay = Math.min(daysInMonth, Math.max(1, targetDay));
+  } else if (isCurrentMonth) {
+    endDay = Math.min(daysInMonth, now.getDate());
   }
-}
 
-function parseYearMonth(val) {
-  if (!val) return [null, null];
-  const parts = val.split('-');
-  return [safeParseInt(parts[0]), safeParseInt(parts[1])];
-}
+  for (let day = 1; day <= endDay; day++) {
+    const ws = {};
+    const rowHeights = []; // 行の高さをきめ細かく制御
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const dayOfWeek = new Date(year, month - 1, day).getDay();
+    const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+    const reiwaYear = year - 2018;
+    const isSunday = dayOfWeek === 0;
 
-function createSystemDump(meta = {}) {
-  const dump = {
-    app: 'reha-work-manager',
-    version: '1.0.0',
-    exportedAt: new Date().toISOString(),
-    ...meta,
-    storage: {}
-  };
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    // 自動バックアップ自体の肥大化防止のため、内部ローテーションキーは除外して純粋データのみ収集
-    if (key && key.startsWith('reha_') && !key.startsWith('reha_autobackup_')) {
-      dump.storage[key] = localStorage.getItem(key);
-    }
-  }
-  return dump;
-}
+    // 1. タイトル & 日付 & 検印枠（右上）
+    rowHeights[0] = 24;
+    setStyledCell(ws, 0, 0, 'リハビリテーション科 業務日誌', {
+      font: { name: 'Meiryo UI', sz: 13, bold: true, color: { rgb: '0F172A' } },
+      alignment: { vertical: 'center' }
+    });
 
-function downloadJsonBlob(blob, filename) {
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(link.href);
-}
+    rowHeights[1] = 22;
+    const dayColor = isSunday ? { rgb: 'DC2626' } : (dayOfWeek === 6 ? { rgb: '2563EB' } : { rgb: '334155' });
+    setStyledCell(ws, 1, 0, `令和${reiwaYear}年 ${month}月 ${day}日 (${dayNames[dayOfWeek]})`, {
+      font: { name: 'Meiryo UI', sz: 10, bold: true, color: dayColor },
+      alignment: { vertical: 'center' }
+    });
 
-/**
- * 日中の操作時（時間割の変更・登録等）に当日ファイルを最新状態で自動上書きするトリガー
- * 操作直後の短時間の連続書き込みを防ぐため、2.5秒のデバウンス制御を実施
- */
-export function triggerDailyAutoBackup() {
-  if (autoBackupDebounceTimer) clearTimeout(autoBackupDebounceTimer);
-  autoBackupDebounceTimer = setTimeout(() => {
-    performDailyAutoBackup();
-  }, 2500);
-}
+    // 検印枠（4連: 院長・事務長・科長・担当）
+    const sealTitles = ['院 長', '事務長', '科 長', '担 当'];
+    sealTitles.forEach((title, idx) => {
+      const c = 4 + idx;
+      setStyledCell(ws, 0, c, title, STYLES.headerSub);
+      setStyledCell(ws, 1, c, '', { border: thinBorder('94A3B8'), alignment: { horizontal: 'center', vertical: 'center' } });
+    });
 
-/**
- * ★【第1層：日常】日次自動バックアップ ＆ 当日最新上書き ＆ 直近14日自動ローテーション消去
- * （アプリ内部LocalStorage保護 ＋ PCドキュメントフォルダへの直接JSON上書きの二重防衛）
- */
-export async function performDailyAutoBackup() {
-  try {
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const backupKey = `reha_autobackup_${todayStr}`;
-    const dump = createSystemDump({ backupType: 'DAILY_AUTO', targetDate: todayStr });
+    rowHeights[2] = 8; // 表との間の上品な余白
 
-    // 1. アプリ内部LocalStorageへの上書き保管（常に最新状態へ更新）
-    localStorage.setItem(backupKey, JSON.stringify(dump));
+    // 2. データ集計
+    const schedule = getDailySchedule(dateStr);
+    const ptStats = {};
+    activeStaffList.forEach((t) => {
+      ptStats[t.id] = { name: t.name, units: 0, pSet: new Set() };
+    });
 
-    // 2. PCの専用フォルダ（ドキュメント/リハ業務管理_自動バックアップ/）へ当日ファイルとして直接上書き書き出し
-    if (window.desktopApp && typeof window.desktopApp.saveDailyBackup === 'function') {
-      try {
-        // ★新旧main.jsのどちらでも100%確実に書き出せるよう、包み込み構造と直渡し構造を両立して送信
-        const payload = { targetDate: todayStr, data: dump, ...dump };
-        const res = await window.desktopApp.saveDailyBackup(payload);
-        if (res?.success) {
-          console.log(`[自動バックアップ] PCフォルダへ当日最新上書き保存完了: ${res.filePath}`);
-        }
-      } catch (ipcErr) {
-        console.warn('Desktop file auto-backup IPC error:', ipcErr);
-      }
-    }
-
-    // 3. 内部LocalStorage側も14日を超過した古い自動バックアップを自動消去（容量頭打ち処理）
-    const autoKeys = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith('reha_autobackup_')) autoKeys.push(k);
-    }
-    autoKeys.sort(); // 日付文字列昇順
-    while (autoKeys.length > 14) {
-      const oldestKey = autoKeys.shift();
-      if (oldestKey) localStorage.removeItem(oldestKey);
-    }
-  } catch (e) {
-    console.warn('Daily auto backup error:', e);
-  }
-}
-
-function setupBackupAndRestoreListeners() {
-  const btnBackup = document.getElementById('btnBackupDownload');
-  const btnFiscalBackup = document.getElementById('btnFiscalYearBackup');
-  const btnTriggerRestore = document.getElementById('btnTriggerRestore');
-  const fileInput = document.getElementById('backupFileInput');
-
-  // A: 通常の手動全データバックアップ (随時)
-  btnBackup?.addEventListener('click', () => {
-    try {
-      const dumpData = createSystemDump({ backupType: 'MANUAL' });
-      const blob = new Blob([JSON.stringify(dumpData, null, 2)], { type: 'application/json' });
-      const nowStr = new Date().toISOString().slice(0, 10);
-      const fileName = `reha_backup_${nowStr}.json`;
-      downloadJsonBlob(blob, fileName);
-      showToast(`全データを保存しました: ${fileName}`, 'success');
-    } catch (err) {
-      console.error('Backup error:', err);
-      showToast('バックアップの作成に失敗しました', 'error');
-    }
-  });
-
-  // ★B: 【第2層：年次】5月31日 年度確定バックアップ（改定サイクル準拠）
-  btnFiscalBackup?.addEventListener('click', () => {
-    try {
-      const today = new Date();
-      const y = today.getFullYear();
-      const m = today.getMonth() + 1;
-      const fiscalYear = m <= 5 ? y - 1 : y;
-      const dumpData = createSystemDump({
-        backupType: 'FISCAL_YEAR_FINAL',
-        fiscalYear: fiscalYear,
-        cycleNote: '5月31日確定_診療報酬改定対応'
-      });
-      const blob = new Blob([JSON.stringify(dumpData, null, 2)], { type: 'application/json' });
-      const fileName = `reha_${fiscalYear}年度確定_5月31日改定締め.json`;
-      downloadJsonBlob(blob, fileName);
-      showToast(`🏛 ${fiscalYear}年度確定バックアップ(5/31締め)を保存しました`, 'success');
-    } catch (err) {
-      console.error('Fiscal backup error:', err);
-      showToast('年度確定バックアップの作成に失敗しました', 'error');
-    }
-  });
-
-  // C: 復元ファイル選択トリガー
-  btnTriggerRestore?.addEventListener('click', () => {
-    if (fileInput) { fileInput.value = ''; fileInput.click(); }
-  });
-
-  // D: バックアップファイルの読み込み & 完全復元
-  fileInput?.addEventListener('change', (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const text = event.target?.result;
-        if (typeof text !== 'string') throw new Error('読込失敗');
-        const parsed = JSON.parse(text);
-        if (!parsed || parsed.app !== 'reha-work-manager' || !parsed.storage) {
-          return showToast('無効なファイルです。正しいバックアップJSONを選択してください。', 'error');
-        }
-
-        const keysToRemove = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (k && k.startsWith('reha_')) keysToRemove.push(k);
-        }
-        keysToRemove.forEach((k) => localStorage.removeItem(k));
-
-        Object.entries(parsed.storage).forEach(([k, v]) => {
-          if (typeof v === 'string') localStorage.setItem(k, v);
-        });
-
-        showToast('データを完全復元しました。画面を再読み込みします...', 'success');
-        setTimeout(() => window.location.reload(), 1200);
-      } catch (err) {
-        console.error('Restore error:', err);
-        showToast('ファイルの復元に失敗しました。正しいJSONファイルかご確認ください。', 'error');
-      }
+    const breakdown = {
+      IN: { LOCOMOTIVE: { u: 0, p: new Set() }, CEREBROVASCULAR: { u: 0, p: new Set() }, DISUSE: { u: 0, p: new Set() } },
+      OUT: { LOCOMOTIVE: { u: 0, p: new Set() }, CEREBROVASCULAR: { u: 0, p: new Set() }, DISUSE: { u: 0, p: new Set() } }
     };
-    reader.readAsText(file);
+    let planCount = 0;
+
+    activeStaffList.forEach((t) => {
+      const slots = schedule[t.id] || {};
+      Object.values(slots).forEach((item) => {
+        if (item?.patientId) {
+          const p = getPatientById(item.patientId);
+          const u = item.units || 1;
+          if (ptStats[t.id]) {
+            ptStats[t.id].units += u;
+            ptStats[t.id].pSet.add(item.patientId);
+          }
+
+          const isInput = p?.category === 'INPATIENT';
+          const catKey = isInput ? 'IN' : 'OUT';
+          const dKey = p?.diseaseType in breakdown[catKey] ? p.diseaseType : 'LOCOMOTIVE';
+          breakdown[catKey][dKey].u += u;
+          breakdown[catKey][dKey].p.add(item.patientId);
+
+          if (item.billingPlan) planCount++;
+        }
+      });
+    });
+
+    // 3. 左側上部：勤務状況・出勤確認
+    rowHeights[3] = 22;
+    setStyledCell(ws, 3, 0, '職種 / 担当', STYLES.headerNavy);
+    setStyledCell(ws, 3, 1, '出欠・勤務区分', STYLES.headerNavy);
+    setStyledCell(ws, 3, 2, '備考', STYLES.headerNavy);
+
+    let curLeftRow = 4;
+    activeStaffList.forEach((t) => {
+      rowHeights[curLeftRow] = 19;
+      const isWorking = ptStats[t.id]?.units > 0;
+      let statusStr = '出勤';
+      let statusColor = { rgb: '15803D' };
+
+      if (isSunday && !isWorking) {
+        statusStr = '公休';
+        statusColor = { rgb: '64748B' };
+      } else if (t.status === THERAPIST_STATUS.LEAVE) {
+        statusStr = '休職';
+        statusColor = { rgb: 'B45309' };
+      }
+
+      setStyledCell(ws, curLeftRow, 0, t.name, STYLES.cellLabel);
+      setStyledCell(ws, curLeftRow, 1, statusStr, {
+        ...STYLES.cellCenter,
+        font: { name: 'Meiryo UI', sz: 8, bold: true, color: statusColor }
+      });
+      setStyledCell(ws, curLeftRow, 2, '', STYLES.cellCenter);
+      curLeftRow++;
+    });
+
+    ['リハビリ助手 1', 'リハビリ助手 2'].forEach((aide) => {
+      rowHeights[curLeftRow] = 19;
+      const aideStatus = isSunday ? '公休' : '出勤 [　　]';
+      setStyledCell(ws, curLeftRow, 0, aide, STYLES.cellLabel);
+      setStyledCell(ws, curLeftRow, 1, aideStatus, STYLES.cellCenter);
+      setStyledCell(ws, curLeftRow, 2, '', STYLES.cellCenter);
+      curLeftRow++;
+    });
+
+    // 4. 左側下部：担当セラピスト別実績
+    rowHeights[curLeftRow] = 6; // 余白
+    curLeftRow++;
+
+    rowHeights[curLeftRow] = 22;
+    setStyledCell(ws, curLeftRow, 0, '担当セラピスト', STYLES.headerNavy);
+    setStyledCell(ws, curLeftRow, 1, '実施単位', STYLES.headerNavy);
+    setStyledCell(ws, curLeftRow, 2, '実施患者数', STYLES.headerNavy);
+    curLeftRow++;
+
+    activeStaffList.forEach((t) => {
+      rowHeights[curLeftRow] = 19;
+      const stats = ptStats[t.id] || { units: 0, pSet: new Set() };
+      setStyledCell(ws, curLeftRow, 0, t.name, STYLES.cellLabel);
+      setStyledCell(ws, curLeftRow, 1, `${stats.units} 単位`, { ...STYLES.cellVal, font: { name: 'Meiryo UI', sz: 8, bold: stats.units > 0 } });
+      setStyledCell(ws, curLeftRow, 2, `${stats.pSet.size} 名`, STYLES.cellVal);
+      curLeftRow++;
+    });
+
+    // 5. 右側：入院・外来別 実績集計表
+    setStyledCell(ws, 3, 4, '区分 / 疾患項目', STYLES.headerNavy);
+    setStyledCell(ws, 3, 5, '単位数', STYLES.headerNavy);
+    setStyledCell(ws, 3, 6, '実施人数', STYLES.headerNavy);
+    setStyledCell(ws, 3, 7, '備考', STYLES.headerNavy);
+
+    const inUnits = breakdown.IN.LOCOMOTIVE.u + breakdown.IN.CEREBROVASCULAR.u + breakdown.IN.DISUSE.u;
+    const inPatients = new Set([...breakdown.IN.LOCOMOTIVE.p, ...breakdown.IN.CEREBROVASCULAR.p, ...breakdown.IN.DISUSE.p]).size;
+    const outUnits = breakdown.OUT.LOCOMOTIVE.u + breakdown.OUT.CEREBROVASCULAR.u + breakdown.OUT.DISUSE.u;
+    const outPatients = new Set([...breakdown.OUT.LOCOMOTIVE.p, ...breakdown.OUT.CEREBROVASCULAR.p, ...breakdown.OUT.DISUSE.p]).size;
+
+    const aPatients = Object.values(schedule.analgesia || {}).flat();
+    const aInCount = aPatients.filter((id) => getPatientById(id)?.category === 'INPATIENT').length;
+    const aOutCount = aPatients.length - aInCount;
+
+    const summaryGrid = [
+      ['【入院】運動器リハ(Ⅱ)', `${breakdown.IN.LOCOMOTIVE.u} 単位`, `${breakdown.IN.LOCOMOTIVE.p.size} 名`, ''],
+      ['【入院】脳血管等リハ(Ⅲ)', `${breakdown.IN.CEREBROVASCULAR.u} 単位`, `${breakdown.IN.CEREBROVASCULAR.p.size} 名`, ''],
+      ['【入院】廃用症候群(Ⅲ)', `${breakdown.IN.DISUSE.u} 単位`, `${breakdown.IN.DISUSE.p.size} 名`, ''],
+      ['【入院】小計', `${inUnits} 単位`, `${inPatients} 名`, ''],
+      ['【外来】運動器リハ(Ⅱ)', `${breakdown.OUT.LOCOMOTIVE.u} 単位`, `${breakdown.OUT.LOCOMOTIVE.p.size} 名`, ''],
+      ['【外来】脳血管等リハ(Ⅲ)', `${breakdown.OUT.CEREBROVASCULAR.u} 単位`, `${breakdown.OUT.CEREBROVASCULAR.p.size} 名`, ''],
+      ['【外来】廃用症候群(Ⅲ)', `${breakdown.OUT.DISUSE.u} 単位`, `${breakdown.OUT.DISUSE.p.size} 名`, ''],
+      ['【外来】小計', `${outUnits} 単位`, `${outPatients} 名`, ''],
+      ['消炎鎮痛処置 (物療)', `${aPatients.length} 件`, `${aPatients.length} 名`, `入院${aInCount} / 外来${aOutCount}`],
+      ['総合計画書策定件数', `${planCount} 件`, '-', ''],
+      ['個別リハ 合計実績', `${inUnits + outUnits} 単位`, `${inPatients + outPatients} 名`, '']
+    ];
+
+    summaryGrid.forEach((row, idx) => {
+      const r = 4 + idx;
+      if (!rowHeights[r]) rowHeights[r] = 19;
+      const isSub = row[0].includes('小計');
+      const isTotal = row[0].includes('合計');
+
+      let styleLbl = STYLES.cellLabel;
+      let styleVal = STYLES.cellVal;
+
+      if (isSub) {
+        styleLbl = { ...STYLES.cellLabel, font: { name: 'Meiryo UI', sz: 8, bold: true }, fill: { fgColor: { rgb: 'F1F5F9' } } };
+        styleVal = { ...STYLES.cellVal, font: { name: 'Meiryo UI', sz: 8, bold: true }, fill: { fgColor: { rgb: 'F1F5F9' } } };
+      } else if (isTotal) {
+        styleLbl = { ...STYLES.cellLabel, font: { name: 'Meiryo UI', sz: 8.5, bold: true, color: { rgb: '0F172A' } }, fill: { fgColor: { rgb: 'E0F2FE' } } };
+        styleVal = { ...STYLES.cellVal, font: { name: 'Meiryo UI', sz: 8.5, bold: true, color: { rgb: '0369A1' } }, fill: { fgColor: { rgb: 'E0F2FE' } } };
+      }
+
+      setStyledCell(ws, r, 4, row[0], styleLbl);
+      setStyledCell(ws, r, 5, row[1], styleVal);
+      setStyledCell(ws, r, 6, row[2], styleVal);
+      setStyledCell(ws, r, 7, row[3], isTotal ? { ...STYLES.cellCenter, fill: { fgColor: { rgb: 'E0F2FE' } } } : STYLES.cellCenter);
+    });
+
+    // 6. 下部：記事・申し送り事項
+    const noteStartRow = Math.max(curLeftRow, 16);
+    rowHeights[noteStartRow] = 20;
+    setStyledCell(ws, noteStartRow, 0, '記事・申し送り事項', STYLES.headerNavy);
+    for (let c = 1; c <= 7; c++) setStyledCell(ws, noteStartRow, c, '', STYLES.headerNavy);
+
+    let autoNoteText = '';
+    const totalDayUnits = inUnits + outUnits;
+    if (isSunday && totalDayUnits === 0 && aPatients.length === 0) {
+      autoNoteText = '※ 休診日 (公休)';
+    } else if (!isSunday && outUnits === 0 && aOutCount === 0) {
+      autoNoteText = '※ 本日は外来患者来院なし（配置・待機・院内リハ業務実施）';
+    }
+
+    for (let rOffset = 1; rOffset <= 3; rOffset++) {
+      const nr = noteStartRow + rOffset;
+      rowHeights[nr] = 20;
+      const rowText = (rOffset === 1 && autoNoteText) ? autoNoteText : '';
+      setStyledCell(ws, nr, 0, rowText, {
+        border: thinBorder('CBD5E1'),
+        fill: { fgColor: { rgb: 'FFFFFF' } },
+        font: { name: 'Meiryo UI', sz: 8, color: { rgb: '475569' }, italic: Boolean(autoNoteText && rOffset === 1) },
+        alignment: { vertical: 'center' }
+      });
+      for (let c = 1; c <= 7; c++) {
+        setStyledCell(ws, nr, c, '', { border: thinBorder('CBD5E1'), fill: { fgColor: { rgb: 'FFFFFF' } } });
+      }
+    }
+
+    // 7. 列幅設定（A4横いっぱいに広がる最適幅）
+    setSheetCols(ws, [18, 14, 12, 3, 22, 12, 12, 17]);
+
+    // 8. 行高の適用
+    ws['!rows'] = rowHeights.map((h) => ({ hpt: h || 19 }));
+
+    applyA4LandscapePrintSetup(ws);
+    updateSheetRange(ws);
+    window.XLSX.utils.book_append_sheet(wb, ws, `${day}日`);
+  }
+
+  return wb;
+}
+
+function applyA4LandscapePrintSetup(ws) {
+  ws['!sheetPr'] = { pageSetUpPr: { fitToPage: true } };
+  ws['!properties'] = { pageSetUpPr: { fitToPage: true } };
+  ws['!pageSetup'] = {
+    paperSize: 9, // A4
+    orientation: 'landscape', // 原本通りの横向き
+    fitToWidth: 1, // 横1ページ
+    fitToHeight: 1, // 縦1ページ（1日＝1枚完全収容）
+    fitToPage: true
+  };
+  ws['!margins'] = { left: 0.2, right: 0.2, top: 0.25, bottom: 0.25, header: 0.05, footer: 0.05 };
+}
+
+function setStyledCell(ws, r, c, val, style = {}) {
+  const addr = window.XLSX.utils.encode_cell({ r, c });
+  if (val === '' || val === null || val === undefined) {
+    ws[addr] = { t: 's', v: '', s: style };
+    return;
+  }
+  const isNum = typeof val === 'number';
+  ws[addr] = { t: isNum ? 'n' : 's', v: val, s: style };
+}
+
+function setSheetCols(ws, widthList) {
+  ws['!cols'] = widthList.map((w) => ({ wch: w }));
+}
+
+function updateSheetRange(ws) {
+  const keys = Object.keys(ws).filter((k) => !k.startsWith('!'));
+  if (keys.length === 0) return;
+  let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
+  keys.forEach((k) => {
+    const cell = window.XLSX.utils.decode_cell(k);
+    if (cell.r < minR) minR = cell.r;
+    if (cell.r > maxR) maxR = cell.r;
+    if (cell.c < minC) minC = cell.c;
+    if (cell.c > maxC) maxC = cell.c;
   });
+  ws['!ref'] = window.XLSX.utils.encode_range({ r: minR, c: minC }, { r: maxR, c: maxC });
 }
