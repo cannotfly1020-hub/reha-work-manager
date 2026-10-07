@@ -167,6 +167,12 @@ function setupPatientModalListeners() {
     deletePatient(editingPatientId);
     modal.classList.remove('active');
     showToast('患者レコードを削除しました', 'warn');
+
+    // ★患者削除後の最新データを当日バックアップファイルへ自動上書きトリガー
+    if (typeof window.triggerDailyBackup === 'function') {
+      window.triggerDailyBackup();
+    }
+
     renderPatientView();
   });
 
@@ -205,6 +211,12 @@ function setupPatientModalListeners() {
 
     modal.classList.remove('active');
     showToast(`患者情報(${res.patient.name})を保存しました`, 'success');
+
+    // ★患者登録・更新保存後の最新データを当日バックアップファイルへ自動上書きトリガー
+    if (typeof window.triggerDailyBackup === 'function') {
+      window.triggerDailyBackup();
+    }
+
     renderPatientView();
   });
 }
