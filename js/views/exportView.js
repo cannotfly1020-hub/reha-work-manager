@@ -1,11 +1,12 @@
 // js/views/exportView.js
-// VIEW 5: 月末Excel原本出力・全データバックアップ＆復元・日次14日ローテーション自動保存(PCフォルダ直接書き出し連携)・5/31年度確定バックアップ対応層（200行制限準拠）
-
+// VIEW 5: 月末Excel原本出力・全データバックアップ＆復元・日次14日ローテーション自動保存(PCフォルダ直接書き出し・当日リアルタイム上書き・終了時保存対応)・5/31年度確定バックアップ対応層（200行制限準拠）
 
 import { safeParseInt } from '../core/dataNormalizer.js';
 import { aggregateFromAppSchedule } from '../store/scheduleStore.js';
 import { generateUketsukeWorkbook } from '../excel/uketsukeWriter.js';
 import { generateDiaryWorkbook } from '../excel/diaryWriter.js';
+
+let autoBackupDebounceTimer = null;
 
 export function showToast(message, type = 'info') {
   let container = document.getElementById('toastContainer');
@@ -46,8 +47,16 @@ export function initExportView() {
 
   setupBackupAndRestoreListeners();
 
-  // ★【第1層】起動時に日次自動バックアップを実行（直近14日ローテーション自動管理）
+  // ★【第1層：起動時】当日の最新ファイルを作成・上書き保存（前日のファイルはそのまま確定保持）
   performDailyAutoBackup();
+
+  // ★【第1層：終了時】アプリ終了（画面を閉じる）直前に、当日の最終確定データを当日ファイルへ上書き保存
+  window.addEventListener('beforeunload', () => {
+    performDailyAutoBackup();
+  });
+
+  // グローバルに関数を公開し、時間割保存時などから安全に即時/遅延上書きを呼べるように設定
+  window.triggerDailyBackup = triggerDailyAutoBackup;
 }
 
 function handleExportUketsuke(monthInput) {
@@ -123,26 +132,35 @@ function downloadJsonBlob(blob, filename) {
 }
 
 /**
- * ★【第1層：日常】日次自動バックアップ ＆ 直近14日自動ローテーション消去
- * （アプリ内部LocalStorage保護 ＋ PCドキュメントフォルダへの直接JSON書き出しの二重防衛）
+ * 日中の操作時（時間割の変更・登録等）に当日ファイルを最新状態で自動上書きするトリガー
+ * 操作直後の短時間の連続書き込みを防ぐため、2.5秒のデバウンス制御を実施
  */
-async function performDailyAutoBackup() {
+export function triggerDailyAutoBackup() {
+  if (autoBackupDebounceTimer) clearTimeout(autoBackupDebounceTimer);
+  autoBackupDebounceTimer = setTimeout(() => {
+    performDailyAutoBackup();
+  }, 2500);
+}
+
+/**
+ * ★【第1層：日常】日次自動バックアップ ＆ 当日最新上書き ＆ 直近14日自動ローテーション消去
+ * （アプリ内部LocalStorage保護 ＋ PCドキュメントフォルダへの直接JSON上書きの二重防衛）
+ */
+export async function performDailyAutoBackup() {
   try {
     const todayStr = new Date().toISOString().slice(0, 10);
     const backupKey = `reha_autobackup_${todayStr}`;
     const dump = createSystemDump({ backupType: 'DAILY_AUTO', targetDate: todayStr });
 
-    // 1. アプリ内部LocalStorageへの保管
-    if (!localStorage.getItem(backupKey)) {
-      localStorage.setItem(backupKey, JSON.stringify(dump));
-    }
+    // 1. アプリ内部LocalStorageへの上書き保管（常に最新状態へ更新）
+    localStorage.setItem(backupKey, JSON.stringify(dump));
 
-    // 2. PCの専用フォルダ（ドキュメント/リハ業務管理_自動バックアップ/）へ直接JSONファイルを書き出し
+    // 2. PCの専用フォルダ（ドキュメント/リハ業務管理_自動バックアップ/）へ当日ファイルとして直接上書き書き出し
     if (window.desktopApp && typeof window.desktopApp.saveDailyBackup === 'function') {
       try {
         const res = await window.desktopApp.saveDailyBackup(dump);
         if (res?.success) {
-          console.log(`[自動バックアップ] PCフォルダへ直接保存完了: ${res.filePath}`);
+          console.log(`[自動バックアップ] PCフォルダへ当日最新上書き保存完了: ${res.filePath}`);
         }
       } catch (ipcErr) {
         console.warn('Desktop file auto-backup IPC error:', ipcErr);
@@ -171,7 +189,7 @@ function setupBackupAndRestoreListeners() {
   const btnTriggerRestore = document.getElementById('btnTriggerRestore');
   const fileInput = document.getElementById('backupFileInput');
 
-  // A: 通常の手動全データバックアップ
+  // A: 通常の手動全データバックアップ (随時)
   btnBackup?.addEventListener('click', () => {
     try {
       const dumpData = createSystemDump({ backupType: 'MANUAL' });
@@ -192,7 +210,6 @@ function setupBackupAndRestoreListeners() {
       const today = new Date();
       const y = today.getFullYear();
       const m = today.getMonth() + 1;
-      // 6月1日〜翌5月31日サイクル判定（1〜5月は前年年度、6〜12月は当年年度）
       const fiscalYear = m <= 5 ? y - 1 : y;
       const dumpData = createSystemDump({
         backupType: 'FISCAL_YEAR_FINAL',
