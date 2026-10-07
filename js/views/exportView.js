@@ -158,7 +158,9 @@ export async function performDailyAutoBackup() {
     // 2. PCの専用フォルダ（ドキュメント/リハ業務管理_自動バックアップ/）へ当日ファイルとして直接上書き書き出し
     if (window.desktopApp && typeof window.desktopApp.saveDailyBackup === 'function') {
       try {
-        const res = await window.desktopApp.saveDailyBackup(dump);
+        // ★新旧main.jsのどちらでも100%確実に書き出せるよう、包み込み構造と直渡し構造を両立して送信
+        const payload = { targetDate: todayStr, data: dump, ...dump };
+        const res = await window.desktopApp.saveDailyBackup(payload);
         if (res?.success) {
           console.log(`[自動バックアップ] PCフォルダへ当日最新上書き保存完了: ${res.filePath}`);
         }
