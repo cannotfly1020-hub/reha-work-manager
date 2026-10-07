@@ -515,11 +515,11 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName, patients) {
     font: { name: 'Meiryo UI', sz: 12, bold: true, color: { rgb: '0F172A' } }
   });
 
-  setStyledCell(ws, 1, 0, '患者ID', STYLES.headerNavy);
+  setStyledCell(ws, 1, 0, 'ID', STYLES.headerNavy);
   setStyledCell(ws, 1, 1, '患者氏名', STYLES.headerNavy);
   setStyledCell(ws, 1, 2, '区分', STYLES.headerNavy);
-  setStyledCell(ws, 1, 3, '介護', STYLES.headerNavy);
-  setStyledCell(ws, 1, 4, '総単位', { ...STYLES.headerNavy, fill: { fgColor: { rgb: '0369A1' } } });
+  setStyledCell(ws, 1, 3, '介', STYLES.headerNavy);
+  setStyledCell(ws, 1, 4, '総', { ...STYLES.headerNavy, fill: { fgColor: { rgb: '0369A1' } } });
 
   const dayColStart = 5;
   for (let d = 1; d <= daysInMonth; d++) {
@@ -536,11 +536,11 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName, patients) {
 
   const extraCol = dayColStart + daysInMonth;
   if (isInput) {
-    setStyledCell(ws, 1, extraCol, '早期Ⅰ', STYLES.headerNavy);
-    setStyledCell(ws, 1, extraCol + 1, '早期Ⅱ', STYLES.headerNavy);
-    setStyledCell(ws, 1, extraCol + 2, '計画日', STYLES.headerNavy);
+    setStyledCell(ws, 1, extraCol, '早Ⅰ', STYLES.headerNavy);
+    setStyledCell(ws, 1, extraCol + 1, '早Ⅱ', STYLES.headerNavy);
+    setStyledCell(ws, 1, extraCol + 2, '計画', STYLES.headerNavy);
   } else {
-    setStyledCell(ws, 1, extraCol, '計画日', STYLES.headerNavy);
+    setStyledCell(ws, 1, extraCol, '計画', STYLES.headerNavy);
   }
 
   let curRow = 2;
@@ -645,19 +645,19 @@ function writeRehaPatientSheet(wb, aggregated, category, sheetName, patients) {
   }
   ws['!rows'] = rHeights;
 
-  // 列幅設定：日付列を 3.6 へ拡大し、2桁数字＋曜日が絶対に潰れない幅を確保
+  // 列幅設定：すべてご指定のピクセル（wpx）で厳密設定
   const colProps = [
-    { wch: 7.5 },       // 患者ID
-    { wpx: 130 },       // 患者氏名 (130px固定)
-    { wch: 4.5 },       // 区分
-    { wch: 5.5 },       // 介護
-    { wch: 7.5 }        // 総単位
+    { wpx: 42 },        // ID (42px)
+    { wpx: 80 },        // 患者氏名 (80px)
+    { wpx: 29 },        // 区分 (29px)
+    { wpx: 23 },        // 介 (23px)
+    { wpx: 29 }         // 総 (29px)
   ];
   for (let d = 1; d <= daysInMonth; d++) {
-    colProps.push({ wch: 3.6 });
+    colProps.push({ wpx: 23 }); // 日付（すべて23px）
   }
-  if (isInput) colProps.push({ wch: 6.5 }, { wch: 6.5 }, { wch: 8.5 });
-  else colProps.push({ wch: 8.5 });
+  if (isInput) colProps.push({ wpx: 34 }, { wpx: 34 }, { wpx: 38 }); // 早Ⅰ(34px), 早Ⅱ(34px), 計画(38px)
+  else colProps.push({ wpx: 38 });                                     // 計画(38px)
   ws['!cols'] = colProps;
 
   ws['!autofilter'] = {
