@@ -156,6 +156,7 @@ export function generateUketsukeWorkbook(aggregated) {
 function writeExecutiveSummarySheet(wb, aggregated) {
   const { patientMap, year, month } = aggregated;
   const ws = {};
+  const rowHeights = []; // 各行のゆったり高さを記録する配列
 
   // 入院・外来別の集計コンテナ
   const inStats = {
@@ -202,17 +203,25 @@ function writeExecutiveSummarySheet(wb, aggregated) {
 
   // タイトル（A列1行目から開始）
   setStyledCell(ws, 0, 0, `【${year}年${month}月 リハビリテーション科 レセプト確定・経営収益サマリー (入院・外来別内訳)】`, {
-    font: { name: 'Meiryo UI', sz: 11, bold: true, color: { rgb: '0F172A' } }
+    font: { name: 'Meiryo UI', sz: 12, bold: true, color: { rgb: '0F172A' } },
+    alignment: { vertical: 'center' }
   });
+  rowHeights[0] = 30; // タイトル行：30pt
+  rowHeights[1] = 10; // タイトル下の余白空行：10pt
 
   const headers = ['項目 / 算定区分', '算定対象 (単位/回)', '単価点数', '総点数', '総売上金額 (¥)', '備考・算定区分'];
-  headers.forEach((h, idx) => setStyledCell(ws, 2, idx, h, STYLES.headerNavy));
+  headers.forEach((h, idx) => setStyledCell(ws, 2, idx, h, {
+    ...STYLES.headerNavy,
+    font: { ...STYLES.headerNavy.font, sz: 9.5 }
+  }));
+  rowHeights[2] = 24; // ヘッダー行：24pt
 
   let rIdx = 3;
 
   const renderSectionHeader = (title, bgColor) => {
+    rowHeights[rIdx] = 22; // 見出し行：22pt
     setStyledCell(ws, rIdx, 0, title, {
-      font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: 'FFFFFF' } },
+      font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: 'FFFFFF' } },
       fill: { fgColor: { rgb: bgColor } },
       alignment: { vertical: 'center' },
       border: thinBorder()
@@ -224,27 +233,29 @@ function writeExecutiveSummarySheet(wb, aggregated) {
   };
 
   const renderDataRow = (name, qty, unitPts, customPts = null, note = '') => {
+    rowHeights[rIdx] = 21; // データ行：ゆったり太めの21pt
     const totPts = customPts !== null ? customPts : qty * unitPts;
     const totYen = totPts * 10;
     const bg = (rIdx % 2 === 1) ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } };
 
-    setStyledCell(ws, rIdx, 0, name, { ...STYLES.cellNormal, fill: bg });
-    setStyledCell(ws, rIdx, 1, qty, { ...STYLES.cellCenter, fill: bg, numFmt: '#,##0' });
-    setStyledCell(ws, rIdx, 2, unitPts > 0 ? unitPts : '-', { ...STYLES.cellCenter, fill: bg, numFmt: '#,##0' });
-    setStyledCell(ws, rIdx, 3, totPts, { ...STYLES.cellRight, fill: bg, numFmt: '#,##0', font: { ...STYLES.cellNormal.font, bold: true } });
-    setStyledCell(ws, rIdx, 4, totYen, { ...STYLES.cellRight, fill: bg, numFmt: '¥#,##0', font: { ...STYLES.cellNormal.font, bold: true, color: { rgb: '047857' } } });
-    setStyledCell(ws, rIdx, 5, note, { ...STYLES.cellNormal, fill: bg, font: { sz: 7.5, color: { rgb: '64748B' } } });
+    setStyledCell(ws, rIdx, 0, name, { ...STYLES.cellNormal, font: { name: 'Meiryo UI', sz: 9 }, fill: bg });
+    setStyledCell(ws, rIdx, 1, qty, { ...STYLES.cellCenter, font: { name: 'Meiryo UI', sz: 9 }, fill: bg, numFmt: '#,##0' });
+    setStyledCell(ws, rIdx, 2, unitPts > 0 ? unitPts : '-', { ...STYLES.cellCenter, font: { name: 'Meiryo UI', sz: 9 }, fill: bg, numFmt: '#,##0' });
+    setStyledCell(ws, rIdx, 3, totPts, { ...STYLES.cellRight, fill: bg, numFmt: '#,##0', font: { name: 'Meiryo UI', sz: 9, bold: true } });
+    setStyledCell(ws, rIdx, 4, totYen, { ...STYLES.cellRight, fill: bg, numFmt: '¥#,##0', font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: '047857' } } });
+    setStyledCell(ws, rIdx, 5, note, { ...STYLES.cellNormal, fill: bg, font: { name: 'Meiryo UI', sz: 8, color: { rgb: '64748B' } } });
     rIdx++;
     return { pts: totPts, yen: totYen, units: qty };
   };
 
   const renderSubTotalRow = (title, units, totPts, totYen) => {
-    setStyledCell(ws, rIdx, 0, title, { ...STYLES.cellSubTotal, alignment: { vertical: 'center' } });
-    setStyledCell(ws, rIdx, 1, units, { ...STYLES.cellSubTotal, alignment: { horizontal: 'center', vertical: 'center' }, numFmt: '#,##0' });
-    setStyledCell(ws, rIdx, 2, '-', { ...STYLES.cellSubTotal, alignment: { horizontal: 'center', vertical: 'center' } });
-    setStyledCell(ws, rIdx, 3, totPts, { ...STYLES.cellSubTotal, alignment: { horizontal: 'right', vertical: 'center' }, numFmt: '#,##0' });
-    setStyledCell(ws, rIdx, 4, totYen, { ...STYLES.cellSubTotal, alignment: { horizontal: 'right', vertical: 'center' }, font: { ...STYLES.cellSubTotal.font, color: { rgb: '047857' } }, numFmt: '¥#,##0' });
-    setStyledCell(ws, rIdx, 5, '小計 (単位・点数×10円)', { ...STYLES.cellSubTotal, font: { sz: 7.5, color: { rgb: '475569' } } });
+    rowHeights[rIdx] = 24; // 小計行：24pt
+    setStyledCell(ws, rIdx, 0, title, { ...STYLES.cellSubTotal, font: { ...STYLES.cellSubTotal.font, sz: 9.5 }, alignment: { vertical: 'center' } });
+    setStyledCell(ws, rIdx, 1, units, { ...STYLES.cellSubTotal, font: { ...STYLES.cellSubTotal.font, sz: 9.5 }, alignment: { horizontal: 'center', vertical: 'center' }, numFmt: '#,##0' });
+    setStyledCell(ws, rIdx, 2, '-', { ...STYLES.cellSubTotal, font: { ...STYLES.cellSubTotal.font, sz: 9.5 }, alignment: { horizontal: 'center', vertical: 'center' } });
+    setStyledCell(ws, rIdx, 3, totPts, { ...STYLES.cellSubTotal, font: { ...STYLES.cellSubTotal.font, sz: 9.5 }, alignment: { horizontal: 'right', vertical: 'center' }, numFmt: '#,##0' });
+    setStyledCell(ws, rIdx, 4, totYen, { ...STYLES.cellSubTotal, alignment: { horizontal: 'right', vertical: 'center' }, font: { name: 'Meiryo UI', sz: 10, bold: true, color: { rgb: '047857' } }, numFmt: '¥#,##0' });
+    setStyledCell(ws, rIdx, 5, '小計 (単位・点数×10円)', { ...STYLES.cellSubTotal, font: { name: 'Meiryo UI', sz: 8, color: { rgb: '475569' } } });
     rIdx++;
   };
 
@@ -265,6 +276,7 @@ function writeExecutiveSummarySheet(wb, aggregated) {
   inTotalYen = r1.yen + r2.yen + r3.yen + r4.yen + r5.yen + r6.yen;
   renderSubTotalRow('★【入院 総単位・収益 小計】', inTotalUnits, inTotalPts, inTotalYen);
 
+  rowHeights[rIdx] = 12; // セクション間空行：12pt
   rIdx++; // 空白行
 
   // 2. 【外来セクション】
@@ -283,6 +295,7 @@ function writeExecutiveSummarySheet(wb, aggregated) {
   outTotalYen = ro1.yen + ro2.yen + ro3.yen + ro4.yen + ro5.yen;
   renderSubTotalRow('★【外来 総単位・収益 小計】', outTotalUnits, outTotalPts, outTotalYen);
 
+  rowHeights[rIdx] = 12; // セクション間空行：12pt
   rIdx++; // 空白行
 
   // 3. 【全体総合計セクション】
@@ -292,16 +305,21 @@ function writeExecutiveSummarySheet(wb, aggregated) {
   const totalBorder = { top: { style: 'thin', color: { rgb: '0F172A' } }, bottom: { style: 'double', color: { rgb: '0F172A' } } };
   const totalFill = { fgColor: { rgb: 'ECFDF5' } };
 
-  setStyledCell(ws, rIdx, 0, '★★★【レセプト総確定 合計 (入院＋外来)】', { font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: '0F172A' } }, fill: totalFill, border: totalBorder });
-  setStyledCell(ws, rIdx, 1, grandTotalUnits, { alignment: { horizontal: 'center', vertical: 'center' }, font: { bold: true }, fill: totalFill, border: totalBorder, numFmt: '#,##0' });
+  rowHeights[rIdx] = 28; // 総合計行：一番太い28pt
+  setStyledCell(ws, rIdx, 0, '★★★【レセプト総確定 合計 (入院＋外来)】', { font: { name: 'Meiryo UI', sz: 10, bold: true, color: { rgb: '0F172A' } }, fill: totalFill, border: totalBorder, alignment: { vertical: 'center' } });
+  setStyledCell(ws, rIdx, 1, grandTotalUnits, { alignment: { horizontal: 'center', vertical: 'center' }, font: { name: 'Meiryo UI', sz: 10, bold: true }, fill: totalFill, border: totalBorder, numFmt: '#,##0' });
   setStyledCell(ws, rIdx, 2, '-', { alignment: { horizontal: 'center', vertical: 'center' }, fill: totalFill, border: totalBorder });
-  setStyledCell(ws, rIdx, 3, grandTotalPts, { alignment: { horizontal: 'right', vertical: 'center' }, font: { name: 'Meiryo UI', sz: 10, bold: true, color: { rgb: '0F172A' } }, fill: totalFill, border: totalBorder, numFmt: '#,##0' });
-  setStyledCell(ws, rIdx, 4, grandTotalYen, { alignment: { horizontal: 'right', vertical: 'center' }, font: { name: 'Meiryo UI', sz: 10.5, bold: true, color: { rgb: '047857' } }, fill: totalFill, border: totalBorder, numFmt: '¥#,##0' });
-  setStyledCell(ws, rIdx, 5, '総点数×10円（保険請求確定）', { font: { sz: 7.5, color: { rgb: '047857' }, bold: true }, fill: totalFill, border: totalBorder });
+  setStyledCell(ws, rIdx, 3, grandTotalPts, { alignment: { horizontal: 'right', vertical: 'center' }, font: { name: 'Meiryo UI', sz: 10.5, bold: true, color: { rgb: '0F172A' } }, fill: totalFill, border: totalBorder, numFmt: '#,##0' });
+  setStyledCell(ws, rIdx, 4, grandTotalYen, { alignment: { horizontal: 'right', vertical: 'center' }, font: { name: 'Meiryo UI', sz: 11, bold: true, color: { rgb: '047857' } }, fill: totalFill, border: totalBorder, numFmt: '¥#,##0' });
+  setStyledCell(ws, rIdx, 5, '総点数×10円（保険請求確定）', { font: { name: 'Meiryo UI', sz: 8.5, color: { rgb: '047857' }, bold: true }, fill: totalFill, border: totalBorder, alignment: { vertical: 'center' } });
 
   // A列(0)から始まる列幅をゆったり十分な余白付きで設定（文字切れ完全防止）
   setSheetCols(ws, [38, 14, 10, 14, 18, 28]);
-  applyA4LandscapePrintSetup(ws, true); // サマリーは1枚収容
+
+  // 各行の高さを適用（A4横1枚の上下余白にぴったりバランス良く収容）
+  ws['!rows'] = rowHeights.map((h) => ({ hpt: h || 20 }));
+
+  applyA4LandscapePrintSetup(ws, true); // サマリーは1枚収容（横1枚×縦1枚）
   updateSheetRange(ws);
   appendOrReplaceSheet(wb, ws, SUMMARY_SHEET);
 }
