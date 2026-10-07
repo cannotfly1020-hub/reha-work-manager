@@ -1,10 +1,12 @@
 // js/excel/diaryWriter.js
-// 業務日誌Excel生成層（原本R8.6準拠 / 検印欄 / 動的スタッフ名完全反映 / 当日までの累積シート生成 / 外来0名・公休スマート自動記録 / A4横用紙完全均整・堂々美麗レイアウト版）
+// 業務日誌Excel生成層（原本R8.6準拠 / 検印欄 / 動的スタッフ名・リハ助手名完全反映 / 当日までの累積シート生成 / 外来0名・公休スマート自動記録 / 右側テーブル本日収益金額¥完全連携 / A4横用紙完全均整・堂々美麗レイアウト版）
 
 import { REHA_RULES } from '../config/rules.js';
+import { evaluateEarlyBonusPhase } from '../core/deadlineCalc.js';
 import { getDailySchedule } from '../store/scheduleStore.js';
 import { getPatientById } from '../store/patientStore.js';
 import { getAllTherapists, THERAPIST_STATUS } from '../store/therapistStore.js';
+import { getAssistantSettings } from '../views/modals/staffModal.js';
 
 const STYLES = {
   headerNavy: {
@@ -91,7 +93,7 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
       setStyledCell(ws, 1, c, '', { border: thinBorder('94A3B8'), alignment: { horizontal: 'center', vertical: 'center' } });
     });
 
-    // 2. データ集計
+    // 2. データ集計（単位・患者数・本日収益）
     const schedule = getDailySchedule(dateStr);
     const ptStats = {};
     activeStaffList.forEach((t) => {
@@ -99,10 +101,20 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
     });
 
     const breakdown = {
-      IN: { LOCOMOTIVE: { u: 0, p: new Set() }, CEREBROVASCULAR: { u: 0, p: new Set() }, DISUSE: { u: 0, p: new Set() } },
-      OUT: { LOCOMOTIVE: { u: 0, p: new Set() }, CEREBROVASCULAR: { u: 0, p: new Set() }, DISUSE: { u: 0, p: new Set() } }
+      IN: {
+        LOCOMOTIVE: { u: 0, p: new Set(), yen: 0 },
+        CEREBROVASCULAR: { u: 0, p: new Set(), yen: 0 },
+        DISUSE: { u: 0, p: new Set(), yen: 0 },
+        earlyYen: 0
+      },
+      OUT: {
+        LOCOMOTIVE: { u: 0, p: new Set(), yen: 0 },
+        CEREBROVASCULAR: { u: 0, p: new Set(), yen: 0 },
+        DISUSE: { u: 0, p: new Set(), yen: 0 }
+      }
     };
     let planCount = 0;
+    let planYen = 0;
 
     activeStaffList.forEach((t) => {
       const slots = schedule[t.id] || {};
@@ -118,10 +130,29 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
           const isInput = p?.category === 'INPATIENT';
           const catKey = isInput ? 'IN' : 'OUT';
           const dKey = p?.diseaseType in breakdown[catKey] ? p.diseaseType : 'LOCOMOTIVE';
+          const unitPts = REHA_RULES.LIMIT_DAYS[dKey]?.defaultPoints || 170;
+          const baseYen = u * unitPts * 10;
+
           breakdown[catKey][dKey].u += u;
           breakdown[catKey][dKey].p.add(item.patientId);
+          breakdown[catKey][dKey].yen += baseYen;
 
-          if (item.billingPlan) planCount++;
+          // 入院早期加算の算定
+          if (isInput && p) {
+            const baseEarlyDate = p.earlyBonusStartDate || p.admissionDate || p.onsetDate || '';
+            if (baseEarlyDate) {
+              const ph = evaluateEarlyBonusPhase(baseEarlyDate, dateStr, 'INPATIENT');
+              if (ph.points > 0) {
+                breakdown.IN.earlyYen += ph.points * 10;
+              }
+            }
+          }
+
+          // 計画書の算定
+          if (item.billingPlan && REHA_RULES.PLAN_POINTS[item.billingPlan]) {
+            planCount++;
+            planYen += REHA_RULES.PLAN_POINTS[item.billingPlan] * 10;
+          }
         }
       });
     });
@@ -154,7 +185,12 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
       curLeftRow++;
     });
 
-    ['リハビリ助手 1', 'リハビリ助手 2'].forEach((aide) => {
+    // ★設定されたリハビリ助手氏名を動的に反映（未入力時はフォールバック表示）
+    const assistants = getAssistantSettings();
+    const aide1Name = assistants.assistant1 || 'リハビリ助手 1';
+    const aide2Name = assistants.assistant2 || 'リハビリ助手 2';
+
+    [aide1Name, aide2Name].forEach((aide) => {
       const aideStatus = isSunday ? '公休' : '出勤 [　　]';
       setStyledCell(ws, curLeftRow, 0, aide, STYLES.cellLabel);
       setStyledCell(ws, curLeftRow, 1, aideStatus, STYLES.cellCenter);
@@ -162,7 +198,7 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
       curLeftRow++;
     });
 
-    // 4. 左側下部：担当セラピスト別実績（行潰れの原因だった極小空行を排除）
+    // 4. 左側下部：担当セラピスト別実績（行潰れ防止設計）
     setStyledCell(ws, curLeftRow, 0, '担当セラピスト', STYLES.headerNavy);
     setStyledCell(ws, curLeftRow, 1, '実施単位', STYLES.headerNavy);
     setStyledCell(ws, curLeftRow, 2, '実施患者数', STYLES.headerNavy);
@@ -176,33 +212,41 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
       curLeftRow++;
     });
 
-    // 5. 右側：入院・外来別 実績集計表
+    // 5. 右側：入院・外来別 実績集計表（収益金額¥完全連携）
     setStyledCell(ws, 3, 4, '区分 / 疾患項目', STYLES.headerNavy);
     setStyledCell(ws, 3, 5, '単位数', STYLES.headerNavy);
     setStyledCell(ws, 3, 6, '実施人数', STYLES.headerNavy);
-    setStyledCell(ws, 3, 7, '備考', STYLES.headerNavy);
+    setStyledCell(ws, 3, 7, '本日収益金額 (¥)', STYLES.headerNavy);
 
     const inUnits = breakdown.IN.LOCOMOTIVE.u + breakdown.IN.CEREBROVASCULAR.u + breakdown.IN.DISUSE.u;
     const inPatients = new Set([...breakdown.IN.LOCOMOTIVE.p, ...breakdown.IN.CEREBROVASCULAR.p, ...breakdown.IN.DISUSE.p]).size;
+    const inBaseYen = breakdown.IN.LOCOMOTIVE.yen + breakdown.IN.CEREBROVASCULAR.yen + breakdown.IN.DISUSE.yen;
+    const inTotalYen = inBaseYen + breakdown.IN.earlyYen;
+
     const outUnits = breakdown.OUT.LOCOMOTIVE.u + breakdown.OUT.CEREBROVASCULAR.u + breakdown.OUT.DISUSE.u;
     const outPatients = new Set([...breakdown.OUT.LOCOMOTIVE.p, ...breakdown.OUT.CEREBROVASCULAR.p, ...breakdown.OUT.DISUSE.p]).size;
+    const outTotalYen = breakdown.OUT.LOCOMOTIVE.yen + breakdown.OUT.CEREBROVASCULAR.yen + breakdown.OUT.DISUSE.yen;
 
     const aPatients = Object.values(schedule.analgesia || {}).flat();
     const aInCount = aPatients.filter((id) => getPatientById(id)?.category === 'INPATIENT').length;
     const aOutCount = aPatients.length - aInCount;
+    const aTotalYen = aPatients.length * 35 * 10;
+
+    const grandTotalYen = inTotalYen + outTotalYen + aTotalYen + planYen;
+    const fmtYen = (val) => (val > 0 ? `¥${val.toLocaleString()}` : '¥0');
 
     const summaryGrid = [
-      ['【入院】運動器リハ(Ⅱ)', `${breakdown.IN.LOCOMOTIVE.u} 単位`, `${breakdown.IN.LOCOMOTIVE.p.size} 名`, ''],
-      ['【入院】脳血管等リハ(Ⅲ)', `${breakdown.IN.CEREBROVASCULAR.u} 単位`, `${breakdown.IN.CEREBROVASCULAR.p.size} 名`, ''],
-      ['【入院】廃用症候群(Ⅲ)', `${breakdown.IN.DISUSE.u} 単位`, `${breakdown.IN.DISUSE.p.size} 名`, ''],
-      ['【入院】小計', `${inUnits} 単位`, `${inPatients} 名`, ''],
-      ['【外来】運動器リハ(Ⅱ)', `${breakdown.OUT.LOCOMOTIVE.u} 単位`, `${breakdown.OUT.LOCOMOTIVE.p.size} 名`, ''],
-      ['【外来】脳血管等リハ(Ⅲ)', `${breakdown.OUT.CEREBROVASCULAR.u} 単位`, `${breakdown.OUT.CEREBROVASCULAR.p.size} 名`, ''],
-      ['【外来】廃用症候群(Ⅲ)', `${breakdown.OUT.DISUSE.u} 単位`, `${breakdown.OUT.DISUSE.p.size} 名`, ''],
-      ['【外来】小計', `${outUnits} 単位`, `${outPatients} 名`, ''],
-      ['消炎鎮痛処置 (物療)', `${aPatients.length} 件`, `${aPatients.length} 名`, `入院${aInCount} / 外来${aOutCount}`],
-      ['総合計画書策定件数', `${planCount} 件`, '-', ''],
-      ['個別リハ 合計実績', `${inUnits + outUnits} 単位`, `${inPatients + outPatients} 名`, '']
+      ['【入院】運動器リハ(Ⅱ)', `${breakdown.IN.LOCOMOTIVE.u} 単位`, `${breakdown.IN.LOCOMOTIVE.p.size} 名`, fmtYen(breakdown.IN.LOCOMOTIVE.yen)],
+      ['【入院】脳血管等リハ(Ⅲ)', `${breakdown.IN.CEREBROVASCULAR.u} 単位`, `${breakdown.IN.CEREBROVASCULAR.p.size} 名`, fmtYen(breakdown.IN.CEREBROVASCULAR.yen)],
+      ['【入院】廃用症候群(Ⅲ)', `${breakdown.IN.DISUSE.u} 単位`, `${breakdown.IN.DISUSE.p.size} 名`, fmtYen(breakdown.IN.DISUSE.yen)],
+      ['【入院】小計', `${inUnits} 単位`, `${inPatients} 名`, fmtYen(inTotalYen)],
+      ['【外来】運動器リハ(Ⅱ)', `${breakdown.OUT.LOCOMOTIVE.u} 単位`, `${breakdown.OUT.LOCOMOTIVE.p.size} 名`, fmtYen(breakdown.OUT.LOCOMOTIVE.yen)],
+      ['【外来】脳血管等リハ(Ⅲ)', `${breakdown.OUT.CEREBROVASCULAR.u} 単位`, `${breakdown.OUT.CEREBROVASCULAR.p.size} 名`, fmtYen(breakdown.OUT.CEREBROVASCULAR.yen)],
+      ['【外来】廃用症候群(Ⅲ)', `${breakdown.OUT.DISUSE.u} 単位`, `${breakdown.OUT.DISUSE.p.size} 名`, fmtYen(breakdown.OUT.DISUSE.yen)],
+      ['【外来】小計', `${outUnits} 単位`, `${outPatients} 名`, fmtYen(outTotalYen)],
+      ['消炎鎮痛処置 (物療)', `${aPatients.length} 件`, `${aPatients.length} 名`, fmtYen(aTotalYen)],
+      ['総合計画書策定件数', `${planCount} 件`, '-', fmtYen(planYen)],
+      ['個別リハ 合計実績', `${inUnits + outUnits} 単位`, `${inPatients + outPatients} 名`, fmtYen(grandTotalYen)]
     ];
 
     summaryGrid.forEach((row, idx) => {
@@ -212,19 +256,24 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
 
       let styleLbl = STYLES.cellLabel;
       let styleVal = STYLES.cellVal;
+      let styleYen = STYLES.cellVal;
 
       if (isSub) {
         styleLbl = { ...STYLES.cellLabel, font: { name: 'Meiryo UI', sz: 9, bold: true }, fill: { fgColor: { rgb: 'F1F5F9' } } };
         styleVal = { ...STYLES.cellVal, font: { name: 'Meiryo UI', sz: 9, bold: true }, fill: { fgColor: { rgb: 'F1F5F9' } } };
+        styleYen = { ...STYLES.cellVal, font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '047857' } }, fill: { fgColor: { rgb: 'F1F5F9' } } };
       } else if (isTotal) {
         styleLbl = { ...STYLES.cellLabel, font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: '0F172A' } }, fill: { fgColor: { rgb: 'E0F2FE' } } };
         styleVal = { ...STYLES.cellVal, font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: '0369A1' } }, fill: { fgColor: { rgb: 'E0F2FE' } } };
+        styleYen = { ...STYLES.cellVal, font: { name: 'Meiryo UI', sz: 10, bold: true, color: { rgb: '047857' } }, fill: { fgColor: { rgb: 'E0F2FE' } } };
+      } else {
+        styleYen = { ...STYLES.cellVal, font: { name: 'Meiryo UI', sz: 9, color: { rgb: '047857' } } };
       }
 
       setStyledCell(ws, r, 4, row[0], styleLbl);
       setStyledCell(ws, r, 5, row[1], styleVal);
       setStyledCell(ws, r, 6, row[2], styleVal);
-      setStyledCell(ws, r, 7, row[3], isTotal ? { ...STYLES.cellCenter, fill: { fgColor: { rgb: 'E0F2FE' } } } : STYLES.cellCenter);
+      setStyledCell(ws, r, 7, row[3], styleYen);
     });
 
     // 6. 下部：記事・申し送り事項（用紙下部の白紙余白を埋める堂々としたエリア）
@@ -256,8 +305,7 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
 
     const maxRowIndex = noteStartRow + 4;
 
-    // 各行の高さを一括最適化（タイトル32pt、見出し26pt、データ行23.5pt、申し送り28pt）
-    // A4横（有効高約520pt）の上下を満たし、下部余白の偏りを解消
+    // 各行の高さを一括最適化（A4横520ptを満たすバランス設計）
     const finalRowHeights = [];
     for (let r = 0; r <= maxRowIndex; r++) {
       if (r === 0) finalRowHeights[r] = { hpt: 32 };
