@@ -1,5 +1,5 @@
 // js/views/modals/slotModal.js
-// コマ配置モーダル制御層（患者リアルタイム検索・単位数選択・計画書チェックボックス連動・各種制約バリデーション・保存解除・日次自動上書きトリガー連動）
+// コマ配置モーダル制御層（患者リアルタイム検索・単位数選択・計画書チェックボックス連動・各種制約バリデーション・保存解除・日次自動バックアップ連携）
 
 import { TIME_SLOTS } from '../../config/rules.js';
 import { sanitizeHtml, safeParseInt } from '../../core/dataNormalizer.js';
@@ -17,6 +17,14 @@ import { showToast } from '../exportView.js';
 
 let activeModalSlot = null;
 let onScheduleUpdatedCallback = null;
+
+function getLocalDateStr() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
 
 export function setupSlotModalListeners(onUpdate) {
   onScheduleUpdatedCallback = onUpdate;
@@ -374,5 +382,5 @@ function updateModalPatientPlanRecommendation(pId) {
 
 function getCurrentDateContext() {
   const dateInput = document.getElementById('scheduleDateInput');
-  return dateInput?.value || new Date().toISOString().split('T')[0];
+  return dateInput?.value || getLocalDateStr();
 }
