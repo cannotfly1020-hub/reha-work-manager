@@ -73,12 +73,12 @@ padding: 20px 24px;
 display: block;
 }
 
-/* STREAMING_CHUNK:Styling time table grid and scroll dimensions... */
+/* STREAMING_CHUNK:Styling time table grid and scroll dimensions with hour separators... */
 .timetable-container {
 display: grid;
 grid-template-columns: 110px repeat(3, 1fr) 110px;
 background: var(--color-surface);
-border: 1px solid var(--color-border);
+border: 1px solid #cbd5e1;
 border-radius: var(--radius-md);
 max-height: calc(100vh - 160px);
 overflow-y: auto;
@@ -91,8 +91,8 @@ background: #f8fafc;
 font-weight: 700;
 padding: 10px;
 text-align: center;
-border-bottom: 2px solid var(--color-border);
-border-right: 1px solid var(--color-border);
+border-bottom: 2px solid #94a3b8;
+border-right: 1px solid #cbd5e1;
 position: sticky;
 top: 0;
 z-index: 30;
@@ -104,25 +104,43 @@ max-height: 52px;
 display: contents;
 }
 .time-col {
-border-bottom: 1px solid var(--color-border);
-border-right: 1px solid var(--color-border);
+border-bottom: 1px solid #cbd5e1;
+border-right: 1px solid #cbd5e1;
 padding: 4px 8px;
 display: flex;
 align-items: center;
 justify-content: center;
 font-size: 0.78rem;
-font-weight: 600;
-color: var(--color-text-muted);
-background: #fafafa;
+font-weight: 700;
+color: #475569;
+background: #f8fafc;
+transition: background 0.15s ease;
 }
 .cell-slot {
 height: 52px;
 min-height: 52px;
 max-height: 52px;
-border-bottom: 1px solid var(--color-border);
-border-right: 1px solid var(--color-border);
+border-bottom: 1px solid #cbd5e1;
+border-right: 1px solid #cbd5e1;
 position: relative;
 padding: 2px 4px;
+background: #ffffff;
+transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+/* ★案2：1時間ごとの区切り（正時：3コマごと）の下線を濃いスレートグレー(2px)で強調 */
+.time-slot-row:nth-child(3n) .time-col,
+.time-slot-row:nth-child(3n) .cell-slot {
+border-bottom: 2px solid #94a3b8;
+}
+
+/* ドラッグ＆ドロップ操作アシスト：枠の上にカーソルが乗った時のガイド強調 */
+.cell-slot:hover {
+background: #f8fafc;
+}
+.cell-slot[data-therapist]:hover {
+border-bottom-color: #93c5fd;
+border-top: 1px solid #93c5fd;
 }
 .empty-slot-btn {
 width: 100%;
@@ -138,8 +156,8 @@ color: var(--color-primary);
 }
 .cell-slot:hover .empty-slot-btn {
 opacity: 1;
-border-color: #cbd5e1;
-background: #f8fafc;
+border-color: #94a3b8;
+background: #f1f5f9;
 }
 
 /* STREAMING_CHUNK:Styling analgesia slot badges and counter buttons... */
