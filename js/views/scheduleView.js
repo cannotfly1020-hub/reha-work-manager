@@ -18,11 +18,6 @@ import { setupSlotModalListeners, openSlotModal } from './modals/slotModal.js';
 import { setupStaffSettingsModalListeners } from './modals/staffModal.js';
 import { setupAnalgesiaModalListeners, openAnalgesiaModal } from './modals/analgesiaModal.js';
 
-let currentDateStr = new Date().toISOString().split('T')[0];
-let paletteCategory = 'ALL';
-let paletteSortKey = 'CATEGORY'; // 'CATEGORY' | 'KANA' | 'ID'
-
-// PCのローカルタイム基準の YYYY-MM-DD を返す（UTC基準の toISOString は使わない）
 function getLocalDateStr() {
   const d = new Date();
   const yyyy = d.getFullYear();
@@ -31,40 +26,9 @@ function getLocalDateStr() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-let midnightWatcherId = null;
-
-// 深夜0時跨ぎ・スリープ復帰時に当日表示へ追従する監視
-function setupMidnightWatcher() {
-  if (midnightWatcherId !== null) return; // 二重起動防止
-
-  let lastKnownToday = getLocalDateStr();
-
-  const checkDateChange = () => {
-    const today = getLocalDateStr();
-    if (today === lastKnownToday) return;
-
-    // 日付が変わる直前まで「当日」を表示していた場合のみ追従する
-    const wasShowingToday = currentDateStr === lastKnownToday;
-    lastKnownToday = today;
-
-    if (!wasShowingToday) return; // 過去/未来日を閲覧・編集中は勝手にジャンプしない
-
-    currentDateStr = today;
-
-    const dateInput = document.getElementById('scheduleDateInput');
-    if (dateInput) dateInput.value = today;
-
-    renderScheduleView();
-  };
-
-  midnightWatcherId = setInterval(checkDateChange, 30000);
-
-  // スリープ復帰・タブ復帰時は即座に確認
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) checkDateChange();
-  });
-  window.addEventListener('focus', checkDateChange);
-}
+let currentDateStr = getLocalDateStr();
+let paletteCategory = 'ALL';
+let paletteSortKey = 'CATEGORY'; // 'CATEGORY' | 'KANA' | 'ID'
 
 export function initScheduleView() {
   const dateInput = document.getElementById('scheduleDateInput');
@@ -82,7 +46,7 @@ export function initScheduleView() {
 
   if (btnToday) {
     btnToday.addEventListener('click', () => {
-      currentDateStr = new Date().toISOString().split('T')[0];
+      currentDateStr = getLocalDateStr();
       if (dateInput) dateInput.value = currentDateStr;
       renderScheduleView();
     });
@@ -110,9 +74,6 @@ export function initScheduleView() {
   setupSlotModalListeners(renderScheduleView);
   setupStaffSettingsModalListeners(renderScheduleView);
   setupAnalgesiaModalListeners(renderScheduleView);
-
-  // 深夜0時跨ぎ・スリープ復帰時の日付自動追従
-  setupMidnightWatcher();
 }
 
 export function renderScheduleView() {
