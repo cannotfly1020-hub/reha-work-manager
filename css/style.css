@@ -73,7 +73,7 @@ padding: 20px 24px;
 display: block;
 }
 
-/* STREAMING_CHUNK:Styling time table grid and scroll dimensions with hour separators... */
+/* STREAMING_CHUNK:Styling time table grid with delicate hairline and smart hour dividers (Plan A)... /
 .timetable-container {
 display: grid;
 grid-template-columns: 110px repeat(3, 1fr) 110px;
@@ -91,11 +91,12 @@ background: #f8fafc;
 font-weight: 700;
 padding: 10px;
 text-align: center;
-border-bottom: 2px solid #94a3b8;
-border-right: 1px solid #cbd5e1;
+border-bottom: 1px solid #cbd5e1;
+border-right: 1px solid #e2e8f0;
 position: sticky;
 top: 0;
 z-index: 30;
+color: #334155;
 }
 .time-slot-row {
 height: 52px;
@@ -104,43 +105,49 @@ max-height: 52px;
 display: contents;
 }
 .time-col {
-border-bottom: 1px solid #cbd5e1;
-border-right: 1px solid #cbd5e1;
+/ 中間コマ（20分・40分）：繊細で邪魔にならない極薄ヘアライン /
+border-bottom: 1px solid #f1f5f9;
+border-right: 1px solid #e2e8f0;
 padding: 4px 8px;
 display: flex;
 align-items: center;
 justify-content: center;
 font-size: 0.78rem;
-font-weight: 700;
-color: #475569;
-background: #f8fafc;
+font-weight: 600;
+color: #64748b;
+background: #fafafa;
 transition: background 0.15s ease;
 }
 .cell-slot {
 height: 52px;
 min-height: 52px;
 max-height: 52px;
-border-bottom: 1px solid #cbd5e1;
-border-right: 1px solid #cbd5e1;
+/ 中間コマ（20分・40分）：繊細な極薄ヘアライン（白飛びせず、かつ決して主張しない） */
+border-bottom: 1px solid #f1f5f9;
+border-right: 1px solid #e2e8f0;
 position: relative;
 padding: 2px 4px;
 background: #ffffff;
 transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-/* ★案2：1時間ごとの区切り（正時：3コマごと）の下線を濃いスレートグレー(2px)で強調 */
-.time-slot-row:nth-child(3n) .time-col,
+/* ★案A：1時間ごとの区切り（正時：3コマごと）は、太くせず「端正な1px実線」で上品に引き締める */
+.time-slot-row:nth-child(3n) .time-col {
+border-bottom: 1px solid #cbd5e1;
+background: #f8fafc;
+}
 .time-slot-row:nth-child(3n) .cell-slot {
-border-bottom: 2px solid #94a3b8;
+border-bottom: 1px solid #cbd5e1;
 }
 
-/* ドラッグ＆ドロップ操作アシスト：枠の上にカーソルが乗った時のガイド強調 */
+/* ドラッグ＆ドロップ操作アシスト：乗った時はほんのり清潔感のあるスカイブルーでガイド */
 .cell-slot:hover {
 background: #f8fafc;
 }
 .cell-slot[data-therapist]:hover {
-border-bottom-color: #93c5fd;
-border-top: 1px solid #93c5fd;
+background: #f0f9ff;
+border-bottom-color: #7dd3fc;
+border-top: 1px solid #7dd3fc;
 }
 .empty-slot-btn {
 width: 100%;
@@ -156,8 +163,8 @@ color: var(--color-primary);
 }
 .cell-slot:hover .empty-slot-btn {
 opacity: 1;
-border-color: #94a3b8;
-background: #f1f5f9;
+border-color: #cbd5e1;
+background: #f8fafc;
 }
 
 /* STREAMING_CHUNK:Styling analgesia slot badges and counter buttons... */
