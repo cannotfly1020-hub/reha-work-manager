@@ -73,12 +73,12 @@ padding: 20px 24px;
 display: block;
 }
 
-/* STREAMING_CHUNK:Styling time table grid with delicate hairline and smart hour dividers (Plan A)... /
+/* STREAMING_CHUNK:Styling time table grid and scroll dimensions... */
 .timetable-container {
 display: grid;
 grid-template-columns: 110px repeat(3, 1fr) 110px;
 background: var(--color-surface);
-border: 1px solid #cbd5e1;
+border: 1px solid var(--color-border);
 border-radius: var(--radius-md);
 max-height: calc(100vh - 160px);
 overflow-y: auto;
@@ -91,12 +91,11 @@ background: #f8fafc;
 font-weight: 700;
 padding: 10px;
 text-align: center;
-border-bottom: 1px solid #cbd5e1;
-border-right: 1px solid #e2e8f0;
+border-bottom: 2px solid var(--color-border);
+border-right: 1px solid var(--color-border);
 position: sticky;
 top: 0;
 z-index: 30;
-color: #334155;
 }
 .time-slot-row {
 height: 52px;
@@ -105,49 +104,25 @@ max-height: 52px;
 display: contents;
 }
 .time-col {
-/ 中間コマ（20分・40分）：繊細で邪魔にならない極薄ヘアライン /
-border-bottom: 1px solid #f1f5f9;
-border-right: 1px solid #e2e8f0;
+border-bottom: 1px solid var(--color-border);
+border-right: 1px solid var(--color-border);
 padding: 4px 8px;
 display: flex;
 align-items: center;
 justify-content: center;
 font-size: 0.78rem;
 font-weight: 600;
-color: #64748b;
+color: var(--color-text-muted);
 background: #fafafa;
-transition: background 0.15s ease;
 }
 .cell-slot {
 height: 52px;
 min-height: 52px;
 max-height: 52px;
-/ 中間コマ（20分・40分）：繊細な極薄ヘアライン（白飛びせず、かつ決して主張しない） */
-border-bottom: 1px solid #f1f5f9;
-border-right: 1px solid #e2e8f0;
+border-bottom: 1px solid var(--color-border);
+border-right: 1px solid var(--color-border);
 position: relative;
 padding: 2px 4px;
-background: #ffffff;
-transition: background 0.15s ease, border-color 0.15s ease;
-}
-
-/* ★案A：1時間ごとの区切り（正時：3コマごと）は、太くせず「端正な1px実線」で上品に引き締める */
-.time-slot-row:nth-child(3n) .time-col {
-border-bottom: 1px solid #cbd5e1;
-background: #f8fafc;
-}
-.time-slot-row:nth-child(3n) .cell-slot {
-border-bottom: 1px solid #cbd5e1;
-}
-
-/* ドラッグ＆ドロップ操作アシスト：乗った時はほんのり清潔感のあるスカイブルーでガイド */
-.cell-slot:hover {
-background: #f8fafc;
-}
-.cell-slot[data-therapist]:hover {
-background: #f0f9ff;
-border-bottom-color: #7dd3fc;
-border-top: 1px solid #7dd3fc;
 }
 .empty-slot-btn {
 width: 100%;
