@@ -3,7 +3,7 @@
 --font-base: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 --color-bg: #f8fafc;
 --color-surface: #ffffff;
---color-border: #e2e8f0;
+--color-border: #cbd5e1;
 --color-text-main: #0f172a;
 --color-text-muted: #64748b;
 --color-primary: #0284c7;
@@ -73,12 +73,12 @@ padding: 20px 24px;
 display: block;
 }
 
-/* STREAMING_CHUNK:Styling time table grid and scroll dimensions... */
+/* STREAMING_CHUNK:Styling time table grid with uniform, crisp 1px borders... /
 .timetable-container {
 display: grid;
 grid-template-columns: 110px repeat(3, 1fr) 110px;
 background: var(--color-surface);
-border: 1px solid var(--color-border);
+border: 1px solid #cbd5e1;
 border-radius: var(--radius-md);
 max-height: calc(100vh - 160px);
 overflow-y: auto;
@@ -91,8 +91,8 @@ background: #f8fafc;
 font-weight: 700;
 padding: 10px;
 text-align: center;
-border-bottom: 2px solid var(--color-border);
-border-right: 1px solid var(--color-border);
+border-bottom: 1px solid #cbd5e1;
+border-right: 1px solid #cbd5e1;
 position: sticky;
 top: 0;
 z-index: 30;
@@ -104,8 +104,8 @@ max-height: 52px;
 display: contents;
 }
 .time-col {
-border-bottom: 1px solid var(--color-border);
-border-right: 1px solid var(--color-border);
+border-bottom: 1px solid #cbd5e1;
+border-right: 1px solid #cbd5e1;
 padding: 4px 8px;
 display: flex;
 align-items: center;
@@ -119,8 +119,9 @@ background: #fafafa;
 height: 52px;
 min-height: 52px;
 max-height: 52px;
-border-bottom: 1px solid var(--color-border);
-border-right: 1px solid var(--color-border);
+/ 全マス目ブレなく均一な端正の1px実線 */
+border-bottom: 1px solid #cbd5e1;
+border-right: 1px solid #cbd5e1;
 position: relative;
 padding: 2px 4px;
 }
