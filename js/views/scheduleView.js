@@ -22,6 +22,50 @@ let currentDateStr = new Date().toISOString().split('T')[0];
 let paletteCategory = 'ALL';
 let paletteSortKey = 'CATEGORY'; // 'CATEGORY' | 'KANA' | 'ID'
 
+// PCのローカルタイム基準の YYYY-MM-DD を返す（UTC基準の toISOString は使わない）
+function getLocalDateStr() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+let midnightWatcherId = null;
+
+// 深夜0時跨ぎ・スリープ復帰時に当日表示へ追従する監視
+function setupMidnightWatcher() {
+  if (midnightWatcherId !== null) return; // 二重起動防止
+
+  let lastKnownToday = getLocalDateStr();
+
+  const checkDateChange = () => {
+    const today = getLocalDateStr();
+    if (today === lastKnownToday) return;
+
+    // 日付が変わる直前まで「当日」を表示していた場合のみ追従する
+    const wasShowingToday = currentDateStr === lastKnownToday;
+    lastKnownToday = today;
+
+    if (!wasShowingToday) return; // 過去/未来日を閲覧・編集中は勝手にジャンプしない
+
+    currentDateStr = today;
+
+    const dateInput = document.getElementById('scheduleDateInput');
+    if (dateInput) dateInput.value = today;
+
+    renderScheduleView();
+  };
+
+  midnightWatcherId = setInterval(checkDateChange, 30000);
+
+  // スリープ復帰・タブ復帰時は即座に確認
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) checkDateChange();
+  });
+  window.addEventListener('focus', checkDateChange);
+}
+
 export function initScheduleView() {
   const dateInput = document.getElementById('scheduleDateInput');
   const btnToday = document.getElementById('btnTodaySchedule');
@@ -66,6 +110,9 @@ export function initScheduleView() {
   setupSlotModalListeners(renderScheduleView);
   setupStaffSettingsModalListeners(renderScheduleView);
   setupAnalgesiaModalListeners(renderScheduleView);
+
+  // 深夜0時跨ぎ・スリープ復帰時の日付自動追従
+  setupMidnightWatcher();
 }
 
 export function renderScheduleView() {
@@ -129,7 +176,7 @@ function renderPatientPalette() {
       const isOut = p.category === 'OUTPATIENT';
       const borderCol = isOut ? 'var(--color-outpatient)' : 'var(--color-inpatient)';
       const disRule = REHA_RULES.LIMIT_DAYS[p.diseaseType] || REHA_RULES.LIMIT_DAYS.ANALGESIA;
-      const tagHtml = `<span style="font-size:0.65rem; font-weight:700; background:${disRule.tagBg}; color:${disRule.tagColor}; border:1px solid ${disRule.tagBorder}; padding:1px 4px; border-radius:3px; margin-right:4px;">${disRule.tag}</span>`;
+      const tagHtml = `<span style="font-size:0.65rem; font-weight:700; background:${disRule.tagBg}; color:${disRule.tagColor}; border:1px solid ${disRule.tagBorder}; padding:1px 4px; border-radius:3px;">${disRule.shortLabel}</span> `;
 
       return `
         <div class="patient-palette-card" draggable="true" data-patient-id="${p.id}"
@@ -155,7 +202,7 @@ function buildSlotCardHtml(p, u, cellData, tId, slotId) {
   const isOut = p.category === 'OUTPATIENT';
   const cardClass = isOut ? 'card-outpatient' : 'card-inpatient';
   const disRule = REHA_RULES.LIMIT_DAYS[p.diseaseType] || REHA_RULES.LIMIT_DAYS.ANALGESIA;
-  const diseaseTag = `<span style="font-size:0.65rem; font-weight:700; background:${disRule.tagBg}; color:${disRule.tagColor}; border:1px solid ${disRule.tagBorder}; padding:1px 3px; border-radius:3px; margin-right:4px;">${disRule.tag}</span>`;
+  const diseaseTag = `<span style="font-size:0.65rem; font-weight:700; background:${disRule.tagBg}; color:${disRule.tagColor}; border:1px solid ${disRule.tagBorder}; padding:1px 3px; border-radius:3px;">${disRule.shortLabel}</span>`;
 
   let planBadge = '';
   if (cellData.billingPlan) {
@@ -171,7 +218,7 @@ function buildSlotCardHtml(p, u, cellData, tId, slotId) {
       const bBg = isUrgent ? '#fef3c7' : '#ecfdf5';
       const bCol = isUrgent ? '#b45309' : '#047857';
       const bBorder = isUrgent ? '#f59e0b' : '#10b981';
-      earlyBadge = `<span style="font-size:0.63rem; font-weight:700; background:${bBg}; color:${bCol}; border:1px solid ${bBorder}; padding:1px 4px; border-radius:3px; margin-left:3px;" title="${dl.earlyBonus.label}">${dl.earlyBonus.shortLabel}</span>`;
+      earlyBadge = `<span style="font-size:0.63rem; font-weight:700; background:${bBg}; color:${bCol}; border:1px solid ${bBorder}; padding:1px 4px; border-radius:3px; margin-left:3px;" title="${dl.earlyBonus.shortLabel}">${dl.earlyBonus.shortLabel}</span>`;
     }
   }
 
@@ -244,7 +291,7 @@ function renderTimetableGrid() {
     let bHtml = `<button class="badge-analgesia-count" data-analgesia-slot="${slot.id}" style="color:#94a3b8; font-size:0.75rem;">＋</button>`;
     if (aCount > 0) {
       const inC = aPatients.filter((p) => p.category === 'INPATIENT').length;
-      bHtml = `<button class="badge-analgesia-count has-patients" data-analgesia-slot="${slot.id}"><span style="font-weight:800; font-size:0.85rem; color:#15803d;">${aCount}名</span><span style="font-size:0.65rem; color:#166534;">(入${inC}/外${aCount - inC})</span></button>`;
+      bHtml = `<button class="badge-analgesia-count has-patients" data-analgesia-slot="${slot.id}"><span style="font-weight:800; font-size:0.85rem; color:#15803d;">${aCount}名</span><span style="font-size:0.65rem; color:#64748b; margin-left:4px;">入${inC}/外${aCount - inC}</span></button>`;
     }
     html += `<div class="cell-slot analgesia-slot-cell" data-analgesia-drop="${slot.id}">${bHtml}</div></div>`;
   });
