@@ -70,22 +70,65 @@
     </div>
   </section>
 
-  <!-- VIEW: 外来予約カレンダー (月間マンスリービュー) -->
+  <!-- VIEW: 外来予約カレンダー (週間タイムテーブル ＆ ドラッグ＆ドロップ ＆ 患者パレット完全連携) -->
   <section id="viewAppointmentCalendar" class="view-panel">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+    <!-- 上部操作バー -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
       <div style="display:flex; align-items:center; gap:8px;">
-        <button id="btnAptCalPrevMonth" style="padding:6px 12px; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer;">◀ 前月</button>
-        <input type="month" id="aptCalendarMonthInput" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.95rem; font-weight:700; background:#fff;">
-        <button id="btnAptCalNextMonth" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; cursor:pointer;">次月 ▶</button>
-        <button id="btnAptCalToday" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; cursor:pointer; font-weight:600;">今月</button>
+        <button id="btnAptCalPrevWeek" style="padding:6px 12px; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer; font-size:0.85rem; font-weight:600;">◀ 前週</button>
+        <input type="date" id="aptCalendarWeekDateInput" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.9rem; font-weight:700; background:#fff;">
+        <button id="btnAptCalNextWeek" style="padding:6px 12px; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer; font-size:0.85rem; font-weight:600;">次週 ▶</button>
+        <button id="btnAptCalThisWeek" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; cursor:pointer; font-weight:600;">今週</button>
+        <span id="aptCalendarWeekRangeLabel" style="font-size:0.88rem; font-weight:800; color:#0f172a; margin-left:6px;"></span>
       </div>
-      <div style="display:flex; align-items:center; gap:12px;">
-        <span id="aptCalendarMonthCountBadge" style="font-size:0.85rem; font-weight:700; color:#0369a1; background:#e0f2fe; padding:6px 14px; border-radius:6px; border:1px solid #bae6fd;">月間予約: 計 0 件</span>
-        <button id="btnAptCalNew" style="padding:8px 16px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.85rem; cursor:pointer;">＋ 新規予約登録</button>
+
+      <div style="display:flex; align-items:center; gap:8px;">
+        <!-- 表示モード切替（週間タイムテーブル優先 / 月間マンスリー） -->
+        <div style="display:flex; border:1px solid #cbd5e1; border-radius:6px; overflow:hidden; background:#fff;">
+          <button id="btnAptViewModeWeek" type="button" class="apt-view-mode-btn active" style="padding:6px 12px; border:none; background:#0284c7; color:#fff; font-size:0.8rem; font-weight:700; cursor:pointer;">週間 (時間割)</button>
+          <button id="btnAptViewModeMonth" type="button" class="apt-view-mode-btn" style="padding:6px 12px; border:none; background:#fff; color:#475569; font-size:0.8rem; font-weight:700; cursor:pointer;">月間 (マス目)</button>
+        </div>
+        <span id="aptCalendarWeekCountBadge" style="font-size:0.82rem; font-weight:700; color:#0369a1; background:#e0f2fe; padding:6px 12px; border-radius:6px; border:1px solid #bae6fd;">週間予約: 計 0 件</span>
+        <!-- A4週間シート印刷ボタン -->
+        <button id="btnAptPrintWeekly" type="button" style="display:flex; align-items:center; gap:4px; padding:6px 12px; background:#fff; border:1px solid #cbd5e1; border-radius:6px; font-size:0.82rem; font-weight:700; color:#0f172a; cursor:pointer;">
+          <span>🖨</span>
+          <span>今週を印刷 (A4)</span>
+        </button>
+        <button id="btnAptCalNew" type="button" style="padding:6px 14px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.82rem; cursor:pointer;">＋ 新規予約</button>
       </div>
     </div>
-    <!-- カレンダーグリッド描画コンテナ -->
-    <div id="aptCalendarGridContainer" class="calendar-container"></div>
+
+    <!-- 週間ビュー本体：左側患者パレット ＋ 右側週間タイムテーブルグリッド -->
+    <div id="aptWeeklyViewContainer" style="display:grid; grid-template-columns: 240px 1fr; gap:16px;">
+      <!-- 左側：外来予約用 患者パレット -->
+      <aside style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:8px; max-height:80vh; overflow-y:auto;">
+        <div style="font-size:0.8rem; font-weight:800; color:#0f172a; display:flex; justify-content:space-between; align-items:center;">
+          <span>👤 患者パレット (予約用)</span>
+          <span style="font-size:0.68rem; color:#64748b;">ドラッグで配置</span>
+        </div>
+        <input type="text" id="aptPaletteSearch" placeholder="患者名・ID検索..." style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem;">
+        <select id="aptPaletteSortSelect" style="width:100%; padding:5px 6px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.75rem; background:#fff; font-weight:600; color:#334155; cursor:pointer;">
+          <option value="CATEGORY" selected>並べ替え: 区分順 (外来→消炎→入院)</option>
+          <option value="KANA">並べ替え: 五十音順 (あいうえお)</option>
+          <option value="ID">並べ替え: 患者ID順</option>
+        </select>
+        <div style="display:flex; gap:4px;">
+          <button class="apt-palette-cat-btn" data-cat="ALL" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">全て</button>
+          <button class="apt-palette-cat-btn active" data-cat="OUTPATIENT" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">外来</button>
+          <button class="apt-palette-cat-btn" data-cat="ANALGESIA" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">消炎</button>
+          <button class="apt-palette-cat-btn" data-cat="INPATIENT" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">入院</button>
+        </div>
+        <div id="aptPalettePatientList" style="display:flex; flex-direction:column; gap:6px; margin-top:4px;"></div>
+      </aside>
+
+      <!-- 右側：週間タイムテーブル（月〜土 × 時間枠） -->
+      <main class="apt-weekly-grid-container" id="aptWeeklyGrid"></main>
+    </div>
+
+    <!-- 月間ビュー本体（切替時のみ表示、普段は非表示） -->
+    <div id="aptMonthlyViewContainer" style="display:none;">
+      <div id="aptCalendarGridContainer" class="calendar-container"></div>
+    </div>
   </section>
 
   <!-- VIEW 2: 月間単位・収益ダッシュボード -->
