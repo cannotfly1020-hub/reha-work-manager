@@ -70,7 +70,7 @@
     </div>
   </section>
 
-  <!-- VIEW: 外来予約カレンダー (週間タイムテーブル ＆ ドラッグ＆ドロップ ＆ 患者パレット完全連携) -->
+  <!-- VIEW: 外来予約カレンダー (週間タイムテーブル ＆ ドラッグ＆ドロップ ＆ 2大A4印刷対応) -->
   <section id="viewAppointmentCalendar" class="view-panel">
     <!-- 上部操作バー -->
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
@@ -89,11 +89,19 @@
           <button id="btnAptViewModeMonth" type="button" class="apt-view-mode-btn" style="padding:6px 12px; border:none; background:#fff; color:#475569; font-size:0.8rem; font-weight:700; cursor:pointer;">月間 (マス目)</button>
         </div>
         <span id="aptCalendarWeekCountBadge" style="font-size:0.82rem; font-weight:700; color:#0369a1; background:#e0f2fe; padding:6px 12px; border-radius:6px; border:1px solid #bae6fd;">週間予約: 計 0 件</span>
-        <!-- A4週間シート印刷ボタン -->
-        <button id="btnAptPrintWeekly" type="button" style="display:flex; align-items:center; gap:4px; padding:6px 12px; background:#fff; border:1px solid #cbd5e1; border-radius:6px; font-size:0.82rem; font-weight:700; color:#0f172a; cursor:pointer;">
+
+        <!-- ★印刷ボタン 1: 週間タイムテーブル (A4横1枚完結・Excel完全同一レイアウト) -->
+        <button id="btnAptPrintWeekly" type="button" style="display:flex; align-items:center; gap:4px; padding:6px 12px; background:#fff; border:1px solid #0284c7; border-radius:6px; font-size:0.82rem; font-weight:700; color:#0369a1; cursor:pointer;" title="今週1週間の予約をA4横1枚のタイムテーブルで印刷します">
           <span>🖨</span>
-          <span>今週を印刷 (A4)</span>
+          <span>週間表 (A4横)</span>
         </button>
+
+        <!-- ★印刷ボタン 2: 本日デイリー予約チェックリスト (A4縦1枚・30名以上対応) -->
+        <button id="btnAptPrintDaily" type="button" style="display:flex; align-items:center; gap:4px; padding:6px 12px; background:#fff; border:1px solid #16a34a; border-radius:6px; font-size:0.82rem; font-weight:700; color:#15803d; cursor:pointer;" title="選択中の日付（または本日）の予約患者をA4縦1枚のバインダー用チェック表で印刷します">
+          <span>📋</span>
+          <span>本日デイリー (A4縦)</span>
+        </button>
+
         <button id="btnAptCalNew" type="button" style="padding:6px 14px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.82rem; cursor:pointer;">＋ 新規予約</button>
       </div>
     </div>
