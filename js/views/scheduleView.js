@@ -1,5 +1,5 @@
 // js/views/scheduleView.js
-// VIEW 1: 当日時間割（動的CSSグリッド・パレット並び替え・ドラッグ＆ドロップ・KPIストリップ・各モーダル連携・リファクタリング軽量版）
+// VIEW 1: 当日時間割（動的CSSグリッド・パレット並び替え・ドラッグ＆ドロップ・KPIストリップ・各モーダル連携・セル枠内完全ジャストフィット対応版）
 
 import { TIME_SLOTS, REHA_RULES } from '../config/rules.js';
 import { sanitizeHtml, safeParseInt, normalizeToKatakana } from '../core/dataNormalizer.js';
@@ -183,12 +183,18 @@ function buildSlotCardHtml(p, u, cellData, tId, slotId) {
     }
   }
 
+  // ★【セル枠完全密着の精密計算】
+  // 1セル高さ52pxに対して、u単位（uコマ）分の高さを算出し、下枠線と重ならないよう -5px を適用
+  // 1単位: 47px / 2単位: 99px / 3単位: 151px / 4単位: 203px
+  const calculatedHeight = (52 * u) - 5;
+
   return `
     <div class="cell-slot">
-      <div class="reha-slot-card ${cardClass} card-unit-${u}" draggable="true" data-therapist="${tId}" data-slot="${slotId}" style="cursor:grab;">
+      <div class="reha-slot-card ${cardClass} card-unit-${u}" draggable="true" data-therapist="${tId}" data-slot="${slotId}"
+           style="height:${calculatedHeight}px !important; max-height:${calculatedHeight}px !important; box-sizing:border-box; overflow:hidden; cursor:grab;">
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <div style="display:flex; align-items:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-            ${diseaseTag}<span style="font-weight:700; font-size:0.8rem;">${sanitizeHtml(p.name)}</span>
+            ${diseaseTag}<span style="font-weight:700; font-size:0.8rem; margin-left:3px;">${sanitizeHtml(p.name)}</span>
           </div>
           <div style="display:flex; align-items:center; flex-shrink:0;">
             <span class="badge-unit badge-unit-${u}">${u}単位</span>${planBadge}${earlyBadge}
