@@ -1,12 +1,12 @@
 // js/views/appointmentCalendarView.js
 // 外来予約 週間タイムテーブル ＆ ドラッグ＆ドロップ ＆ 月間切替 ＆ A4週間シート印刷 画面制御層
-// 本日時間割と同一の操作感（左側患者パレットから月〜土の時間枠へ直感ドラッグ配置・同一時間重複対応）
+// 本日時間割と同一の操作感（左側患者パレットから月〜土の時間枠へ直感ドラッグ配置・即時保存・同一時間重複対応）
 
 import { sanitizeHtml } from '../core/dataNormalizer.js';
 import { getPatientById, getAllPatients } from '../store/patientStore.js';
 import { getAllTherapists } from '../store/therapistStore.js';
 import {
-  getAllAppointments, getAppointmentsByDate, getAppointmentsByMonth,
+  getAllAppointments, getAppointmentsByMonth,
   upsertAppointment, calculateEndTime
 } from '../store/appointmentStore.js';
 import { openAppointmentModal } from './modals/appointmentModal.js';
@@ -45,6 +45,9 @@ let currentBaseDate = new Date(); // 表示基準日（週内の任意の日）
 let currentViewMode = 'WEEK';     // 'WEEK' (週間タイムテーブル) | 'MONTH' (月間マス目)
 let paletteFilterCat = 'OUTPATIENT'; // 外来優先
 let paletteSortOrder = 'CATEGORY';
+
+// ドラッグ中の一時データ退避用（ブラウザのデータ転送消失ガード）
+let activeDragPayload = null;
 
 /**
  * 外来予約カレンダー画面の全体初期化
@@ -149,7 +152,7 @@ function initViewModeListeners() {
 /**
  * 基準日を含む「月曜日〜土曜日」の日付リストを算出する
  * @param {Date} baseDate
- * @returns {Array<{ dateStr: string, dayOfWeek: number, dayName: string, label: string, isToday: boolean }>}
+ * @returns {Array<{ dateStr: string, dayOfWeek: number, dayName: string, label: string, isToday: boolean, monthDay: string }>}
  */
 function getWeekDaysList(baseDate) {
   const current = new Date(baseDate);
@@ -214,7 +217,6 @@ function renderWeeklyTimetable() {
   // 日付 ＆ 開始時刻でインデックス化 (key: YYYY-MM-DD_HH:MM)
   const aptBySlot = {};
   weekAptList.forEach((apt) => {
-    // 20分刻みに近似スナップ、または実時間そのまま
     const slotKey = `${apt.date}_${apt.startTime}`;
     if (!aptBySlot[slotKey]) aptBySlot[slotKey] = [];
     aptBySlot[slotKey].push(apt);
@@ -238,7 +240,7 @@ function renderWeeklyTimetable() {
     gridHtml += `
       <div class="${headerCls}">
         <div>${wd.dayName}曜日</div>
-        <div style="font-size:0.72rem; color:${wd.isToday ? '#15803d' : '#64748b'};">${wd.monthDay}</div>
+        <div style="font-size:0.72rem; color:${wd.isToday ? '#15803d' : '#64748b'}; font-weight:normal;">${wd.monthDay}</div>
       </div>
     `;
   });
@@ -263,7 +265,7 @@ function renderWeeklyTimetable() {
              data-time="${slot.time}">
       `;
 
-      // 予約カード（同一時間帯に複数名が入っても並列表示）
+      // 予約カード（同一時間帯に複数名が入っても並列スタック表示）
       apts.forEach((apt) => {
         const p = getPatientById(apt.patientId);
         const pName = p ? p.name : apt.patientId;
@@ -312,8 +314,9 @@ function attachWeeklyGridEvents() {
   cells.forEach((cell) => {
     cell.addEventListener('click', (e) => {
       if (e.target.closest('.apt-weekly-card')) return;
-      const date = cell.dataset.date;
-      const time = cell.dataset.time;
+      const targetCell = e.target.closest('.apt-weekly-slot-cell');
+      const date = targetCell?.dataset.date;
+      const time = targetCell?.dataset.time;
       if (date && time) {
         openAppointmentModal(null, date, time);
       }
@@ -322,43 +325,73 @@ function attachWeeklyGridEvents() {
     // ドラッグオーバー（ドロップ可能化）
     cell.addEventListener('dragover', (e) => {
       e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'copy';
+      }
       cell.classList.add('apt-drop-hover');
     });
 
-    cell.addEventListener('dragleave', () => {
-      cell.classList.remove('apt-drop-hover');
+    cell.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      cell.classList.add('apt-drop-hover');
+    });
+
+    cell.addEventListener('dragleave', (e) => {
+      // 内部子要素への移動による誤消去を防止
+      if (!cell.contains(e.relatedTarget)) {
+        cell.classList.remove('apt-drop-hover');
+      }
     });
 
     // ドロップ処理（パレットからの新規配置、またはカードの移動）
     cell.addEventListener('drop', (e) => {
       e.preventDefault();
+      e.stopPropagation();
       cell.classList.remove('apt-drop-hover');
 
-      const targetDate = cell.dataset.date;
-      const targetTime = cell.dataset.time;
+      const targetCell = e.target.closest('.apt-weekly-slot-cell');
+      const targetDate = targetCell?.dataset.date;
+      const targetTime = targetCell?.dataset.time;
       if (!targetDate || !targetTime) return;
 
-      const rawData = e.dataTransfer.getData('text/plain');
-      if (!rawData) return;
+      // 転送データの復元（activeDragPayload または dataTransfer から取得）
+      let payload = activeDragPayload;
+      if (!payload) {
+        try {
+          const raw = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('application/json');
+          if (raw) payload = JSON.parse(raw);
+        } catch (_) {}
+      }
+
+      if (!payload) return;
 
       try {
-        const payload = JSON.parse(rawData);
-
-        // パターンA: パレットから患者をドロップした場合
+        // パターンA: パレットから患者をドロップした場合（その場に即時配置）
         if (payload.type === 'NEW_PATIENT') {
           const patient = getPatientById(payload.patientId);
           if (!patient) return;
 
-          // 予約モーダルを開いて確認・保存（時間と患者を自動セット）
-          openAppointmentModal({
+          const isAnalgesia = patient.category === 'ANALGESIA' || patient.diseaseType === 'ANALGESIA';
+          const defaultTherapist = isAnalgesia ? 'ANALGESIA' : 'A';
+          const defaultTreatment = isAnalgesia ? 'ANALGESIA' : 'INDIVIDUAL';
+          const defaultDuration = isAnalgesia ? 20 : 30;
+
+          const res = upsertAppointment({
             patientId: patient.id,
             date: targetDate,
             startTime: targetTime,
-            durationMinutes: 30,
-            therapistId: 'A',
-            treatmentType: patient.category === 'ANALGESIA' ? 'ANALGESIA' : 'INDIVIDUAL'
-          }, targetDate, targetTime);
+            durationMinutes: defaultDuration,
+            therapistId: defaultTherapist,
+            treatmentType: defaultTreatment,
+            notes: ''
+          });
+
+          if (res.success) {
+            showToast(`${patient.name} 様を ${targetDate} ${targetTime} に配置しました`, 'success');
+            renderAppointmentCalendarView();
+          } else {
+            showToast(res.message || '予約の配置に失敗しました', 'error');
+          }
         }
         // パターンB: 既存の予約カードを掴んで移動した場合
         else if (payload.type === 'MOVE_APPOINTMENT') {
@@ -374,6 +407,8 @@ function attachWeeklyGridEvents() {
         }
       } catch (err) {
         console.error('Drop error:', err);
+      } finally {
+        activeDragPayload = null;
       }
     });
   });
@@ -394,8 +429,16 @@ function attachWeeklyGridEvents() {
       e.stopPropagation();
       const aptId = card.dataset.aptId;
       const payload = { type: 'MOVE_APPOINTMENT', aptId };
-      e.dataTransfer.setData('text/plain', JSON.stringify(payload));
-      e.dataTransfer.effectAllowed = 'move';
+      activeDragPayload = payload;
+      if (e.dataTransfer) {
+        e.dataTransfer.setData('text/plain', JSON.stringify(payload));
+        e.dataTransfer.effectAllowed = 'move';
+      }
+    });
+
+    card.addEventListener('dragend', () => {
+      activeDragPayload = null;
+      document.querySelectorAll('.apt-drop-hover').forEach((el) => el.classList.remove('apt-drop-hover'));
     });
   });
 }
@@ -504,8 +547,16 @@ function renderPalette() {
     item.addEventListener('dragstart', (e) => {
       const patientId = item.dataset.patientId;
       const payload = { type: 'NEW_PATIENT', patientId };
-      e.dataTransfer.setData('text/plain', JSON.stringify(payload));
-      e.dataTransfer.effectAllowed = 'copy';
+      activeDragPayload = payload;
+      if (e.dataTransfer) {
+        e.dataTransfer.setData('text/plain', JSON.stringify(payload));
+        e.dataTransfer.effectAllowed = 'copy';
+      }
+    });
+
+    item.addEventListener('dragend', () => {
+      activeDragPayload = null;
+      document.querySelectorAll('.apt-drop-hover').forEach((el) => el.classList.remove('apt-drop-hover'));
     });
   });
 }
