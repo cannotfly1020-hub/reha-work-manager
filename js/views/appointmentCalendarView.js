@@ -2,6 +2,7 @@
 // 外来予約 週間タイムテーブル ＆ ドラッグ＆ドロップ ＆ 月間切替 ＆ A4週間シート印刷 画面制御層
 // 本日時間割と同一の操作感（左側患者パレットから月〜土の時間枠へ直感ドラッグ配置・即時保存・同一時間重複対応）
 // ★同一患者の重複予約防止ガード完全連動（二重予約を即座に検知し警告トースト通知）
+// ★月間カレンダーからの日付ダブルクリックによる週間タイムテーブル即時ジャンプ機能完備
 
 import { sanitizeHtml } from '../core/dataNormalizer.js';
 import { getPatientById, getAllPatients } from '../store/patientStore.js';
@@ -116,38 +117,66 @@ function initWeekNavigationListeners() {
 function initViewModeListeners() {
   const btnWeek = document.getElementById('btnAptViewModeWeek');
   const btnMonth = document.getElementById('btnAptViewModeMonth');
-  const weekContainer = document.getElementById('aptWeeklyViewContainer');
-  const monthContainer = document.getElementById('aptMonthlyViewContainer');
 
   btnWeek?.addEventListener('click', () => {
-    currentViewMode = 'WEEK';
-    btnWeek.classList.add('active');
-    btnWeek.style.background = '#0284c7';
-    btnWeek.style.color = '#fff';
-    btnMonth?.classList.remove('active');
-    if (btnMonth) {
-      btnMonth.style.background = '#fff';
-      btnMonth.style.color = '#475569';
-    }
-    if (weekContainer) weekContainer.style.display = 'grid';
-    if (monthContainer) monthContainer.style.display = 'none';
-    renderAppointmentCalendarView();
+    switchToWeeklyMode();
   });
 
   btnMonth?.addEventListener('click', () => {
-    currentViewMode = 'MONTH';
+    switchToMonthlyMode();
+  });
+}
+
+/**
+ * 週間モードへの画面切り替え
+ */
+function switchToWeeklyMode() {
+  currentViewMode = 'WEEK';
+  const btnWeek = document.getElementById('btnAptViewModeWeek');
+  const btnMonth = document.getElementById('btnAptViewModeMonth');
+  const weekContainer = document.getElementById('aptWeeklyViewContainer');
+  const monthContainer = document.getElementById('aptMonthlyViewContainer');
+
+  if (btnWeek) {
+    btnWeek.classList.add('active');
+    btnWeek.style.background = '#0284c7';
+    btnWeek.style.color = '#fff';
+  }
+  if (btnMonth) {
+    btnMonth.classList.remove('active');
+    btnMonth.style.background = '#fff';
+    btnMonth.style.color = '#475569';
+  }
+  if (weekContainer) weekContainer.style.display = 'grid';
+  if (monthContainer) monthContainer.style.display = 'none';
+
+  renderAppointmentCalendarView();
+}
+
+/**
+ * 月間モードへの画面切り替え
+ */
+function switchToMonthlyMode() {
+  currentViewMode = 'MONTH';
+  const btnWeek = document.getElementById('btnAptViewModeWeek');
+  const btnMonth = document.getElementById('btnAptViewModeMonth');
+  const weekContainer = document.getElementById('aptWeeklyViewContainer');
+  const monthContainer = document.getElementById('aptMonthlyViewContainer');
+
+  if (btnMonth) {
     btnMonth.classList.add('active');
     btnMonth.style.background = '#0284c7';
     btnMonth.style.color = '#fff';
-    btnWeek?.classList.remove('active');
-    if (btnWeek) {
-      btnWeek.style.background = '#fff';
-      btnWeek.style.color = '#475569';
-    }
-    if (weekContainer) weekContainer.style.display = 'none';
-    if (monthContainer) monthContainer.style.display = 'block';
-    renderAppointmentCalendarView();
-  });
+  }
+  if (btnWeek) {
+    btnWeek.classList.remove('active');
+    btnWeek.style.background = '#fff';
+    btnWeek.style.color = '#475569';
+  }
+  if (weekContainer) weekContainer.style.display = 'none';
+  if (monthContainer) monthContainer.style.display = 'block';
+
+  renderAppointmentCalendarView();
 }
 
 /**
@@ -628,7 +657,7 @@ function renderMonthlyCalendar() {
     const dayApts = aptByDate[dateStr] || [];
 
     gridHtml += `
-      <div class="${dayClass}" data-date="${dateStr}">
+      <div class="${dayClass}" data-date="${dateStr}" title="ダブルクリックでこの週のタイムテーブルへ移動">
         <div class="cal-day-header">
           <span class="cal-day-number ${isToday ? 'cal-today-badge' : ''}">${day}</span>
           ${dayApts.length > 0 ? `<span class="cal-day-count">${dayApts.length}件</span>` : ''}
@@ -672,7 +701,7 @@ function renderMonthlyCalendar() {
   gridHtml += `</div>`;
   container.innerHTML = gridHtml;
 
-  // モーダルバインド
+  // モーダルバインド（＋ボタン）
   container.querySelectorAll('.btn-cal-add-day').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -680,12 +709,31 @@ function renderMonthlyCalendar() {
     });
   });
 
+  // モーダルバインド（予約カードクリックで編集）
   container.querySelectorAll('.cal-apt-card').forEach((card) => {
     card.addEventListener('click', (e) => {
       e.stopPropagation();
       const allApts = getAllAppointments();
       const targetApt = allApts[card.dataset.aptId];
       if (targetApt) openAppointmentModal(targetApt);
+    });
+  });
+
+  // ★日付マスのダブルクリックでその週の週間タイムテーブルへ即時ジャンプ
+  container.querySelectorAll('.calendar-day-cell:not(.cal-empty)').forEach((cell) => {
+    cell.addEventListener('dblclick', (e) => {
+      // 予約カードや＋ボタン自体のクリック時はダブルクリック誤爆を回避
+      if (e.target.closest('.cal-apt-card') || e.target.closest('.btn-cal-add-day')) return;
+
+      const targetDateStr = cell.dataset.date;
+      if (targetDateStr) {
+        const [y, m, d] = targetDateStr.split('-').map(Number);
+        if (y && m && d) {
+          currentBaseDate = new Date(y, m - 1, d);
+          switchToWeeklyMode();
+          showToast(`📅 ${targetDateStr} の週間タイムテーブルへ移動しました`, 'info');
+        }
+      }
     });
   });
 }
