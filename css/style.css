@@ -91,8 +91,8 @@ background: #f8fafc;
 font-weight: 700;
 padding: 10px;
 text-align: center;
-border-bottom: 2px solid var(--color-border);
-border-right: 1px solid var(--color-border);
+border-bottom: 2px solid #cbd5e1;
+border-right: 1px solid #cbd5e1;
 position: sticky;
 top: 0;
 z-index: 30;
@@ -104,8 +104,12 @@ max-height: 52px;
 display: contents;
 }
 .time-col {
-border-bottom: 1px solid var(--color-border);
-border-right: 1px solid var(--color-border);
+height: 52px;
+min-height: 52px;
+max-height: 52px;
+box-sizing: border-box;
+border-bottom: 1px solid #cbd5e1;
+border-right: 1px solid #cbd5e1;
 padding: 4px 8px;
 display: flex;
 align-items: center;
@@ -119,8 +123,9 @@ background: #fafafa;
 height: 52px;
 min-height: 52px;
 max-height: 52px;
-border-bottom: 1px solid var(--color-border);
-border-right: 1px solid var(--color-border);
+box-sizing: border-box;
+border-bottom: 1px solid #cbd5e1;
+border-right: 1px solid #cbd5e1;
 position: relative;
 padding: 2px 4px;
 }
