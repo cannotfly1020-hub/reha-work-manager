@@ -118,6 +118,8 @@ font-size: 0.78rem;
 font-weight: 600;
 color: var(--color-text-muted);
 background: #fafafa;
+white-space: nowrap;
+line-height: 1;
 }
 .cell-slot {
 height: 52px;
