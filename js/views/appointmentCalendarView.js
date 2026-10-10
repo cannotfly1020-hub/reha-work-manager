@@ -1,6 +1,7 @@
 // js/views/appointmentCalendarView.js
 // 外来予約 週間タイムテーブル ＆ ドラッグ＆ドロップ ＆ 月間切替 ＆ A4週間シート印刷 画面制御層
 // 本日時間割と同一の操作感（左側患者パレットから月〜土の時間枠へ直感ドラッグ配置・即時保存・同一時間重複対応）
+// ★同一患者の重複予約防止ガード完全連動（二重予約を即座に検知し警告トースト通知）
 
 import { sanitizeHtml } from '../core/dataNormalizer.js';
 import { getPatientById, getAllPatients } from '../store/patientStore.js';
@@ -343,7 +344,7 @@ function attachWeeklyGridEvents() {
       }
     });
 
-    // ドロップ処理（パレットからの新規配置、またはカードの移動）
+    // ドロップ処理（重複予約防止ガード完全連動）
     cell.addEventListener('drop', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -366,7 +367,7 @@ function attachWeeklyGridEvents() {
       if (!payload) return;
 
       try {
-        // パターンA: パレットから患者をドロップした場合（その場に即時配置）
+        // パターンA: パレットから患者をドロップした場合（重複ガード連動）
         if (payload.type === 'NEW_PATIENT') {
           const patient = getPatientById(payload.patientId);
           if (!patient) return;
@@ -390,19 +391,28 @@ function attachWeeklyGridEvents() {
             showToast(`${patient.name} 様を ${targetDate} ${targetTime} に配置しました`, 'success');
             renderAppointmentCalendarView();
           } else {
+            // ★同一患者の二重予約を物理遮断し、明確なエラーメッセージを表示
             showToast(res.message || '予約の配置に失敗しました', 'error');
           }
         }
-        // パターンB: 既存の予約カードを掴んで移動した場合
+        // パターンB: 既存の予約カードを掴んで移動した場合（移動先での二重予約ガード連動）
         else if (payload.type === 'MOVE_APPOINTMENT') {
           const allApts = getAllAppointments();
           const targetApt = allApts[payload.aptId];
           if (targetApt) {
-            targetApt.date = targetDate;
-            targetApt.startTime = targetTime;
-            upsertAppointment(targetApt);
-            showToast(`予約を ${targetDate} ${targetTime} へ移動しました`, 'success');
-            renderAppointmentCalendarView();
+            const updatedApt = {
+              ...targetApt,
+              date: targetDate,
+              startTime: targetTime
+            };
+            const res = upsertAppointment(updatedApt);
+            if (res.success) {
+              showToast(`予約を ${targetDate} ${targetTime} へ移動しました`, 'success');
+              renderAppointmentCalendarView();
+            } else {
+              // 移動先で同一患者の別予約と重複した場合も安全に遮断
+              showToast(res.message || '予約の移動に失敗しました', 'error');
+            }
           }
         }
       } catch (err) {
