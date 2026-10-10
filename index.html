@@ -19,18 +19,19 @@
     <div style="display:flex; align-items:center; gap:12px;">
       <nav class="nav-tab-group">
         <button class="nav-tab active" data-target="viewSchedule">本日時間割</button>
+        <button class="nav-tab" data-target="viewAppointmentCalendar">外来予約カレンダー</button>
         <button class="nav-tab" data-target="viewMonthly">月間単位・収益</button>
         <button class="nav-tab" data-target="viewPatient">患者台帳</button>
         <button class="nav-tab" data-target="viewLoan">物品貸出</button>
         <button class="nav-tab" data-target="viewExport">Excel出力</button>
       </nav>
-      <!-- ★1箇所目：ヘッダー更新ボタン（どの画面からでもワンクリック全体更新） -->
-      <button id="btnRefreshHeader" type="button" style="display:flex; align-items:center; gap:5px; padding:6px 12px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; font-size:0.82rem; font-weight:700; color:#0369a1; cursor:pointer; transition:all 0.15s ease;" onmouseover="this.style.background='#e0f2fe'" onmouseout="this.style.background='#f8fafc'">
+      <!-- ヘッダー更新ボタン -->
+      <button id="btnRefreshHeader" type="button" style="display:flex; align-items:center; gap:5px; padding:6px 12px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; font-size:0.82rem; font-weight:700; color:#0369a1; cursor:pointer;">
         <span>🔄</span>
         <span>最新に更新</span>
       </button>
       <!-- スタッフ設定ボタン -->
-      <button id="btnOpenStaffSettings" type="button" style="display:flex; align-items:center; gap:5px; padding:6px 12px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; font-size:0.82rem; font-weight:700; color:#334155; cursor:pointer; transition:all 0.15s ease;" onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f8fafc'">
+      <button id="btnOpenStaffSettings" type="button" style="display:flex; align-items:center; gap:5px; padding:6px 12px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; font-size:0.82rem; font-weight:700; color:#334155; cursor:pointer;">
         <span>⚙</span>
         <span>スタッフ設定</span>
       </button>
@@ -43,15 +44,15 @@
       <div style="display:flex; align-items:center; gap:8px;">
         <input type="date" id="scheduleDateInput" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.9rem;">
         <button id="btnTodaySchedule" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; cursor:pointer;">今日</button>
-        <!-- ★2箇所目：時間割専用更新ボタン（手元ですぐ最新化） -->
-        <button id="btnRefreshSchedule" type="button" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; font-weight:600; color:#0369a1; cursor:pointer; transition:background 0.15s ease;" onmouseover="this.style.background='#e0f2fe'" onmouseout="this.style.background='#f1f5f9'">🔄 更新</button>
+        <!-- 時間割専用更新ボタン -->
+        <button id="btnRefreshSchedule" type="button" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; font-weight:600; color:#0369a1; cursor:pointer;">🔄 更新</button>
       </div>
       <div id="dailyKpiStrip" style="display:flex; gap:16px; font-size:0.88rem; font-weight:600; background:#fff; padding:6px 16px; border-radius:6px; border:1px solid #e2e8f0;"></div>
     </div>
     <div style="display:grid; grid-template-columns: 240px 1fr; gap:16px;">
       <aside style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:8px; max-height:80vh; overflow-y:auto;">
         <input type="text" id="paletteSearch" placeholder="患者名・ID検索..." style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem;">
-        <!-- ★患者パレット並び替えドロップダウン -->
+        <!-- 患者パレット並び替えドロップダウン -->
         <select id="paletteSortSelect" style="width:100%; padding:5px 6px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.75rem; background:#fff; font-weight:600; color:#334155; cursor:pointer;">
           <option value="CATEGORY" selected>並べ替え: 区分順 (入院→外来→消炎)</option>
           <option value="KANA">並べ替え: 五十音順 (あいうえお)</option>
@@ -69,6 +70,24 @@
     </div>
   </section>
 
+  <!-- VIEW: 外来予約カレンダー (月間マンスリービュー) -->
+  <section id="viewAppointmentCalendar" class="view-panel">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <button id="btnAptCalPrevMonth" style="padding:6px 12px; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer;">◀ 前月</button>
+        <input type="month" id="aptCalendarMonthInput" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.95rem; font-weight:700; background:#fff;">
+        <button id="btnAptCalNextMonth" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; cursor:pointer;">次月 ▶</button>
+        <button id="btnAptCalToday" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; cursor:pointer; font-weight:600;">今月</button>
+      </div>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <span id="aptCalendarMonthCountBadge" style="font-size:0.85rem; font-weight:700; color:#0369a1; background:#e0f2fe; padding:6px 14px; border-radius:6px; border:1px solid #bae6fd;">月間予約: 計 0 件</span>
+        <button id="btnAptCalNew" style="padding:8px 16px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.85rem; cursor:pointer;">＋ 新規予約登録</button>
+      </div>
+    </div>
+    <!-- カレンダーグリッド描画コンテナ -->
+    <div id="aptCalendarGridContainer" class="calendar-container"></div>
+  </section>
+
   <!-- VIEW 2: 月間単位・収益ダッシュボード -->
   <section id="viewMonthly" class="view-panel">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
@@ -83,7 +102,7 @@
         </select>
       </div>
       <div style="display:flex; gap:16px;">
-        <div id="kpiTodayRevenueCard" style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:8px 16px; text-align:center; cursor:pointer; transition:all 0.15s ease;" title="クリックで本日の収益内訳明細を表示">
+        <div id="kpiTodayRevenueCard" style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:8px 16px; text-align:center; cursor:pointer;" title="クリックで本日の収益内訳明細を表示">
           <div style="font-size:0.75rem; color:#64748b; display:flex; align-items:center; justify-content:center; gap:4px;">
             <span>本日収益見込 (単位)</span>
             <span style="font-size:0.68rem; background:#e0f2fe; color:#0369a1; padding:1px 4px; border-radius:3px; font-weight:700;">内訳🔍</span>
@@ -165,7 +184,7 @@
               実施リスト（入院・外来・消炎鎮痛）およびレセプト収益サマリーをA4横サイズで完全生成します。
             </p>
           </div>
-          <button id="btnExportUketsuke" style="padding:12px; background:#059669; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.9rem; cursor:pointer; transition:background 0.2s;" onmouseover="this.style.background='#047857'" onmouseout="this.style.background='#059669'">受付提出用Excelを出力</button>
+          <button id="btnExportUketsuke" style="padding:12px; background:#059669; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.9rem; cursor:pointer;">受付提出用Excelを出力</button>
         </div>
 
         <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:20px; display:flex; flex-direction:column; justify-content:space-between;">
@@ -178,7 +197,7 @@
               1日〜31日の日別シートへセラピスト別の時間割実施単位を自動集計して出力します。
             </p>
           </div>
-          <button id="btnExportDiary" style="padding:12px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.9rem; cursor:pointer; transition:background 0.2s;" onmouseover="this.style.background='#0369a1'" onmouseout="this.style.background='#0284c7'">業務日誌Excelを出力</button>
+          <button id="btnExportDiary" style="padding:12px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.9rem; cursor:pointer;">業務日誌Excelを出力</button>
         </div>
       </div>
 
@@ -201,12 +220,12 @@
                 <div style="font-weight:700; font-size:0.82rem; color:#334155;">全データをPCへ保存 (随時)</div>
                 <div style="font-size:0.7rem; color:#64748b;">PC移行や大型点検時にいつでも保存できます。</div>
               </div>
-              <button id="btnBackupDownload" type="button" style="padding:7px 12px; background:#334155; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer; white-space:nowrap; transition:background 0.15s ease;" onmouseover="this.style.background='#1e293b'" onmouseout="this.style.background='#334155'">
+              <button id="btnBackupDownload" type="button" style="padding:7px 12px; background:#334155; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer; white-space:nowrap;">
                 📦 保存
               </button>
             </div>
 
-            <!-- ★5/31年度確定バックアップ -->
+            <!-- 5/31年度確定バックアップ -->
             <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center;">
               <div>
                 <div style="font-weight:700; font-size:0.82rem; color:#166534; display:flex; align-items:center; gap:4px;">
@@ -215,7 +234,7 @@
                 </div>
                 <div style="font-size:0.7rem; color:#15803d;">診療報酬改定(6/1)前の旧点数データを冷凍保存します。</div>
               </div>
-              <button id="btnFiscalYearBackup" type="button" style="padding:7px 12px; background:#16a34a; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer; white-space:nowrap; transition:background 0.15s ease;" onmouseover="this.style.background='#15803d'" onmouseout="this.style.background='#16a34a'">
+              <button id="btnFiscalYearBackup" type="button" style="padding:7px 12px; background:#16a34a; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer; white-space:nowrap;">
                 🏛 確定保存
               </button>
             </div>
@@ -229,7 +248,7 @@
             </div>
             <div style="display:flex; gap:6px;">
               <input type="file" id="backupFileInput" accept=".json" style="display:none;">
-              <button id="btnTriggerRestore" type="button" style="flex:1; padding:9px 12px; background:#fff; border:1px solid #cbd5e1; color:#0f172a; border-radius:6px; font-weight:700; font-size:0.82rem; cursor:pointer; transition:all 0.15s ease;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='#fff'">
+              <button id="btnTriggerRestore" type="button" style="flex:1; padding:9px 12px; background:#fff; border:1px solid #cbd5e1; color:#0f172a; border-radius:6px; font-weight:700; font-size:0.82rem; cursor:pointer;">
                 📥 ファイルを選択して復元
               </button>
             </div>
@@ -565,7 +584,7 @@
         </div>
         <div style="display:flex; gap:8px; align-items:center;">
           <input type="text" id="newStaffNameInput" placeholder="新規セラピスト氏名（例: 山田 太郎）" style="flex:1; padding:6px 10px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff;">
-          <button type="button" id="btnAddNewStaff" style="padding:6px 14px; background:#0284c7; color:#fff; border:none; border-radius:4px; font-size:0.82rem; font-weight:700; cursor:pointer; white-space:nowrap; transition:background 0.15s ease;" onmouseover="this.style.background='#0369a1'" onmouseout="this.style.background='#0284c7'">＋ 追加</button>
+          <button type="button" id="btnAddNewStaff" style="padding:6px 14px; background:#0284c7; color:#fff; border:none; border-radius:4px; font-size:0.82rem; font-weight:700; cursor:pointer; white-space:nowrap;">＋ 追加</button>
         </div>
       </div>
 
