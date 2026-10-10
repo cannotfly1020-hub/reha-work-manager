@@ -1,102 +1,48 @@
 // js/views/appointmentCalendarView.js
-// 外来予約 週間タイムテーブル ＆ ドラッグ＆ドロップ ＆ 月間切替 ＆ A4週間シート印刷 画面制御層
-// 本日時間割と同一の操作感（左側患者パレットから月〜土の時間枠へ直感ドラッグ配置・即時保存・同一時間重複対応）
-// ★同一患者の重複予約防止ガード完全連動（二重予約を即座に検知し警告トースト通知）
-// ★月間カレンダーからの日付ダブルクリックによる週間タイムテーブル即時ジャンプ機能完備
+// 外来予約 週間タイムテーブル ＆ ドラッグ＆ドロップ ＆ 2大A4印刷対応 画面制御層
+// 1. A4横1枚完結・原本Excel完全同一 週間タイムテーブル印刷
+// 2. A4縦1枚完結・1日30名以上対応 本日デイリー予約チェックリスト印刷
+// 3. 同一患者二重予約物理遮断トースト連携 ＆ 月間日付ダブルクリック週間ジャンプ完備
 
 import { sanitizeHtml } from '../core/dataNormalizer.js';
-import { getPatientById, getAllPatients } from '../store/patientStore.js';
+import { getPatientById, searchPatients } from '../store/patientStore.js';
 import { getAllTherapists } from '../store/therapistStore.js';
 import {
-  getAllAppointments, getAppointmentsByMonth,
-  upsertAppointment, calculateEndTime
+  getAllAppointments, getAppointmentsByMonth, upsertAppointment
 } from '../store/appointmentStore.js';
 import { openAppointmentModal } from './modals/appointmentModal.js';
 import { showToast } from './exportView.js';
 
-// 24コマ標準時間枠（本日時間割と完全同期）
-const TIME_SLOTS = [
-  { id: 1,  time: '08:40' },
-  { id: 2,  time: '09:00' },
-  { id: 3,  time: '09:20' },
-  { id: 4,  time: '09:40' },
-  { id: 5,  time: '10:00' },
-  { id: 6,  time: '10:20' },
-  { id: 7,  time: '10:40' },
-  { id: 8,  time: '11:00' },
-  { id: 9,  time: '11:20' },
-  { id: 10, time: '11:40' },
-  { id: 11, time: '12:00' },
-  { id: 12, time: '12:20' },
-  { id: 13, time: '13:20' },
-  { id: 14, time: '13:40' },
-  { id: 15, time: '14:00' },
-  { id: 16, time: '14:20' },
-  { id: 17, time: '14:40' },
-  { id: 18, time: '15:00' },
-  { id: 19, time: '15:20' },
-  { id: 20, time: '15:40' },
-  { id: 21, time: '16:00' },
-  { id: 22, time: '16:20' },
-  { id: 23, time: '16:40' },
-  { id: 24, time: '17:00' }
-];
-
-// 表示状態管理
-let currentBaseDate = new Date(); // 表示基準日（週内の任意の日）
-let currentViewMode = 'WEEK';     // 'WEEK' (週間タイムテーブル) | 'MONTH' (月間マス目)
-let paletteFilterCat = 'OUTPATIENT'; // 外来優先
-let paletteSortOrder = 'CATEGORY';
-
-// ドラッグ中の一時データ退避用（ブラウザのデータ転送消失ガード）
+// 基準日（デフォルトは本日）
+let currentBaseDate = new Date();
+// 表示モード: 'WEEK'（週間タイムテーブル） | 'MONTH'（月間カレンダー）
+let currentViewMode = 'WEEK';
+// ドラッグ中のペイロード保持（ブラウザのデータ消失対策）
 let activeDragPayload = null;
 
+// 時間軸スロット（本日時間割と同一の24コマ構成）
+const TIME_SLOTS = [
+  '08:40', '09:00', '09:20', '09:40', '10:00', '10:20', '10:40',
+  '11:00', '11:20', '11:40', '12:00', '12:20',
+  '13:40', '14:00', '14:20', '14:40', '15:00', '15:20', '15:40',
+  '16:00', '16:20', '16:40', '17:00'
+];
+
 /**
- * 外来予約カレンダー画面の全体初期化
+ * 外来予約カレンダー画面の初期化
  */
 export function initAppointmentCalendarView() {
-  initWeekNavigationListeners();
-  initPaletteListeners();
-  initViewModeListeners();
-  initPrintListeners();
-
-  // 初回描画
-  renderAppointmentCalendarView();
-}
-
-/**
- * 画面全体の再描画（週間/月間モード両対応）
- */
-export function renderAppointmentCalendarView() {
-  renderPalette();
-
-  if (currentViewMode === 'WEEK') {
-    renderWeeklyTimetable();
-  } else {
-    renderMonthlyCalendar();
-  }
-}
-
-function initWeekNavigationListeners() {
+  const dateInput = document.getElementById('aptCalendarWeekDateInput');
   const btnPrev = document.getElementById('btnAptCalPrevWeek');
   const btnNext = document.getElementById('btnAptCalNextWeek');
-  const btnThisWeek = document.getElementById('btnAptCalThisWeek');
-  const dateInput = document.getElementById('aptCalendarWeekDateInput');
+  const btnToday = document.getElementById('btnAptCalThisWeek');
+  const btnNew = document.getElementById('btnAptCalNew');
+  const btnModeWeek = document.getElementById('btnAptViewModeWeek');
+  const btnModeMonth = document.getElementById('btnAptViewModeMonth');
+  const btnPrintWeekly = document.getElementById('btnAptPrintWeekly');
+  const btnPrintDaily = document.getElementById('btnAptPrintDaily');
 
-  btnPrev?.addEventListener('click', () => {
-    currentBaseDate.setDate(currentBaseDate.getDate() - 7);
-    renderAppointmentCalendarView();
-  });
-
-  btnNext?.addEventListener('click', () => {
-    currentBaseDate.setDate(currentBaseDate.getDate() + 7);
-    renderAppointmentCalendarView();
-  });
-
-  btnThisWeek?.addEventListener('click', () => {
-    currentBaseDate = new Date();
-    renderAppointmentCalendarView();
-  });
+  syncDateInput();
 
   dateInput?.addEventListener('change', (e) => {
     if (!e.target.value) return;
@@ -107,149 +53,255 @@ function initWeekNavigationListeners() {
     }
   });
 
-  const btnNew = document.getElementById('btnAptCalNew');
+  btnPrev?.addEventListener('click', () => {
+    if (currentViewMode === 'WEEK') {
+      currentBaseDate.setDate(currentBaseDate.getDate() - 7);
+    } else {
+      currentBaseDate.setMonth(currentBaseDate.getMonth() - 1);
+    }
+    syncDateInput();
+    renderAppointmentCalendarView();
+  });
+
+  btnNext?.addEventListener('click', () => {
+    if (currentViewMode === 'WEEK') {
+      currentBaseDate.setDate(currentBaseDate.getDate() + 7);
+    } else {
+      currentBaseDate.setMonth(currentBaseDate.getMonth() + 1);
+    }
+    syncDateInput();
+    renderAppointmentCalendarView();
+  });
+
+  btnToday?.addEventListener('click', () => {
+    currentBaseDate = new Date();
+    syncDateInput();
+    renderAppointmentCalendarView();
+  });
+
   btnNew?.addEventListener('click', () => {
-    const todayStr = toDateString(currentBaseDate);
-    openAppointmentModal(null, todayStr, '09:00');
-  });
-}
-
-function initViewModeListeners() {
-  const btnWeek = document.getElementById('btnAptViewModeWeek');
-  const btnMonth = document.getElementById('btnAptViewModeMonth');
-
-  btnWeek?.addEventListener('click', () => {
-    switchToWeeklyMode();
+    const defaultDateStr = formatDateYMD(currentBaseDate);
+    openAppointmentModal(null, defaultDateStr, '09:00');
   });
 
-  btnMonth?.addEventListener('click', () => {
-    switchToMonthlyMode();
+  // モード切替
+  btnModeWeek?.addEventListener('click', () => switchViewMode('WEEK'));
+  btnModeMonth?.addEventListener('click', () => switchViewMode('MONTH'));
+
+  // ★印刷ボタン 1: 週間タイムテーブル (A4横1枚完結・原本Excel完全同一レイアウト)
+  btnPrintWeekly?.addEventListener('click', () => {
+    handlePrintWeeklyTable();
   });
-}
 
-/**
- * 週間モードへの画面切り替え
- */
-function switchToWeeklyMode() {
-  currentViewMode = 'WEEK';
-  const btnWeek = document.getElementById('btnAptViewModeWeek');
-  const btnMonth = document.getElementById('btnAptViewModeMonth');
-  const weekContainer = document.getElementById('aptWeeklyViewContainer');
-  const monthContainer = document.getElementById('aptMonthlyViewContainer');
+  // ★印刷ボタン 2: 本日デイリー予約チェックリスト (A4縦1枚・30名以上対応)
+  btnPrintDaily?.addEventListener('click', () => {
+    handlePrintDailyChecklist();
+  });
 
-  if (btnWeek) {
-    btnWeek.classList.add('active');
-    btnWeek.style.background = '#0284c7';
-    btnWeek.style.color = '#fff';
-  }
-  if (btnMonth) {
-    btnMonth.classList.remove('active');
-    btnMonth.style.background = '#fff';
-    btnMonth.style.color = '#475569';
-  }
-  if (weekContainer) weekContainer.style.display = 'grid';
-  if (monthContainer) monthContainer.style.display = 'none';
+  // 患者パレットの検索・ソート・区分切替イベント
+  setupAptPaletteEvents();
 
+  // 初回描画
   renderAppointmentCalendarView();
 }
 
-/**
- * 月間モードへの画面切り替え
- */
-function switchToMonthlyMode() {
-  currentViewMode = 'MONTH';
-  const btnWeek = document.getElementById('btnAptViewModeWeek');
-  const btnMonth = document.getElementById('btnAptViewModeMonth');
-  const weekContainer = document.getElementById('aptWeeklyViewContainer');
-  const monthContainer = document.getElementById('aptMonthlyViewContainer');
-
-  if (btnMonth) {
-    btnMonth.classList.add('active');
-    btnMonth.style.background = '#0284c7';
-    btnMonth.style.color = '#fff';
-  }
-  if (btnWeek) {
-    btnWeek.classList.remove('active');
-    btnWeek.style.background = '#fff';
-    btnWeek.style.color = '#475569';
-  }
-  if (weekContainer) weekContainer.style.display = 'none';
-  if (monthContainer) monthContainer.style.display = 'block';
-
-  renderAppointmentCalendarView();
-}
-
-/**
- * 基準日を含む「月曜日〜土曜日」の日付リストを算出する
- * @param {Date} baseDate
- * @returns {Array<{ dateStr: string, dayOfWeek: number, dayName: string, label: string, isToday: boolean, monthDay: string }>}
- */
-function getWeekDaysList(baseDate) {
-  const current = new Date(baseDate);
-  const day = current.getDay(); // 0:日, 1:月 ... 6:土
-  // 月曜日を起点にする (日曜の場合は前週の月曜、それ以外は当週月曜)
-  const diffToMonday = day === 0 ? -6 : 1 - day;
-  const monday = new Date(current);
-  monday.setDate(current.getDate() + diffToMonday);
-
-  const dayNames = ['月', '火', '水', '木', '金', '土'];
-  const todayStr = toDateString(new Date());
-  const list = [];
-
-  for (let i = 0; i < 6; i++) {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    const dateStr = toDateString(d);
-    list.push({
-      dateStr,
-      dayOfWeek: d.getDay(),
-      dayName: dayNames[i],
-      monthDay: `${d.getMonth() + 1}/${d.getDate()}`,
-      label: `${d.getMonth() + 1}/${d.getDate()} (${dayNames[i]})`,
-      isToday: dateStr === todayStr
-    });
-  }
-  return list;
-}
-
-function toDateString(dateObj) {
-  const y = dateObj.getFullYear();
-  const m = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const d = String(dateObj.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-/**
- * 週間タイムテーブル（月〜土 × 24コマ）の描画
- */
-function renderWeeklyTimetable() {
-  const gridContainer = document.getElementById('aptWeeklyGrid');
+function syncDateInput() {
   const dateInput = document.getElementById('aptCalendarWeekDateInput');
+  if (dateInput) {
+    dateInput.value = formatDateYMD(currentBaseDate);
+  }
+}
+
+function switchViewMode(mode) {
+  currentViewMode = mode;
+  const btnWeek = document.getElementById('btnAptViewModeWeek');
+  const btnMonth = document.getElementById('btnAptViewModeMonth');
+  const weekContainer = document.getElementById('aptWeeklyViewContainer');
+  const monthContainer = document.getElementById('aptMonthlyViewContainer');
+
+  if (mode === 'WEEK') {
+    btnWeek?.classList.add('active');
+    if (btnWeek) { btnWeek.style.background = '#0284c7'; btnWeek.style.color = '#fff'; }
+    btnMonth?.classList.remove('active');
+    if (btnMonth) { btnMonth.style.background = '#fff'; btnMonth.style.color = '#475569'; }
+    if (weekContainer) weekContainer.style.display = 'grid';
+    if (monthContainer) monthContainer.style.display = 'none';
+  } else {
+    btnMonth?.classList.add('active');
+    if (btnMonth) { btnMonth.style.background = '#0284c7'; btnMonth.style.color = '#fff'; }
+    btnWeek?.classList.remove('active');
+    if (btnWeek) { btnWeek.style.background = '#fff'; btnWeek.style.color = '#475569'; }
+    if (weekContainer) weekContainer.style.display = 'none';
+    if (monthContainer) monthContainer.style.display = 'block';
+  }
+
+  renderAppointmentCalendarView();
+}
+
+/**
+ * 画面全体の再描画
+ */
+export function renderAppointmentCalendarView() {
+  renderAptPalette();
+
+  if (currentViewMode === 'WEEK') {
+    renderWeeklyTimetable();
+  } else {
+    renderMonthlyCalendar();
+  }
+}
+
+/* ==========================================================================
+   1. 左側：外来予約用 患者パレット
+   ========================================================================== */
+
+let aptPaletteCategory = 'OUTPATIENT'; // 外来優先
+let aptPaletteSort = 'CATEGORY';
+
+function setupAptPaletteEvents() {
+  const searchInput = document.getElementById('aptPaletteSearch');
+  const sortSelect = document.getElementById('aptPaletteSortSelect');
+  const catButtons = document.querySelectorAll('.apt-palette-cat-btn');
+
+  searchInput?.addEventListener('input', renderAptPalette);
+
+  sortSelect?.addEventListener('change', (e) => {
+    aptPaletteSort = e.target.value;
+    renderAptPalette();
+  });
+
+  catButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      catButtons.forEach((b) => {
+        b.classList.remove('active');
+        b.style.background = '#fff';
+        b.style.color = '#334155';
+      });
+      btn.classList.add('active');
+      btn.style.background = '#0284c7';
+      btn.style.color = '#fff';
+      aptPaletteCategory = btn.dataset.cat || 'ALL';
+      renderAptPalette();
+    });
+  });
+}
+
+function renderAptPalette() {
+  const container = document.getElementById('aptPalettePatientList');
+  const searchInput = document.getElementById('aptPaletteSearch');
+  if (!container) return;
+
+  const keyword = searchInput ? searchInput.value.trim() : '';
+  const patients = searchPatients(keyword, aptPaletteCategory, aptPaletteSort);
+
+  if (patients.length === 0) {
+    container.innerHTML = `<div style="font-size:0.75rem; color:#94a3b8; text-align:center; padding:16px;">該当する患者がいません</div>`;
+    return;
+  }
+
+  container.innerHTML = patients
+    .map((p) => {
+      let catClass = 'cat-outpatient';
+      let catName = '外来';
+      let tagBg = '#2563eb';
+      if (p.category === 'INPATIENT') {
+        catClass = 'cat-inpatient';
+        catName = '入院';
+        tagBg = '#d97706';
+      } else if (p.diseaseType === 'ANALGESIA') {
+        catClass = 'cat-analgesia';
+        catName = '消炎';
+        tagBg = '#16a34a';
+      }
+
+      return `
+        <div class="apt-palette-item ${catClass}" draggable="true" data-patient-id="${p.id}" data-patient-name="${sanitizeHtml(p.name)}">
+          <div class="apt-palette-item-name">
+            <span>${sanitizeHtml(p.name)}</span>
+            <span style="font-size:0.65rem; background:${tagBg}; color:#fff; padding:1px 5px; border-radius:3px;">${catName}</span>
+          </div>
+          <div class="apt-palette-item-sub">
+            ID: ${p.id} / ${sanitizeHtml(p.diseaseName || '疾患名未登録')}
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+
+  // パレットのドラッグ開始イベント
+  container.querySelectorAll('.apt-palette-item').forEach((item) => {
+    item.addEventListener('dragstart', (e) => {
+      const patientId = item.dataset.patientId;
+      const patientName = item.dataset.patientName;
+      const payload = {
+        type: 'NEW_PATIENT',
+        patientId,
+        patientName
+      };
+      activeDragPayload = payload;
+      e.dataTransfer.setData('text/plain', JSON.stringify(payload));
+      e.dataTransfer.effectAllowed = 'copy';
+    });
+
+    item.addEventListener('dragend', () => {
+      activeDragPayload = null;
+    });
+  });
+}
+
+/* ==========================================================================
+   2. 右側：週間タイムテーブル（月〜土 × 時間枠）
+   ========================================================================== */
+
+function getWeekDates(baseDate) {
+  const d = new Date(baseDate);
+  const day = d.getDay();
+  // 月曜日を週の始まりとする（日曜日は翌週扱いまたは前週扱い、日本の医療現場慣例）
+  const diffToMonday = (day === 0 ? -6 : 1) - day;
+  const monday = new Date(d);
+  monday.setDate(d.getDate() + diffToMonday);
+
+  const week = [];
+  for (let i = 0; i < 6; i++) { // 月〜土 (6日間)
+    const target = new Date(monday);
+    target.setDate(monday.getDate() + i);
+    week.push(target);
+  }
+  return week;
+}
+
+function renderWeeklyTimetable() {
+  const gridEl = document.getElementById('aptWeeklyGrid');
   const rangeLabel = document.getElementById('aptCalendarWeekRangeLabel');
-  const badgeEl = document.getElementById('aptCalendarWeekCountBadge');
-  if (!gridContainer) return;
+  const countBadge = document.getElementById('aptCalendarWeekCountBadge');
+  if (!gridEl) return;
 
-  const weekDays = getWeekDaysList(currentBaseDate);
-  const startDate = weekDays[0].dateStr;
-  const endDate = weekDays[5].dateStr;
+  const weekDates = getWeekDates(currentBaseDate);
+  const startStr = formatDateYMD(weekDates[0]);
+  const endStr = formatDateYMD(weekDates[5]);
+  const todayStr = formatDateYMD(new Date());
 
-  if (dateInput) dateInput.value = toDateString(currentBaseDate);
-  if (rangeLabel) rangeLabel.textContent = `【 ${startDate} 〜 ${endDate} 】`;
+  if (rangeLabel) {
+    rangeLabel.textContent = `${startStr.replace(/-/g, '/')} (月) 〜 ${endStr.replace(/-/g, '/')} (土)`;
+  }
 
-  // 1週間の全予約データを集計 (日付マップ)
+  // 今週の全予約を取得
   const allAppointments = getAllAppointments();
-  const weekAptList = Object.values(allAppointments).filter(
-    (apt) => apt.date >= startDate && apt.date <= endDate && apt.status !== 'CANCELLED'
-  );
+  const weekDatesSet = new Set(weekDates.map(formatDateYMD));
+  const weekAptList = Object.values(allAppointments).filter((apt) => {
+    return apt.status !== 'CANCELLED' && weekDatesSet.has(apt.date);
+  });
 
-  if (badgeEl) badgeEl.textContent = `週間予約: 計 ${weekAptList.length} 件`;
+  if (countBadge) {
+    countBadge.textContent = `週間予約: 計 ${weekAptList.length} 件`;
+  }
 
-  // 日付 ＆ 開始時刻でインデックス化 (key: YYYY-MM-DD_HH:MM)
-  const aptBySlot = {};
+  // 予約マップ [日付][時間帯] -> Appointment[]
+  const slotAptMap = {};
   weekAptList.forEach((apt) => {
-    const slotKey = `${apt.date}_${apt.startTime}`;
-    if (!aptBySlot[slotKey]) aptBySlot[slotKey] = [];
-    aptBySlot[slotKey].push(apt);
+    const k = `${apt.date}_${apt.startTime}`;
+    if (!slotAptMap[k]) slotAptMap[k] = [];
+    slotAptMap[k].push(apt);
   });
 
   const therapists = getAllTherapists();
@@ -258,351 +310,208 @@ function renderWeeklyTimetable() {
   staffColorMap['ANALGESIA'] = '#16a34a';
   staffColorMap['NONE'] = '#64748b';
 
-  // グリッドHTMLの組み立て
-  // ヘッダー行（時間列 ＋ 月〜土の6列）
-  let gridHtml = `
-    <div class="apt-weekly-header">時間帯</div>
+  const dayNames = ['月', '火', '水', '木', '金', '土'];
+
+  // グリッドHTML組み立て
+  let html = `
+    <div class="apt-weekly-header">時間</div>
   `;
-  weekDays.forEach((wd) => {
-    let headerCls = 'apt-weekly-header';
-    if (wd.dayOfWeek === 6) headerCls += ' apt-col-sat';
-    if (wd.isToday) headerCls += ' apt-col-today';
-    gridHtml += `
-      <div class="${headerCls}">
-        <div>${wd.dayName}曜日</div>
-        <div style="font-size:0.72rem; color:${wd.isToday ? '#15803d' : '#64748b'}; font-weight:normal;">${wd.monthDay}</div>
+
+  // 曜日ヘッダー
+  weekDates.forEach((d, idx) => {
+    const dateStr = formatDateYMD(d);
+    const isToday = dateStr === todayStr;
+    const isSat = d.getDay() === 6;
+    let cls = 'apt-weekly-header';
+    if (isSat) cls += ' apt-col-sat';
+    if (isToday) cls += ' apt-col-today';
+
+    const mmdd = `${d.getMonth() + 1}/${d.getDate()}`;
+    html += `
+      <div class="${cls}">
+        <div>${dayNames[idx]}</div>
+        <div style="font-size:0.7rem; font-weight:normal; opacity:0.85;">${mmdd}</div>
       </div>
     `;
   });
 
-  // 各時間コマ行（24コマ）
-  TIME_SLOTS.forEach((slot) => {
-    // 左端：時間ラベル
-    gridHtml += `<div class="apt-weekly-time-col">${slot.time}</div>`;
+  // 時間帯 × 曜日行
+  TIME_SLOTS.forEach((slotTime) => {
+    html += `<div class="apt-weekly-time-col">${slotTime}</div>`;
 
-    // 月〜土の各セル
-    weekDays.forEach((wd) => {
+    weekDates.forEach((d) => {
+      const dateStr = formatDateYMD(d);
+      const isToday = dateStr === todayStr;
+      const isSat = d.getDay() === 6;
+
       let cellCls = 'apt-weekly-slot-cell';
-      if (wd.dayOfWeek === 6) cellCls += ' apt-sat-cell';
-      if (wd.isToday) cellCls += ' apt-today-cell';
+      if (isSat) cellCls += ' apt-sat-cell';
+      if (isToday) cellCls += ' apt-today-cell';
 
-      const slotKey = `${wd.dateStr}_${slot.time}`;
-      const apts = aptBySlot[slotKey] || [];
+      const key = `${dateStr}_${slotTime}`;
+      const aptsInSlot = slotAptMap[key] || [];
 
-      gridHtml += `
-        <div class="${cellCls}"
-             data-date="${wd.dateStr}"
-             data-time="${slot.time}">
-      `;
+      html += `<div class="${cellCls}" data-date="${dateStr}" data-time="${slotTime}">`;
 
-      // 予約カード（同一時間帯に複数名が入っても並列スタック表示）
-      apts.forEach((apt) => {
+      // 同一枠内の予約カードたち
+      aptsInSlot.forEach((apt) => {
         const p = getPatientById(apt.patientId);
         const pName = p ? p.name : apt.patientId;
         const staff = therapists.find((t) => t.id === apt.therapistId);
         let staffLabel = staff ? staff.name : (apt.therapistId === 'ANALGESIA' ? '物療' : '指定無');
         if (staffLabel.length > 3) staffLabel = staffLabel.slice(0, 3);
 
-        const isAnalgesia = apt.treatmentType === 'ANALGESIA' || apt.therapistId === 'ANALGESIA';
-        const cardBg = isAnalgesia ? '#f0fdf4' : '#ffffff';
-        const cardBorder = isAnalgesia ? '#86efac' : '#cbd5e1';
         const staffCol = staffColorMap[apt.therapistId] || '#0284c7';
+        const isAnalgesia = apt.treatmentType === 'ANALGESIA' || apt.therapistId === 'ANALGESIA';
+        const cardCls = isAnalgesia ? 'apt-weekly-card apt-card-analgesia' : 'apt-weekly-card';
 
-        gridHtml += `
-          <div class="apt-weekly-card ${isAnalgesia ? 'apt-card-analgesia' : ''}"
-               draggable="true"
-               data-apt-id="${apt.id}"
-               style="background:${cardBg}; border:1px solid ${cardBorder}; border-left:4px solid ${staffCol};">
-            <span class="apt-weekly-card-name" title="${sanitizeHtml(pName)} (${apt.patientId}) - ${apt.durationMinutes}分">
-              ${sanitizeHtml(pName)}
-            </span>
-            <span class="apt-weekly-card-tag" style="background:${staffCol};">
-              ${sanitizeHtml(staffLabel)}
-            </span>
+        html += `
+          <div class="${cardCls}" draggable="true" data-apt-id="${apt.id}" style="border-left:4px solid ${staffCol};">
+            <span class="apt-weekly-card-name" title="${sanitizeHtml(pName)} (${apt.patientId})">${sanitizeHtml(pName)}</span>
+            <span class="apt-weekly-card-tag" style="background:${staffCol};">${sanitizeHtml(staffLabel)}</span>
           </div>
         `;
       });
 
-      gridHtml += `</div>`;
+      html += `</div>`;
     });
   });
 
-  gridContainer.innerHTML = gridHtml;
+  gridEl.innerHTML = html;
 
-  // イベントバインド：ドラッグ＆ドロップ受け入れ & セルクリック & カード編集
-  attachWeeklyGridEvents();
+  setupWeeklyDragAndDrop(gridEl);
 }
 
-function attachWeeklyGridEvents() {
-  const gridContainer = document.getElementById('aptWeeklyGrid');
-  if (!gridContainer) return;
-
-  const cells = gridContainer.querySelectorAll('.apt-weekly-slot-cell');
-  const cards = gridContainer.querySelectorAll('.apt-weekly-card');
-
-  // セルクリックで新規予約
-  cells.forEach((cell) => {
-    cell.addEventListener('click', (e) => {
-      if (e.target.closest('.apt-weekly-card')) return;
-      const targetCell = e.target.closest('.apt-weekly-slot-cell');
-      const date = targetCell?.dataset.date;
-      const time = targetCell?.dataset.time;
-      if (date && time) {
-        openAppointmentModal(null, date, time);
-      }
+/**
+ * 週間タイムテーブルのドラッグ＆ドロップ ＆ クリックイベント
+ */
+function setupWeeklyDragAndDrop(gridEl) {
+  // 配置済み予約カードのドラッグ開始イベント（曜日・時間移動）
+  gridEl.querySelectorAll('.apt-weekly-card').forEach((card) => {
+    card.addEventListener('dragstart', (e) => {
+      e.stopPropagation();
+      const aptId = card.dataset.aptId;
+      const payload = {
+        type: 'MOVE_APPOINTMENT',
+        appointmentId: aptId
+      };
+      activeDragPayload = payload;
+      e.dataTransfer.setData('text/plain', JSON.stringify(payload));
+      e.dataTransfer.effectAllowed = 'move';
     });
 
-    // ドラッグオーバー（ドロップ可能化）
+    card.addEventListener('dragend', () => {
+      activeDragPayload = null;
+    });
+
+    // カードクリックで編集モーダルを開く
+    card.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const aptId = card.dataset.aptId;
+      const all = getAllAppointments();
+      const targetApt = all[aptId];
+      if (targetApt) {
+        openAppointmentModal(targetApt);
+      }
+    });
+  });
+
+  // 各セルのドロップ受け入れイベント
+  gridEl.querySelectorAll('.apt-weekly-slot-cell').forEach((cell) => {
     cell.addEventListener('dragover', (e) => {
       e.preventDefault();
-      if (e.dataTransfer) {
-        e.dataTransfer.dropEffect = 'copy';
-      }
-      cell.classList.add('apt-drop-hover');
-    });
-
-    cell.addEventListener('dragenter', (e) => {
-      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
       cell.classList.add('apt-drop-hover');
     });
 
     cell.addEventListener('dragleave', (e) => {
-      // 内部子要素への移動による誤消去を防止
+      // 子要素への移動による誤発火を防止
       if (!cell.contains(e.relatedTarget)) {
         cell.classList.remove('apt-drop-hover');
       }
     });
 
-    // ドロップ処理（重複予約防止ガード完全連動）
     cell.addEventListener('drop', (e) => {
       e.preventDefault();
-      e.stopPropagation();
       cell.classList.remove('apt-drop-hover');
 
       const targetCell = e.target.closest('.apt-weekly-slot-cell');
-      const targetDate = targetCell?.dataset.date;
-      const targetTime = targetCell?.dataset.time;
-      if (!targetDate || !targetTime) return;
+      if (!targetCell) return;
 
-      // 転送データの復元（activeDragPayload または dataTransfer から取得）
+      const date = targetCell.dataset.date;
+      const time = targetCell.dataset.time;
+
       let payload = activeDragPayload;
       if (!payload) {
         try {
-          const raw = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('application/json');
+          const raw = e.dataTransfer.getData('text/plain');
           if (raw) payload = JSON.parse(raw);
         } catch (_) {}
       }
 
       if (!payload) return;
 
-      try {
-        // パターンA: パレットから患者をドロップした場合（重複ガード連動）
-        if (payload.type === 'NEW_PATIENT') {
-          const patient = getPatientById(payload.patientId);
-          if (!patient) return;
+      if (payload.type === 'NEW_PATIENT') {
+        // パレットからの新規配置（即座に保存・配置）
+        const p = getPatientById(payload.patientId);
+        const isAnalgesia = p?.diseaseType === 'ANALGESIA';
+        const defaultTherapist = isAnalgesia ? 'ANALGESIA' : 'A';
+        const defaultTreatment = isAnalgesia ? 'ANALGESIA' : 'INDIVIDUAL';
+        const defaultDuration = isAnalgesia ? 20 : 30;
 
-          const isAnalgesia = patient.category === 'ANALGESIA' || patient.diseaseType === 'ANALGESIA';
-          const defaultTherapist = isAnalgesia ? 'ANALGESIA' : 'A';
-          const defaultTreatment = isAnalgesia ? 'ANALGESIA' : 'INDIVIDUAL';
-          const defaultDuration = isAnalgesia ? 20 : 30;
+        const res = upsertAppointment({
+          patientId: payload.patientId,
+          date: date,
+          startTime: time,
+          durationMinutes: defaultDuration,
+          therapistId: defaultTherapist,
+          treatmentType: defaultTreatment,
+          notes: ''
+        });
 
+        if (res.success) {
+          showToast(`✅ ${payload.patientName} 様を ${date.slice(5)} ${time} に予約配置しました`, 'success');
+          renderAppointmentCalendarView();
+        } else {
+          // ★同一患者重複予約防止ガードのメッセージ表示
+          showToast(res.message || '二重予約のため配置できませんでした', 'error');
+        }
+      } else if (payload.type === 'MOVE_APPOINTMENT') {
+        // 配置済み予約の日時移動
+        const all = getAllAppointments();
+        const existing = all[payload.appointmentId];
+        if (existing) {
           const res = upsertAppointment({
-            patientId: patient.id,
-            date: targetDate,
-            startTime: targetTime,
-            durationMinutes: defaultDuration,
-            therapistId: defaultTherapist,
-            treatmentType: defaultTreatment,
-            notes: ''
+            ...existing,
+            date: date,
+            startTime: time
           });
-
           if (res.success) {
-            showToast(`${patient.name} 様を ${targetDate} ${targetTime} に配置しました`, 'success');
+            showToast(`🔄 予約日時を ${date.slice(5)} ${time} に変更しました`, 'info');
             renderAppointmentCalendarView();
           } else {
-            // ★同一患者の二重予約を物理遮断し、明確なエラーメッセージを表示
-            showToast(res.message || '予約の配置に失敗しました', 'error');
+            showToast(res.message || '移動先の時間帯が重複しています', 'error');
           }
         }
-        // パターンB: 既存の予約カードを掴んで移動した場合（移動先での二重予約ガード連動）
-        else if (payload.type === 'MOVE_APPOINTMENT') {
-          const allApts = getAllAppointments();
-          const targetApt = allApts[payload.aptId];
-          if (targetApt) {
-            const updatedApt = {
-              ...targetApt,
-              date: targetDate,
-              startTime: targetTime
-            };
-            const res = upsertAppointment(updatedApt);
-            if (res.success) {
-              showToast(`予約を ${targetDate} ${targetTime} へ移動しました`, 'success');
-              renderAppointmentCalendarView();
-            } else {
-              // 移動先で同一患者の別予約と重複した場合も安全に遮断
-              showToast(res.message || '予約の移動に失敗しました', 'error');
-            }
-          }
-        }
-      } catch (err) {
-        console.error('Drop error:', err);
-      } finally {
-        activeDragPayload = null;
       }
-    });
-  });
 
-  // 既存予約カードのドラッグ開始 ＆ クリック編集
-  cards.forEach((card) => {
-    card.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const aptId = card.dataset.aptId;
-      const allApts = getAllAppointments();
-      const targetApt = allApts[aptId];
-      if (targetApt) {
-        openAppointmentModal(targetApt);
-      }
-    });
-
-    card.addEventListener('dragstart', (e) => {
-      e.stopPropagation();
-      const aptId = card.dataset.aptId;
-      const payload = { type: 'MOVE_APPOINTMENT', aptId };
-      activeDragPayload = payload;
-      if (e.dataTransfer) {
-        e.dataTransfer.setData('text/plain', JSON.stringify(payload));
-        e.dataTransfer.effectAllowed = 'move';
-      }
-    });
-
-    card.addEventListener('dragend', () => {
       activeDragPayload = null;
-      document.querySelectorAll('.apt-drop-hover').forEach((el) => el.classList.remove('apt-drop-hover'));
+    });
+
+    // セルの空き余白クリックで新規予約モーダルを開く
+    cell.addEventListener('click', (e) => {
+      if (e.target.closest('.apt-weekly-card')) return;
+      const date = cell.dataset.date;
+      const time = cell.dataset.time;
+      openAppointmentModal(null, date, time);
     });
   });
 }
 
-function initPaletteListeners() {
-  const searchInput = document.getElementById('aptPaletteSearch');
-  const sortSelect = document.getElementById('aptPaletteSortSelect');
-  const catButtons = document.querySelectorAll('.apt-palette-cat-btn');
+/* ==========================================================================
+   3. 月間カレンダー（マス目）フォールバックビュー ＆ ダブルクリック週間ジャンプ
+   ========================================================================== */
 
-  searchInput?.addEventListener('input', () => renderPalette());
-
-  sortSelect?.addEventListener('change', (e) => {
-    paletteSortOrder = e.target.value;
-    renderPalette();
-  });
-
-  catButtons.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      catButtons.forEach((b) => {
-        b.classList.remove('active');
-        b.style.background = '#fff';
-      });
-      btn.classList.add('active');
-      btn.style.background = '#e0f2fe';
-      paletteFilterCat = btn.dataset.cat || 'ALL';
-      renderPalette();
-    });
-  });
-}
-
-/**
- * 左側患者パレットの描画
- */
-function renderPalette() {
-  const container = document.getElementById('aptPalettePatientList');
-  if (!container) return;
-
-  const searchInput = document.getElementById('aptPaletteSearch');
-  const keyword = (searchInput?.value || '').trim().toLowerCase();
-
-  const allPatients = getAllPatients();
-  let list = allPatients.filter((p) => p.status !== 'DISCONTINUED');
-
-  // カテゴリ絞り込み
-  if (paletteFilterCat !== 'ALL') {
-    if (paletteFilterCat === 'ANALGESIA') {
-      list = list.filter((p) => p.diseaseType === 'ANALGESIA');
-    } else {
-      list = list.filter((p) => p.category === paletteFilterCat);
-    }
-  }
-
-  // 検索キーワード絞り込み
-  if (keyword) {
-    list = list.filter((p) =>
-      p.id.toLowerCase().includes(keyword) ||
-      p.name.toLowerCase().includes(keyword) ||
-      (p.nameKana || '').toLowerCase().includes(keyword) ||
-      (p.diseaseName || '').toLowerCase().includes(keyword)
-    );
-  }
-
-  // ソート
-  list.sort((a, b) => {
-    if (paletteSortOrder === 'KANA') {
-      return (a.nameKana || a.name).localeCompare(b.nameKana || b.name, 'ja');
-    } else if (paletteSortOrder === 'ID') {
-      return a.id.localeCompare(b.id, 'ja', { numeric: true });
-    } else {
-      // 区分順（外来 → 消炎 → 入院）
-      const order = { OUTPATIENT: 1, ANALGESIA: 2, INPATIENT: 3 };
-      const rankA = a.diseaseType === 'ANALGESIA' ? 2 : (order[a.category] || 9);
-      const rankB = b.diseaseType === 'ANALGESIA' ? 2 : (order[b.category] || 9);
-      if (rankA !== rankB) return rankA - rankB;
-      return a.id.localeCompare(b.id, 'ja', { numeric: true });
-    }
-  });
-
-  if (list.length === 0) {
-    container.innerHTML = `<div style="font-size:0.75rem; color:#94a3b8; text-align:center; padding:16px;">該当する患者がいません</div>`;
-    return;
-  }
-
-  container.innerHTML = list.map((p) => {
-    const isAnalgesia = p.diseaseType === 'ANALGESIA';
-    const catClass = isAnalgesia ? 'cat-analgesia' : (p.category === 'INPATIENT' ? 'cat-inpatient' : 'cat-outpatient');
-    const catBadge = isAnalgesia ? '消炎' : (p.category === 'INPATIENT' ? '入院' : '外来');
-
-    return `
-      <div class="apt-palette-item ${catClass}"
-           draggable="true"
-           data-patient-id="${p.id}">
-        <div class="apt-palette-item-name">
-          <span>${sanitizeHtml(p.name)}</span>
-          <span style="font-size:0.65rem; color:#64748b; font-weight:normal;">${p.id}</span>
-        </div>
-        <div class="apt-palette-item-sub">
-          [${catBadge}] ${sanitizeHtml(p.diseaseName || '疾患名未記入')}
-        </div>
-      </div>
-    `;
-  }).join('');
-
-  // パレットアイテムのドラッグイベントバインド
-  container.querySelectorAll('.apt-palette-item').forEach((item) => {
-    item.addEventListener('dragstart', (e) => {
-      const patientId = item.dataset.patientId;
-      const payload = { type: 'NEW_PATIENT', patientId };
-      activeDragPayload = payload;
-      if (e.dataTransfer) {
-        e.dataTransfer.setData('text/plain', JSON.stringify(payload));
-        e.dataTransfer.effectAllowed = 'copy';
-      }
-    });
-
-    item.addEventListener('dragend', () => {
-      activeDragPayload = null;
-      document.querySelectorAll('.apt-drop-hover').forEach((el) => el.classList.remove('apt-drop-hover'));
-    });
-  });
-}
-
-/**
- * 月間マンスリーカレンダーの描画（切替時のみ）
- */
 function renderMonthlyCalendar() {
   const container = document.getElementById('aptCalendarGridContainer');
   if (!container) return;
@@ -625,7 +534,7 @@ function renderMonthlyCalendar() {
 
   const firstDayOfWeek = new Date(y, m - 1, 1).getDay();
   const daysInMonth = new Date(y, m, 0).getDate();
-  const todayStr = toDateString(new Date());
+  const todayStr = formatDateYMD(new Date());
 
   let gridHtml = `
     <div class="calendar-header-row">
@@ -657,7 +566,7 @@ function renderMonthlyCalendar() {
     const dayApts = aptByDate[dateStr] || [];
 
     gridHtml += `
-      <div class="${dayClass}" data-date="${dateStr}" title="ダブルクリックでこの週のタイムテーブルへ移動">
+      <div class="${dayClass}" data-date="${dateStr}" title="💡 ダブルクリックでこの週の週間タイムテーブルへ移動">
         <div class="cal-day-header">
           <span class="cal-day-number ${isToday ? 'cal-today-badge' : ''}">${day}</span>
           ${dayApts.length > 0 ? `<span class="cal-day-count">${dayApts.length}件</span>` : ''}
@@ -675,19 +584,24 @@ function renderMonthlyCalendar() {
 
       const staffCol = staffColorMap[apt.therapistId] || '#0284c7';
       const isAnalgesia = apt.treatmentType === 'ANALGESIA' || apt.therapistId === 'ANALGESIA';
+      const cardBg = isAnalgesia ? '#f0fdf4' : '#f8fafc';
+      const cardBorder = isAnalgesia ? '#86efac' : '#cbd5e1';
 
       gridHtml += `
-        <div class="cal-apt-card" data-apt-id="${apt.id}" style="background:${isAnalgesia ? '#f0fdf4' : '#f8fafc'}; border:1px solid ${isAnalgesia ? '#86efac' : '#cbd5e1'}; border-left:4px solid ${staffCol};">
+        <div class="cal-apt-card" data-apt-id="${apt.id}" style="background:${cardBg}; border:1px solid ${cardBorder}; border-left:4px solid ${staffCol};">
           <div class="cal-apt-time">
             <strong>${apt.startTime}</strong>
             <span class="cal-apt-staff" style="color:${staffCol};">${sanitizeHtml(staffLabel)}</span>
           </div>
-          <div class="cal-apt-name" title="${sanitizeHtml(pName)}">${sanitizeHtml(pName)}</div>
+          <div class="cal-apt-name" title="${sanitizeHtml(pName)} (${apt.patientId})">${sanitizeHtml(pName)}</div>
         </div>
       `;
     });
 
-    gridHtml += `</div></div>`;
+    gridHtml += `
+        </div>
+      </div>
+    `;
   }
 
   const totalSlots = firstDayOfWeek + daysInMonth;
@@ -701,7 +615,7 @@ function renderMonthlyCalendar() {
   gridHtml += `</div>`;
   container.innerHTML = gridHtml;
 
-  // モーダルバインド（＋ボタン）
+  // 月間ビューのイベント
   container.querySelectorAll('.btn-cal-add-day').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -709,141 +623,262 @@ function renderMonthlyCalendar() {
     });
   });
 
-  // モーダルバインド（予約カードクリックで編集）
   container.querySelectorAll('.cal-apt-card').forEach((card) => {
     card.addEventListener('click', (e) => {
       e.stopPropagation();
-      const allApts = getAllAppointments();
-      const targetApt = allApts[card.dataset.aptId];
+      const all = getAllAppointments();
+      const targetApt = all[card.dataset.aptId];
       if (targetApt) openAppointmentModal(targetApt);
     });
   });
 
-  // ★日付マスのダブルクリックでその週の週間タイムテーブルへ即時ジャンプ
+  // ★月間カレンダー日付セルのダブルクリックでその週のタイムテーブルへジャンプ
   container.querySelectorAll('.calendar-day-cell:not(.cal-empty)').forEach((cell) => {
     cell.addEventListener('dblclick', (e) => {
-      // 予約カードや＋ボタン自体のクリック時はダブルクリック誤爆を回避
       if (e.target.closest('.cal-apt-card') || e.target.closest('.btn-cal-add-day')) return;
-
-      const targetDateStr = cell.dataset.date;
-      if (targetDateStr) {
-        const [y, m, d] = targetDateStr.split('-').map(Number);
-        if (y && m && d) {
-          currentBaseDate = new Date(y, m - 1, d);
-          switchToWeeklyMode();
-          showToast(`📅 ${targetDateStr} の週間タイムテーブルへ移動しました`, 'info');
-        }
+      const dateStr = cell.dataset.date;
+      if (dateStr) {
+        const [y, m, d] = dateStr.split('-').map(Number);
+        currentBaseDate = new Date(y, m - 1, d);
+        syncDateInput();
+        switchViewMode('WEEK');
+        showToast(`📅 ${dateStr.replace(/-/g, '/')} の週へ移動しました`, 'info');
       }
     });
   });
 }
 
-function initPrintListeners() {
-  const btnPrint = document.getElementById('btnAptPrintWeekly');
-  btnPrint?.addEventListener('click', () => {
-    triggerPrintWeeklySheet();
-  });
-}
+/* ==========================================================================
+   4. ★2大印刷エンジン（原本Excel完全同一 週間表 ＆ 本日デイリーリスト）
+   ========================================================================== */
 
 /**
- * 現場のバインダー用 A4週間予約シート（チェックリスト型）の即時印刷プレビュー
+ * 印刷スタイル 1: 週間タイムテーブル (A4横1枚完結・原本Excel完全同一レイアウト)
+ * 月〜土 × 08:40〜17:00 のマトリクスで、週150〜200名規模でもA4横1枚に綺麗に収まります。
  */
-function triggerPrintWeeklySheet() {
-  const weekDays = getWeekDaysList(currentBaseDate);
-  const startDate = weekDays[0].dateStr;
-  const endDate = weekDays[5].dateStr;
+function handlePrintWeeklyTable() {
+  const weekDates = getWeekDates(currentBaseDate);
+  const startStr = formatDateYMD(weekDates[0]);
+  const endStr = formatDateYMD(weekDates[5]);
 
   const allAppointments = getAllAppointments();
-  const weekAptList = Object.values(allAppointments).filter(
-    (apt) => apt.date >= startDate && apt.date <= endDate && apt.status !== 'CANCELLED'
-  );
+  const weekDatesSet = new Set(weekDates.map(formatDateYMD));
+  const weekAptList = Object.values(allAppointments).filter((apt) => {
+    return apt.status !== 'CANCELLED' && weekDatesSet.has(apt.date);
+  });
+
+  const slotAptMap = {};
+  weekAptList.forEach((apt) => {
+    const k = `${apt.date}_${apt.startTime}`;
+    if (!slotAptMap[k]) slotAptMap[k] = [];
+    slotAptMap[k].push(apt);
+  });
 
   const therapists = getAllTherapists();
+  const dayNames = ['月', '火', '水', '木', '金', '土'];
 
-  const printWindow = window.open('', '_blank', 'width=900,height=950');
+  const printWindow = window.open('', '_blank', 'width=1100,height=780');
   if (!printWindow) {
-    showToast('印刷ポップアップがブロックされました', 'warn');
+    showToast('印刷ポップアップがブロックされました。ブラウザ設定をご確認ください。', 'warn');
     return;
   }
 
-  let daysHtml = '';
-  weekDays.forEach((wd) => {
-    const dayApts = weekAptList
-      .filter((a) => a.date === wd.dateStr)
-      .sort((a, b) => a.startTime.localeCompare(b.startTime));
-
-    daysHtml += `
-      <div style="margin-bottom:14px; page-break-inside:avoid;">
-        <div style="background:#f1f5f9; padding:4px 8px; border-left:4px solid #0284c7; font-weight:800; font-size:0.85rem; display:flex; justify-content:space-between;">
-          <span>■ ${wd.dateStr} (${wd.dayName}曜日)</span>
-          <span>計 ${dayApts.length} 名</span>
-        </div>
-        <table style="width:100%; border-collapse:collapse; font-size:0.75rem; margin-top:4px;">
-          <thead>
-            <tr style="background:#f8fafc; border-bottom:1px solid #cbd5e1;">
-              <th style="padding:4px; width:36px; text-align:center; border:1px solid #cbd5e1;">来院</th>
-              <th style="padding:4px; width:70px; text-align:center; border:1px solid #cbd5e1;">時間</th>
-              <th style="padding:4px; text-align:left; border:1px solid #cbd5e1;">患者氏名 (ID)</th>
-              <th style="padding:4px; width:70px; text-align:center; border:1px solid #cbd5e1;">担当</th>
-              <th style="padding:4px; width:80px; text-align:center; border:1px solid #cbd5e1;">種別/所要</th>
-              <th style="padding:4px; text-align:left; border:1px solid #cbd5e1;">特記メモ</th>
-            </tr>
-          </thead>
-          <tbody>
-    `;
-
-    if (dayApts.length === 0) {
-      daysHtml += `
+  let tableHtml = `
+    <table class="weekly-print-table">
+      <thead>
         <tr>
-          <td colspan="6" style="padding:6px; text-align:center; color:#94a3b8; border:1px solid #cbd5e1;">予約なし</td>
-        </tr>
-      `;
-    } else {
-      dayApts.forEach((apt) => {
-        const p = getPatientById(apt.patientId);
-        const pName = p ? p.name : apt.patientId;
-        const staff = therapists.find((t) => t.id === apt.therapistId);
-        const staffName = staff ? staff.name : (apt.therapistId === 'ANALGESIA' ? '物療' : '指定無');
-        const endTime = calculateEndTime(apt.startTime, apt.durationMinutes);
-        const treatType = apt.treatmentType === 'ANALGESIA' ? '消炎鎮痛' : '個別リハ';
+          <th style="width: 58px;">時間</th>
+  `;
 
-        daysHtml += `
-          <tr style="border-bottom:1px solid #cbd5e1;">
-            <td style="padding:4px; text-align:center; border:1px solid #cbd5e1;">[　]</td>
-            <td style="padding:4px; text-align:center; font-weight:700; border:1px solid #cbd5e1;">${apt.startTime}〜${endTime}</td>
-            <td style="padding:4px; font-weight:700; border:1px solid #cbd5e1;">${sanitizeHtml(pName)} <span style="font-size:0.68rem; font-weight:normal; color:#64748b;">(${apt.patientId})</span></td>
-            <td style="padding:4px; text-align:center; border:1px solid #cbd5e1;">${sanitizeHtml(staffName)}</td>
-            <td style="padding:4px; text-align:center; border:1px solid #cbd5e1;">${treatType} (${apt.durationMinutes}分)</td>
-            <td style="padding:4px; color:#475569; border:1px solid #cbd5e1;">${sanitizeHtml(apt.notes || '')}</td>
-          </tr>
-        `;
-      });
-    }
-
-    daysHtml += `</tbody></table></div>`;
+  weekDates.forEach((d, idx) => {
+    const mmdd = `${d.getMonth() + 1}/${d.getDate()}`;
+    const isSat = d.getDay() === 6;
+    tableHtml += `
+      <th style="${isSat ? 'color:#1e40af; background:#eff6ff;' : ''}">
+        ${dayNames[idx]} (${mmdd})
+      </th>
+    `;
   });
 
-  const printHtml = `
+  tableHtml += `
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  TIME_SLOTS.forEach((slotTime) => {
+    tableHtml += `
+      <tr>
+        <td class="time-header-cell">${slotTime}</td>
+    `;
+
+    weekDates.forEach((d) => {
+      const dateStr = formatDateYMD(d);
+      const isSat = d.getDay() === 6;
+      const key = `${dateStr}_${slotTime}`;
+      const apts = slotAptMap[key] || [];
+
+      tableHtml += `<td class="slot-content-cell ${isSat ? 'sat-col' : ''}">`;
+
+      if (apts.length > 0) {
+        apts.forEach((apt) => {
+          const p = getPatientById(apt.patientId);
+          const pName = p ? p.name : apt.patientId;
+          const staff = therapists.find((t) => t.id === apt.therapistId);
+          let staffLabel = staff ? staff.name : (apt.therapistId === 'ANALGESIA' ? '物療' : '');
+          if (staffLabel.length > 3) staffLabel = staffLabel.slice(0, 3);
+          const isAnalgesia = apt.treatmentType === 'ANALGESIA' || apt.therapistId === 'ANALGESIA';
+
+          tableHtml += `
+            <div class="print-card ${isAnalgesia ? 'card-analgesia' : ''}">
+              <span class="p-name">${sanitizeHtml(pName)}</span>
+              ${staffLabel ? `<span class="p-staff">${sanitizeHtml(staffLabel)}</span>` : ''}
+              ${apt.durationMinutes && apt.durationMinutes !== 20 ? `<span class="p-dur">${apt.durationMinutes}m</span>` : ''}
+            </div>
+          `;
+        });
+      }
+
+      tableHtml += `</td>`;
+    });
+
+    tableHtml += `</tr>`;
+  });
+
+  tableHtml += `
+      </tbody>
+    </table>
+  `;
+
+  const html = `
     <!DOCTYPE html>
     <html lang="ja">
     <head>
       <meta charset="UTF-8">
-      <title>外来リハビリ週間予約表 (${startDate}〜${endDate})</title>
+      <title>外来リハビリ週間予約表 (${startStr.replace(/-/g, '/')}〜${endStr.replace(/-/g, '/')})</title>
       <style>
-        @page { size: A4 portrait; margin: 10mm; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Meiryo", sans-serif; color: #0f172a; margin: 0; padding: 10px; }
-        h1 { font-size: 1.15rem; margin: 0 0 4px 0; }
-        .header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #0f172a; padding-bottom: 6px; margin-bottom: 12px; }
+        @page {
+          size: A4 landscape;
+          margin: 6mm 6mm 5mm 6mm;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Meiryo UI", sans-serif;
+          color: #0f172a;
+          background: #fff;
+          font-size: 8.5pt;
+          line-height: 1.15;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+        .page-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-end;
+          margin-bottom: 4px;
+          border-bottom: 2px solid #0f172a;
+          padding-bottom: 3px;
+        }
+        .title { font-size: 13pt; font-weight: 800; color: #0f172a; }
+        .sub-info { font-size: 8.5pt; font-weight: 700; color: #475569; }
+        .weekly-print-table {
+          width: 100%;
+          border-collapse: collapse;
+          table-layout: fixed;
+        }
+        .weekly-print-table th, .weekly-print-table td {
+          border: 1px solid #475569;
+          vertical-align: top;
+          padding: 1px 2px;
+        }
+        .weekly-print-table th {
+          background: #f1f5f9;
+          font-weight: 800;
+          font-size: 8pt;
+          text-align: center;
+          padding: 3px 2px;
+        }
+        .time-header-cell {
+          text-align: center;
+          font-weight: 800;
+          font-size: 7.5pt;
+          background: #f8fafc;
+          vertical-align: middle !important;
+          color: #334155;
+          height: 22px;
+        }
+        .slot-content-cell {
+          height: 22px;
+          background: #fff;
+        }
+        .slot-content-cell.sat-col {
+          background: #fafcff;
+        }
+        .print-card {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 2px;
+          background: #f8fafc;
+          border: 1px solid #94a3b8;
+          border-left: 3px solid #0284c7;
+          border-radius: 2px;
+          padding: 1px 3px;
+          margin-bottom: 1px;
+          font-size: 7pt;
+          line-height: 1.1;
+        }
+        .print-card.card-analgesia {
+          background: #f0fdf4;
+          border-color: #86efac;
+          border-left-color: #16a34a;
+        }
+        .p-name {
+          font-weight: 800;
+          color: #0f172a;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          flex: 1;
+        }
+        .p-staff {
+          font-size: 6.5pt;
+          font-weight: 700;
+          color: #0369a1;
+          white-space: nowrap;
+        }
+        .p-dur {
+          font-size: 6pt;
+          color: #64748b;
+          white-space: nowrap;
+        }
+        .footer-note {
+          display: flex;
+          justify-content: space-between;
+          font-size: 7pt;
+          color: #64748b;
+          margin-top: 3px;
+        }
       </style>
     </head>
     <body>
-      <div class="header">
-        <h1>外来リハビリテーション 週間予約表 (現場確認用)</h1>
-        <div style="font-size:0.85rem; font-weight:700;">期間: ${startDate} (月) 〜 ${endDate} (土)</div>
+      <div class="page-header">
+        <div>
+          <span class="title">外来リハビリテーション 週間予約管理表</span>
+          <span style="font-size:9pt; font-weight:700; color:#0369a1; margin-left:12px;">
+            期間: ${startStr.replace(/-/g, '/')} (月) 〜 ${endStr.replace(/-/g, '/')} (土)
+          </span>
+        </div>
+        <div class="sub-info">
+          週間予約総数: ${weekAptList.length} 名 / 出力日: ${new Date().toLocaleDateString('ja-JP')}
+        </div>
       </div>
-      ${daysHtml}
-      <div style="font-size:0.7rem; color:#64748b; text-align:right; margin-top:8px;">
-        発行日時: ${new Date().toLocaleString('ja-JP')} / reha-work-manager
+
+      ${tableHtml}
+
+      <div class="footer-note">
+        <span>※ 同一時間枠に複数名配置可能（物療並行・担当PT別）。急患・当日キャンセル等は直接追記してください。</span>
+        <span>reha-work-manager R8</span>
       </div>
       <script>
         window.onload = function() { window.print(); };
@@ -852,6 +887,198 @@ function triggerPrintWeeklySheet() {
     </html>
   `;
 
-  printWindow.document.write(printHtml);
+  printWindow.document.write(html);
   printWindow.document.close();
+}
+
+/**
+ * 印刷スタイル 2: 本日デイリー予約チェックリスト (A4縦1枚・30名以上高密度対応)
+ * 選択中（または本日）の予約患者を早い順に並べ、毎朝バインダーに挟んで手元でレ点チェックできる専用帳票。
+ */
+function handlePrintDailyChecklist() {
+  const targetDateStr = formatDateYMD(currentBaseDate);
+  const allAppointments = getAllAppointments();
+
+  const dailyAptList = Object.values(allAppointments)
+    .filter((apt) => apt.date === targetDateStr && apt.status !== 'CANCELLED')
+    .sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+  const printWindow = window.open('', '_blank', 'width=900,height=800');
+  if (!printWindow) {
+    showToast('印刷ポップアップがブロックされました。ブラウザ設定をご確認ください。', 'warn');
+    return;
+  }
+
+  const therapists = getAllTherapists();
+  const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+  const dayOfWeek = dayNames[currentBaseDate.getDay()];
+
+  let rowsHtml = '';
+  dailyAptList.forEach((apt, idx) => {
+    const p = getPatientById(apt.patientId);
+    const pName = p ? p.name : apt.patientId;
+    const staff = therapists.find((t) => t.id === apt.therapistId);
+    const staffLabel = staff ? staff.name : (apt.therapistId === 'ANALGESIA' ? '消炎(物療)' : '-');
+
+    let typeLabel = '個別リハ';
+    if (apt.treatmentType === 'ANALGESIA' || apt.therapistId === 'ANALGESIA') typeLabel = '消炎鎮痛(物療)';
+    else if (apt.treatmentType === 'EVALUATION') typeLabel = '評価・装具診';
+    else if (apt.treatmentType === 'OTHER') typeLabel = 'その他';
+
+    rowsHtml += `
+      <tr>
+        <td style="text-align:center; font-weight:bold; font-size:10pt;">[　]</td>
+        <td style="text-align:center; font-weight:700; color:#64748b;">${idx + 1}</td>
+        <td style="text-align:center; font-weight:800; font-size:9.5pt; color:#0f172a;">${apt.startTime}</td>
+        <td style="font-weight:800; font-size:9.5pt; color:#0f172a;">
+          ${sanitizeHtml(pName)}
+          <span style="font-size:7.5pt; font-weight:normal; color:#64748b;">(${apt.patientId})</span>
+        </td>
+        <td style="text-align:center; font-weight:700; color:#0369a1;">${sanitizeHtml(staffLabel)}</td>
+        <td style="font-size:8pt; text-align:center;">${typeLabel} (${apt.durationMinutes || 30}分)</td>
+        <td style="font-size:8pt; color:#475569;">${sanitizeHtml(apt.notes || '')}</td>
+      </tr>
+    `;
+  });
+
+  // 予約が少ない場合でも30名分枠を確保して手書き追記可能にする
+  const emptyRowsNeeded = Math.max(0, 32 - dailyAptList.length);
+  for (let i = 0; i < emptyRowsNeeded; i++) {
+    const seq = dailyAptList.length + i + 1;
+    rowsHtml += `
+      <tr class="empty-memo-row">
+        <td style="text-align:center;">[　]</td>
+        <td style="text-align:center; color:#94a3b8;">${seq}</td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+      </tr>
+    `;
+  }
+
+  const html = `
+    <!DOCTYPE html>
+    <html lang="ja">
+    <head>
+      <meta charset="UTF-8">
+      <title>外来リハビリ本日デイリー予約チェック表 (${targetDateStr})</title>
+      <style>
+        @page {
+          size: A4 portrait;
+          margin: 7mm 7mm 6mm 7mm;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Meiryo UI", sans-serif;
+          color: #0f172a;
+          background: #fff;
+          font-size: 8.5pt;
+          line-height: 1.2;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+        .page-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-end;
+          margin-bottom: 6px;
+          border-bottom: 2px solid #0f172a;
+          padding-bottom: 4px;
+        }
+        .title { font-size: 13.5pt; font-weight: 800; color: #0f172a; }
+        .date-badge {
+          font-size: 11pt;
+          font-weight: 800;
+          color: #15803d;
+          background: #f0fdf4;
+          padding: 2px 8px;
+          border-radius: 4px;
+          border: 1px solid #86efac;
+        }
+        .daily-table {
+          width: 100%;
+          border-collapse: collapse;
+          table-layout: fixed;
+        }
+        .daily-table th, .daily-table td {
+          border: 1px solid #475569;
+          vertical-align: middle;
+          padding: 3px 5px;
+        }
+        .daily-table th {
+          background: #f1f5f9;
+          font-weight: 800;
+          font-size: 8pt;
+          text-align: center;
+          color: #1e293b;
+        }
+        .daily-table tr:nth-child(even):not(.empty-memo-row) {
+          background: #f8fafc;
+        }
+        .empty-memo-row td {
+          height: 18px;
+          background: #fff;
+        }
+        .footer-note {
+          display: flex;
+          justify-content: space-between;
+          font-size: 7.5pt;
+          color: #64748b;
+          margin-top: 4px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="page-header">
+        <div>
+          <span class="title">外来リハビリテーション 来院チェック表</span>
+          <span class="date-badge" style="margin-left:8px;">${targetDateStr.replace(/-/g, '/')} (${dayOfWeek})</span>
+        </div>
+        <div style="font-size:9pt; font-weight:800; color:#334155;">
+          予約総数: ${dailyAptList.length} 名
+        </div>
+      </div>
+
+      <table class="daily-table">
+        <thead>
+          <tr>
+            <th style="width: 32px;">来院</th>
+            <th style="width: 26px;">No</th>
+            <th style="width: 50px;">時間</th>
+            <th style="width: 130px;">患者氏名 (ID)</th>
+            <th style="width: 65px;">担当PT</th>
+            <th style="width: 95px;">区分 / 所要枠</th>
+            <th>院内特記メモ (送迎・診察順等) / 手書き追記</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+
+      <div class="footer-note">
+        <span>※ 来院時に左端の [ ] にレ点を記入してください。下部の空欄は急患・当日電話予約の受付手書き用です。</span>
+        <span>reha-work-manager R8</span>
+      </div>
+      <script>
+        window.onload = function() { window.print(); };
+      </script>
+    </body>
+    </html>
+  `;
+
+  printWindow.document.write(html);
+  printWindow.document.close();
+}
+
+/**
+ * 日付フォーマットヘルパー (YYYY-MM-DD)
+ */
+function formatDateYMD(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
