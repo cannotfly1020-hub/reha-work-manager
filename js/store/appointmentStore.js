@@ -1,6 +1,7 @@
 // js/store/appointmentStore.js
 // 外来予約管理 データストア層
-// 自由実時間（非20分縛り）・同一時間帯重複（並行来院/消炎複数人/PT別並行）対応・LocalStorage永続化
+// 自由実時間（非20分縛り）・同一時間帯重複（並行来院/消炎複数人/PT別並行）対応
+// ★同一患者の同日・重複時間帯二重予約物理遮断ガード・LocalStorage永続化
 
 const APPOINTMENT_STORAGE_KEY = 'reha_outpatient_appointments';
 
@@ -106,6 +107,50 @@ export function getPatientFutureAppointments(patientId, fromDateStr = null) {
 }
 
 /**
+ * 同一患者の同日・重複時間帯予約の競合判定
+ * （別患者の同時刻重複は許可し、同一患者のみ物理遮断する）
+ * @param {string} patientId - 患者ID
+ * @param {string} date - 予約日 (YYYY-MM-DD)
+ * @param {string} startTime - 開始時刻 (HH:MM)
+ * @param {number} durationMinutes - 所要時間(分)
+ * @param {string|null} excludeAppointmentId - 自身の更新・移動時に除外する予約ID
+ * @returns {{ hasConflict: boolean, conflictingAppointment?: Appointment }}
+ */
+export function checkPatientAppointmentConflict(patientId, date, startTime, durationMinutes, excludeAppointmentId = null) {
+  if (!patientId || !date || !startTime) {
+    return { hasConflict: false };
+  }
+
+  const all = getAllAppointments();
+  const targetStartMin = timeStringToMinutes(startTime);
+  const targetEndMin = targetStartMin + (Number(durationMinutes) || 30);
+
+  // 同一患者・同日の既存予約（キャンセル除く）を抽出
+  const samePatientApts = Object.values(all).filter((apt) => {
+    if (apt.status === 'CANCELLED') return false;
+    if (apt.patientId !== patientId) return false;
+    if (apt.date !== date) return false;
+    if (excludeAppointmentId && apt.id === excludeAppointmentId) return false;
+    return true;
+  });
+
+  for (const apt of samePatientApts) {
+    const existStartMin = timeStringToMinutes(apt.startTime);
+    const existEndMin = existStartMin + (Number(apt.durationMinutes) || 30);
+
+    // 時間帯の重複（オーバーラップ）判定: startA < endB && endA > startB
+    if (targetStartMin < existEndMin && targetEndMin > existStartMin) {
+      return {
+        hasConflict: true,
+        conflictingAppointment: apt
+      };
+    }
+  }
+
+  return { hasConflict: false };
+}
+
+/**
  * 予約の新規登録または更新
  * @param {Object} rawData
  * @returns {{ success: boolean, appointment?: Appointment, message?: string }}
@@ -115,16 +160,37 @@ export function upsertAppointment(rawData) {
     return { success: false, message: '予約日、時間、患者IDは必須です。' };
   }
 
+  const targetId = rawData.id || null;
+  const targetDuration = Number(rawData.durationMinutes) || 30;
+
+  // ★同一患者の重複予約チェック（ヒューマンエラー物理遮断）
+  const conflictCheck = checkPatientAppointmentConflict(
+    rawData.patientId,
+    rawData.date,
+    rawData.startTime,
+    targetDuration,
+    targetId
+  );
+
+  if (conflictCheck.hasConflict && conflictCheck.conflictingAppointment) {
+    const conflict = conflictCheck.conflictingAppointment;
+    const conflictEnd = calculateEndTime(conflict.startTime, conflict.durationMinutes);
+    return {
+      success: false,
+      message: `【二重予約防止】同日に既に予約が入っています (${conflict.startTime}〜${conflictEnd})。`
+    };
+  }
+
   const all = getAllAppointments();
   const nowStr = new Date().toISOString();
-  const id = rawData.id || `apt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const id = targetId || `apt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
   const existing = all[id] || {};
   const appointment = {
     id,
     date: rawData.date,
     startTime: rawData.startTime,
-    durationMinutes: Number(rawData.durationMinutes) || 30,
+    durationMinutes: targetDuration,
     patientId: rawData.patientId,
     therapistId: rawData.therapistId || 'A',
     treatmentType: rawData.treatmentType || 'INDIVIDUAL',
@@ -160,9 +226,19 @@ export function deleteAppointment(appointmentId) {
  */
 export function calculateEndTime(startTime, durationMinutes = 30) {
   if (!startTime || !startTime.includes(':')) return '';
-  const [h, m] = startTime.split(':').map(Number);
-  const totalMinutes = h * 60 + m + (Number(durationMinutes) || 0);
+  const totalMinutes = timeStringToMinutes(startTime) + (Number(durationMinutes) || 0);
   const endH = Math.floor(totalMinutes / 60) % 24;
   const endM = totalMinutes % 60;
   return `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+}
+
+/**
+ * 時刻文字列 (HH:MM) を通算分に変換するヘルパー
+ * @param {string} timeStr - '10:15'
+ * @returns {number} - 615
+ */
+function timeStringToMinutes(timeStr) {
+  if (!timeStr || !timeStr.includes(':')) return 0;
+  const [h, m] = timeStr.split(':').map(Number);
+  return (h * 60) + (m || 0);
 }
