@@ -616,6 +616,97 @@
     </div>
   </div>
 
+  <!-- モーダル 7: 外来予約 登録・編集（自由実時間・所要枠・重複対応・予約票即時印刷連動） -->
+  <div id="modalAppointmentEdit" class="modal-overlay">
+    <div class="modal-card" style="max-width: 580px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 id="aptModalTitle" style="font-size:1.05rem; font-weight:800; color:#0f172a; margin:0;">外来予約の登録・編集</h3>
+        <button type="button" id="btnCloseAppointmentModalX" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:#64748b;">✕</button>
+      </div>
+      <p style="font-size:0.75rem; color:#64748b; margin-bottom:14px;">
+        20分縛りのない自由実時間・所要時間を設定できます。同一時間帯に複数名が重なっても安全に登録できます。
+      </p>
+
+      <form id="appointmentEditForm" style="display:flex; flex-direction:column; gap:12px;">
+        <input type="hidden" id="aptPatientId">
+
+        <!-- 対象患者検索 & 選択 -->
+        <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:10px;">
+          <label for="aptPatientSearchInput" style="font-size:0.78rem; font-weight:800; color:#0f172a; display:block; margin-bottom:6px;">
+            👤 対象患者の選択
+          </label>
+          <input type="text" id="aptPatientSearchInput" placeholder="氏名またはIDで絞り込み..." style="width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; margin-bottom:6px; background:#fff;">
+          <select id="aptPatientSelect" size="3" style="width:100%; padding:4px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff; cursor:pointer;"></select>
+          <div id="aptPatientPreviewInfo" style="font-size:0.75rem; color:#0369a1; margin-top:6px; font-weight:600;"></div>
+        </div>
+
+        <!-- 予約日 & 時間帯（自由時間） -->
+        <div style="display:grid; grid-template-columns: 1.1fr 1fr 1fr; gap:8px;">
+          <div>
+            <label for="aptDateInput" style="font-size:0.75rem; font-weight:700; color:#334155; display:block; margin-bottom:4px;">予約日 *</label>
+            <input type="date" id="aptDateInput" required style="width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem;">
+          </div>
+          <div>
+            <label for="aptStartTimeInput" style="font-size:0.75rem; font-weight:700; color:#334155; display:block; margin-bottom:4px;">開始時刻 *</label>
+            <input type="time" id="aptStartTimeInput" required style="width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem;">
+          </div>
+          <div>
+            <label for="aptDurationSelect" style="font-size:0.75rem; font-weight:700; color:#334155; display:block; margin-bottom:4px;">所要枠 (分)</label>
+            <select id="aptDurationSelect" style="width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; font-weight:700;">
+              <option value="15">15分枠</option>
+              <option value="20">20分枠 (1単位)</option>
+              <option value="30" selected>30分枠</option>
+              <option value="40">40分枠 (2単位)</option>
+              <option value="45">45分枠</option>
+              <option value="60">60分枠 (3単位)</option>
+            </select>
+          </div>
+        </div>
+        <div id="aptEndTimeDisplay" style="font-size:0.75rem; color:#64748b; font-weight:700; text-align:right; margin-top:-4px;"></div>
+
+        <!-- 担当者 & 治療種別 -->
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+          <div>
+            <label for="aptTherapistSelect" style="font-size:0.75rem; font-weight:700; color:#334155; display:block; margin-bottom:4px;">担当セラピスト</label>
+            <select id="aptTherapistSelect" style="width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; font-weight:600;"></select>
+          </div>
+          <div>
+            <label for="aptTreatmentTypeSelect" style="font-size:0.75rem; font-weight:700; color:#334155; display:block; margin-bottom:4px;">治療・来院種別</label>
+            <select id="aptTreatmentTypeSelect" style="width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; font-weight:600;">
+              <option value="INDIVIDUAL" selected>個別リハビリ</option>
+              <option value="ANALGESIA">消炎鎮痛等処置 (物療)</option>
+              <option value="EVALUATION">評価・装具診合わせ</option>
+              <option value="OTHER">その他・自主トレ指導</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 特記メモ -->
+        <div>
+          <label for="aptNotesInput" style="font-size:0.75rem; font-weight:700; color:#334155; display:block; margin-bottom:4px;">特記メモ (送迎・診察順など)</label>
+          <input type="text" id="aptNotesInput" placeholder="例: 送迎バス1便利用、診察後リハビリ等" style="width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem;">
+        </div>
+
+        <!-- 登録と同時に患者用予約票を印刷するチェックボックス -->
+        <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:8px 12px; display:flex; align-items:center; justify-content:space-between;">
+          <label style="font-size:0.8rem; font-weight:700; color:#166534; display:flex; align-items:center; gap:6px; cursor:pointer; margin:0;">
+            <input type="checkbox" id="aptPrintTicketCheck" style="width:16px; height:16px; cursor:pointer;">
+            <span>🎫 保存と同時に患者さん用予約票を印刷する</span>
+          </label>
+          <span style="font-size:0.7rem; color:#15803d;">A5/A4即時印刷</span>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+          <button type="button" id="btnDeleteAppointment" style="padding:6px 12px; background:#fff; border:1px solid #ef4444; color:#ef4444; border-radius:4px; cursor:pointer; font-size:0.85rem;">削除</button>
+          <div style="display:flex; gap:8px;">
+            <button type="button" id="btnCloseAppointmentModal" style="padding:6px 14px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; font-size:0.85rem;">閉じる</button>
+            <button type="submit" style="padding:6px 18px; background:#0284c7; color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:700; font-size:0.85rem;">保存する</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div id="toastContainer" class="toast-container"></div>
   <script type="module" src="js/app.js"></script>
 </body>
