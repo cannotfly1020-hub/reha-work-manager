@@ -1,5 +1,5 @@
 // js/views/appointmentCalendarView.js
-// 外来予約 月間カレンダー画面制御層（マンスリービュー / 日別時間順カード / マス目即時登録 / モーダル連携）
+// 外来予約 月間カレンダー画面制御層（マンスリービュー / 日別時間順カード / マス目即時登録 / モーダル連携 / 初回自動描画対応版）
 
 import { sanitizeHtml } from '../core/dataNormalizer.js';
 import { getPatientById } from '../store/patientStore.js';
@@ -64,6 +64,9 @@ export function initAppointmentCalendarView() {
     const defaultDate = `${currentCalendarYear}-${String(currentCalendarMonth).padStart(2, '0')}-01`;
     openAppointmentModal(null, defaultDate, '09:00');
   });
+
+  // ★初期化時に即座にカレンダーを描画し、枠線やグリッドを確実に表示
+  renderAppointmentCalendarView();
 }
 
 function syncMonthInputValue() {
@@ -198,7 +201,7 @@ export function renderAppointmentCalendarView() {
   gridHtml += `</div>`;
   container.innerHTML = gridHtml;
 
-  // イベントリスナーの付与
+  // イベントリスナーの付与: 日別＋ボタン
   container.querySelectorAll('.btn-cal-add-day').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -207,6 +210,7 @@ export function renderAppointmentCalendarView() {
     });
   });
 
+  // イベントリスナーの付与: 予約カードクリック編集
   container.querySelectorAll('.cal-apt-card').forEach((card) => {
     card.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -218,7 +222,7 @@ export function renderAppointmentCalendarView() {
     });
   });
 
-  // マス目の空き余白クリックでも登録を開く
+  // イベントリスナーの付与: マス目の空き余白クリック新規登録
   container.querySelectorAll('.calendar-day-cell:not(.cal-empty)').forEach((cell) => {
     cell.addEventListener('click', (e) => {
       if (e.target.closest('.cal-apt-card') || e.target.closest('.btn-cal-add-day')) return;
