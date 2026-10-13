@@ -46,6 +46,12 @@
         <button id="btnTodaySchedule" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; cursor:pointer;">今日</button>
         <!-- 時間割専用更新ボタン -->
         <button id="btnRefreshSchedule" type="button" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; font-weight:600; color:#0369a1; cursor:pointer;">🔄 更新</button>
+        <!-- ★新設: 本日の外来予約一括反映ボタン ＆ 件数バッジ -->
+        <button id="btnSyncAppointmentsToSchedule" type="button" style="display:flex; align-items:center; gap:6px; padding:6px 12px; background:#eff6ff; border:1px solid #3b82f6; border-radius:6px; font-size:0.85rem; font-weight:700; color:#1d4ed8; cursor:pointer;" title="外来予約カレンダーの本日予約データを時間割へ安全に自動配置します">
+          <span>📥</span>
+          <span>本日の予約を一括反映</span>
+          <span id="syncAppointmentCountBadge" style="font-size:0.75rem; background:#3b82f6; color:#ffffff; padding:1px 6px; border-radius:9999px; font-weight:700;">0件</span>
+        </button>
       </div>
       <div id="dailyKpiStrip" style="display:flex; gap:16px; font-size:0.88rem; font-weight:600; background:#fff; padding:6px 16px; border-radius:6px; border:1px solid #e2e8f0;"></div>
     </div>
@@ -633,7 +639,7 @@
         <div style="display:flex; gap:8px;">
           <input type="text" id="staffSearchInput" placeholder="セラピスト名・枠IDで絞り込み..." style="flex:1; padding:6px 10px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff;">
         </div>
-        <div style="display:flex; gap:8px; align-items:center;">
+        <div style="display:flex; gap:8px pocket; align-items:center;">
           <input type="text" id="newStaffNameInput" placeholder="新規セラピスト氏名（例: 山田 太郎）" style="flex:1; padding:6px 10px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff;">
           <button type="button" id="btnAddNewStaff" style="padding:6px 14px; background:#0284c7; color:#fff; border:none; border-radius:4px; font-size:0.82rem; font-weight:700; cursor:pointer; white-space:nowrap;">＋ 追加</button>
         </div>
