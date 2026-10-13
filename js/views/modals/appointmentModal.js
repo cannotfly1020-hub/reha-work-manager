@@ -1,6 +1,7 @@
 // js/views/modals/appointmentModal.js
 // 外来予約登録・編集モーダル制御層
 // 自由時間入力・所要時間選択・患者リアルタイム検索・終了時刻自動計算・患者予約票即時印刷連携
+// ★祝日・振替休日のリアルタイム検知 ＆ 予約登録物理遮断ガード完全対応版
 
 import { sanitizeHtml } from '../../core/dataNormalizer.js';
 import { getPatientById, searchPatients } from '../../store/patientStore.js';
@@ -12,6 +13,144 @@ import { showToast } from '../exportView.js';
 
 let activeAppointmentId = null;
 let onAppointmentUpdatedCallback = null;
+
+/**
+ * 日本の祝日・振替休日・国民の休日オフライン高精度判定エンジン
+ */
+function getJapaneseHolidayName(dateInput) {
+  if (!dateInput) return null;
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return null;
+
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  const date = d.getDate();
+  const day = d.getDay();
+
+  // 単独祝日の判定
+  const checkBaseHoliday = (year, month, dayOfMonth) => {
+    const curDate = new Date(year, month - 1, dayOfMonth);
+    const dayOfWeek = curDate.getDay();
+    const nth = Math.floor((dayOfMonth - 1) / 7) + 1;
+
+    // 天文計算式による春分の日・秋分の日の算出 (1980〜2099年対応)
+    const vEq = Math.floor(20.8431 + 0.242194 * (year - 1980) - Math.floor((year - 1980) / 4));
+    const aEq = Math.floor(23.2488 + 0.242194 * (year - 1980) - Math.floor((year - 1980) / 4));
+
+    if (month === 1) {
+      if (dayOfMonth === 1) return '元日';
+      if (dayOfWeek === 1 && nth === 2) return '成人の日';
+    } else if (month === 2) {
+      if (dayOfMonth === 11) return '建国記念の日';
+      if (dayOfMonth === 23 && year >= 2020) return '天皇誕生日';
+    } else if (month === 3) {
+      if (dayOfMonth === vEq) return '春分の日';
+    } else if (month === 4) {
+      if (dayOfMonth === 29) return '昭和の日';
+    } else if (month === 5) {
+      if (dayOfMonth === 3) return '憲法記念日';
+      if (dayOfMonth === 4) return 'みどりの日';
+      if (dayOfMonth === 5) return 'こどもの日';
+    } else if (month === 7) {
+      if (dayOfWeek === 1 && nth === 3) return '海の日';
+    } else if (month === 8) {
+      if (dayOfMonth === 11 && year >= 2016) return '山の日';
+    } else if (month === 9) {
+      if (dayOfWeek === 1 && nth === 3) return '敬老の日';
+      if (dayOfMonth === aEq) return '秋分の日';
+    } else if (month === 10) {
+      if (dayOfWeek === 1 && nth === 2) return 'スポーツの日';
+    } else if (month === 11) {
+      if (dayOfMonth === 3) return '文化の日';
+      if (dayOfMonth === 23) return '勤労感謝の日';
+    }
+    return null;
+  };
+
+  const baseName = checkBaseHoliday(y, m, date);
+  if (baseName) return baseName;
+
+  // 国民の休日判定（祝日と祝日に挟まれた平日）
+  if (day !== 0) {
+    const prevDate = new Date(y, m - 1, date - 1);
+    const nextDate = new Date(y, m - 1, date + 1);
+    const prevHoliday = checkBaseHoliday(prevDate.getFullYear(), prevDate.getMonth() + 1, prevDate.getDate());
+    const nextHoliday = checkBaseHoliday(nextDate.getFullYear(), nextDate.getMonth() + 1, nextDate.getDate());
+    if (prevHoliday && nextHoliday) {
+      return '国民の休日';
+    }
+  }
+
+  // 振替休日判定（日曜日に祝日があり、その直後の連続した平日）
+  if (day !== 0) {
+    for (let back = 1; back <= 6; back++) {
+      const checkD = new Date(y, m - 1, date - back);
+      const isSunday = checkD.getDay() === 0;
+      const hName = checkBaseHoliday(checkD.getFullYear(), checkD.getMonth() + 1, checkD.getDate());
+      if (!hName) {
+        break;
+      }
+      if (isSunday) {
+        return '振替休日';
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 予約日入力欄に応じた祝日チェックとUIの警告・保存ボタン制御
+ */
+function validateAppointmentDateHoliday(dateValue) {
+  const form = document.getElementById('appointmentEditForm');
+  const submitBtn = form ? form.querySelector('button[type="submit"]') : null;
+  const dateInput = document.getElementById('aptDateInput');
+
+  let alertEl = document.getElementById('aptHolidayAlertMessage');
+  if (!alertEl && dateInput && dateInput.parentElement) {
+    alertEl = document.createElement('div');
+    alertEl.id = 'aptHolidayAlertMessage';
+    alertEl.style.cssText = 'font-size:0.72rem; font-weight:700; color:#e11d48; margin-top:3px; display:none;';
+    dateInput.parentElement.appendChild(alertEl);
+  }
+
+  const holidayName = getJapaneseHolidayName(dateValue);
+
+  if (holidayName) {
+    if (alertEl) {
+      alertEl.textContent = `⚠️ 祝日（${holidayName}）のため登録できません`;
+      alertEl.style.display = 'block';
+    }
+    if (dateInput) {
+      dateInput.style.borderColor = '#f43f5e';
+      dateInput.style.background = '#fff1f2';
+    }
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.style.opacity = '0.45';
+      submitBtn.style.cursor = 'not-allowed';
+      submitBtn.title = `祝日（${holidayName}）のため保存できません`;
+    }
+    return false;
+  } else {
+    if (alertEl) {
+      alertEl.textContent = '';
+      alertEl.style.display = 'none';
+    }
+    if (dateInput) {
+      dateInput.style.borderColor = '#cbd5e1';
+      dateInput.style.background = '#fff';
+    }
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.style.opacity = '1';
+      submitBtn.style.cursor = 'pointer';
+      submitBtn.title = '';
+    }
+    return true;
+  }
+}
 
 /**
  * モーダルの初期化とイベント設定
@@ -27,6 +166,7 @@ export function setupAppointmentModalListeners(onUpdate) {
   const form = document.getElementById('appointmentEditForm');
   const searchInput = document.getElementById('aptPatientSearchInput');
   const patientSelect = document.getElementById('aptPatientSelect');
+  const dateInput = document.getElementById('aptDateInput');
   const startTimeInput = document.getElementById('aptStartTimeInput');
   const durationSelect = document.getElementById('aptDurationSelect');
   const endTimeDisplay = document.getElementById('aptEndTimeDisplay');
@@ -47,6 +187,14 @@ export function setupAppointmentModalListeners(onUpdate) {
 
   startTimeInput?.addEventListener('input', updateEndTime);
   durationSelect?.addEventListener('change', updateEndTime);
+
+  // 予約日変更時の祝日リアルタイムチェック
+  dateInput?.addEventListener('change', (e) => {
+    validateAppointmentDateHoliday(e.target.value);
+  });
+  dateInput?.addEventListener('input', (e) => {
+    validateAppointmentDateHoliday(e.target.value);
+  });
 
   // 治療種別が消炎鎮痛のときは担当者を「物療枠」に切り替えやすくする配慮
   treatmentTypeSelect?.addEventListener('change', (e) => {
@@ -105,6 +253,14 @@ function handleAppointmentFormSubmit() {
   }
   if (!date || !startTime) {
     showToast('予約日と開始時刻を入力してください', 'error');
+    return;
+  }
+
+  // ★祝日への登録を物理遮断ガード
+  const holidayName = getJapaneseHolidayName(date);
+  if (holidayName) {
+    showToast(`⚠️ 祝日（${holidayName}）のため外来予約は登録できません`, 'error');
+    validateAppointmentDateHoliday(date);
     return;
   }
 
@@ -195,6 +351,9 @@ export function openAppointmentModal(appointment = null, defaultDate = null, def
   const end = calculateEndTime(targetTime, targetDuration);
   if (endTimeDisplay) endTimeDisplay.textContent = `〜 ${end} 終了`;
 
+  // 開いた直後の日付に対する祝日チェック・ボタン制御
+  validateAppointmentDateHoliday(targetDate);
+
   populateAppointmentPatientSelect('', pId);
   updateAppointmentPatientPreview(pId);
 
@@ -282,7 +441,7 @@ function triggerPrintAppointmentTicket(appointment) {
         <div class="patient-name">${sanitizeHtml(pName)} 様 <span style="font-size:0.85rem; color:#64748b; font-weight:normal;">(ID: ${appointment.patientId})</span></div>
         <div class="date-badge">
           <div class="date-title">■ 次回ご予約日時</div>
-          <div class="date-main">${appointment.date}　${appointment.startTime} 〜 ${endTime}</div>
+          <div class="date-main">${appointment.date} ${appointment.startTime} 〜 ${endTime}</div>
         </div>
         <div class="detail-row">
           <span>担当セラピスト:</span>
