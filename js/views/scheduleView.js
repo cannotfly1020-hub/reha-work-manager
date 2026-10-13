@@ -6,7 +6,7 @@ import { sanitizeHtml, safeParseInt, normalizeToKatakana } from '../core/dataNor
 import { getActiveTherapists } from '../store/therapistStore.js';
 import { getPatientById, searchPatients } from '../store/patientStore.js';
 import {
-  getDailySchedule, moveScheduleSlot, getDailyStats,
+  getDailySchedule, moveScheduleSlot, setScheduleSlot, getDailyStats,
   addAnalgesiaPatient, getAnalgesiaSlotPatients
 } from '../store/scheduleStore.js';
 import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
@@ -30,11 +30,242 @@ let currentDateStr = getLocalDateStr();
 let paletteCategory = 'ALL';
 let paletteSortKey = 'CATEGORY'; // 'CATEGORY' | 'KANA' | 'ID'
 
+/**
+ * 外来予約データストアから指定日の予約（キャンセル以外）を取得する安全ヘルパー
+ */
+function getAppointmentsForDate(dateStr) {
+  try {
+    const raw = localStorage.getItem('reha_outpatient_appointments');
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    const list = Array.isArray(parsed) ? parsed : Object.values(parsed);
+    return list.filter((apt) => apt && apt.date === dateStr && apt.status !== 'CANCELLED');
+  } catch (err) {
+    console.error('外来予約データ取得エラー:', err);
+    return [];
+  }
+}
+
+/**
+ * 実時間（例: "09:15"）から最も近い20分コマのIDを判定して返す
+ */
+function findNearestSlotId(timeStr) {
+  if (!timeStr || !TIME_SLOTS || TIME_SLOTS.length === 0) return TIME_SLOTS[0]?.id || 'slot_0840';
+
+  const [hStr, mStr] = timeStr.split(':');
+  const targetMinutes = (parseInt(hStr, 10) || 0) * 60 + (parseInt(mStr, 10) || 0);
+
+  let bestSlotId = TIME_SLOTS[0].id;
+  let minDiff = Infinity;
+
+  TIME_SLOTS.forEach((slot) => {
+    let slotTime = '08:40';
+    if (slot.start) {
+      slotTime = slot.start;
+    } else if (slot.label && slot.label.includes('〜')) {
+      slotTime = slot.label.split('〜')[0].trim();
+    } else if (slot.id && slot.id.startsWith('slot_')) {
+      const raw = slot.id.replace('slot_', '');
+      slotTime = `${raw.slice(0, 2)}:${raw.slice(2, 4)}`;
+    }
+
+    const [sh, sm] = slotTime.split(':');
+    const slotMinutes = (parseInt(sh, 10) || 0) * 60 + (parseInt(sm, 10) || 0);
+    const diff = Math.abs(targetMinutes - slotMinutes);
+
+    if (diff < minDiff) {
+      minDiff = diff;
+      bestSlotId = slot.id;
+    }
+  });
+
+  return bestSlotId;
+}
+
+/**
+ * 所要時間（分）から単位数（1〜4単位）を変換判定
+ */
+function convertDurationToUnits(durationMin) {
+  const dur = parseInt(durationMin, 10) || 20;
+  if (dur <= 20) return 1;
+  if (dur <= 40) return 2;
+  if (dur <= 60) return 3;
+  return 4;
+}
+
+/**
+ * 本日の外来予約一括反映ボタンの更新・件数バッジ描画
+ */
+function updateSyncAppointmentsBadge() {
+  const badgeEl = document.getElementById('syncAppointmentCountBadge');
+  if (!badgeEl) return;
+  const appointments = getAppointmentsForDate(currentDateStr);
+  badgeEl.textContent = `${appointments.length}件`;
+  if (appointments.length === 0) {
+    badgeEl.style.background = '#94a3b8';
+  } else {
+    badgeEl.style.background = '#3b82f6';
+  }
+}
+
+/**
+ * 本日の予約データを時間割へ安全に自動流し込み（手入力保護ガード完備）
+ */
+function syncAppointmentsToSchedule() {
+  const appointments = getAppointmentsForDate(currentDateStr);
+
+  if (appointments.length === 0) {
+    showToast('本日（' + currentDateStr + '）の外来予約データはありません', 'info');
+    return;
+  }
+
+  const activeTherapists = getActiveTherapists();
+  if (activeTherapists.length === 0) {
+    showToast('稼働中のセラピストが設定されていません', 'error');
+    return;
+  }
+
+  const schedule = getDailySchedule(currentDateStr);
+  let appliedCount = 0;
+  let skippedCount = 0;
+
+  appointments.forEach((apt) => {
+    const patient = getPatientById(apt.patientId);
+    if (!patient) {
+      skippedCount++;
+      return;
+    }
+
+    const nearestSlotId = findNearestSlotId(apt.startTime);
+    const slotIndex = TIME_SLOTS.findIndex((s) => s.id === nearestSlotId);
+    if (slotIndex === -1) {
+      skippedCount++;
+      return;
+    }
+
+    // ① 消炎鎮痛（物療）の場合
+    const isAnalgesia = apt.treatmentType === 'ANALGESIA' || patient.diseaseType === 'ANALGESIA';
+    if (isAnalgesia) {
+      const existingAnalgesia = getAnalgesiaSlotPatients(currentDateStr, nearestSlotId);
+      const isAlreadyAdded = existingAnalgesia.some((p) => p && p.id === apt.patientId);
+      if (isAlreadyAdded) {
+        skippedCount++;
+      } else {
+        addAnalgesiaPatient(currentDateStr, nearestSlotId, apt.patientId);
+        appliedCount++;
+      }
+      return;
+    }
+
+    // ② 個別リハビリの場合
+    const units = convertDurationToUnits(apt.durationMinutes || apt.duration || 30);
+
+    // 担当セラピストの選定（指定PTが存在し稼働中か確認、なければ空いているPTを探索）
+    let targetTherapistId = apt.therapistId;
+    let therapistValid = activeTherapists.some((t) => t.id === targetTherapistId);
+
+    // 同一患者が同日内のいずれかの個別リハ枠にすでに配置されている場合は二重算定防止のためスキップ
+    let alreadyScheduledAnywhere = false;
+    for (const t of activeTherapists) {
+      for (const slot of TIME_SLOTS) {
+        if (schedule[t.id]?.[slot.id]?.patientId === apt.patientId) {
+          alreadyScheduledAnywhere = true;
+          break;
+        }
+      }
+      if (alreadyScheduledAnywhere) break;
+    }
+
+    if (alreadyScheduledAnywhere) {
+      skippedCount++;
+      return;
+    }
+
+    // 指定PT枠で units 分の連続した空き枠があるか検査（手入力データ保護ガード）
+    const isSlotRangeAvailable = (tId, startIdx, reqUnits) => {
+      for (let i = 0; i < reqUnits; i++) {
+        const curIdx = startIdx + i;
+        if (curIdx >= TIME_SLOTS.length) return false;
+        const sId = TIME_SLOTS[curIdx].id;
+        if (schedule[tId]?.[sId] && schedule[tId][sId].patientId) {
+          return false; // すでに手作業配置済みコマが存在するため配置不可
+        }
+      }
+      return true;
+    };
+
+    let canAssign = false;
+    if (therapistValid && isSlotRangeAvailable(targetTherapistId, slotIndex, units)) {
+      canAssign = true;
+    } else {
+      // 指定PTが埋まっている、または未指定の場合は空いている他の稼働セラピスト枠を検索
+      for (const altT of activeTherapists) {
+        if (isSlotRangeAvailable(altT.id, slotIndex, units)) {
+          targetTherapistId = altT.id;
+          canAssign = true;
+          break;
+        }
+      }
+    }
+
+    if (!canAssign) {
+      // 既存の手入力データが埋まっているため安全にスキップ
+      skippedCount++;
+      return;
+    }
+
+    // メモ欄に元の実時間・特記メモを保持（実時間と制度時間の二重レイヤー分離）
+    const timeMemo = apt.startTime ? `予約:${apt.startTime}〜` : '';
+    const noteMemo = apt.notes ? ` (${apt.notes})` : '';
+    const combinedNote = `${timeMemo}${noteMemo}`.trim();
+
+    const cellData = {
+      patientId: apt.patientId,
+      units: units,
+      note: combinedNote,
+      billingPlan: ''
+    };
+
+    setScheduleSlot(currentDateStr, targetTherapistId, nearestSlotId, cellData);
+
+    // 2単位以上の連続枠をローカルの schedule オブジェクトにも仮マークして次患者との衝突を防止
+    for (let u = 0; u < units; u++) {
+      const idx = slotIndex + u;
+      if (idx < TIME_SLOTS.length) {
+        const sId = TIME_SLOTS[idx].id;
+        if (!schedule[targetTherapistId]) schedule[targetTherapistId] = {};
+        schedule[targetTherapistId][sId] = cellData;
+      }
+    }
+
+    appliedCount++;
+  });
+
+  if (appliedCount > 0) {
+    let msg = `外来予約 ${appointments.length}件中 ${appliedCount}件を時間割に反映しました`;
+    if (skippedCount > 0) {
+      msg += `（${skippedCount}件は既存配置または重複のためスキップ）`;
+    }
+    showToast(msg, 'success');
+
+    // 自動バックアップトリガー
+    if (typeof window.triggerDailyBackup === 'function') {
+      window.triggerDailyBackup();
+    }
+
+    renderScheduleView();
+  } else {
+    showToast(`反映可能な空きコマがありませんでした（${skippedCount}件スキップ）`, 'warn');
+  }
+}
+
 export function initScheduleView() {
   const dateInput = document.getElementById('scheduleDateInput');
   const btnToday = document.getElementById('btnTodaySchedule');
+  const btnRefresh = document.getElementById('btnRefreshSchedule');
   const searchInput = document.getElementById('paletteSearch');
   const sortSelect = document.getElementById('paletteSortSelect');
+  const btnSyncAppointments = document.getElementById('btnSyncAppointmentsToSchedule');
 
   if (dateInput) {
     dateInput.value = currentDateStr;
@@ -49,6 +280,20 @@ export function initScheduleView() {
       currentDateStr = getLocalDateStr();
       if (dateInput) dateInput.value = currentDateStr;
       renderScheduleView();
+    });
+  }
+
+  if (btnRefresh) {
+    btnRefresh.addEventListener('click', () => {
+      renderScheduleView();
+      showToast('時間割を最新状態に更新しました', 'info');
+    });
+  }
+
+  // ★外来予約一括反映ボタンのリスナー登録
+  if (btnSyncAppointments) {
+    btnSyncAppointments.addEventListener('click', () => {
+      syncAppointmentsToSchedule();
     });
   }
 
@@ -78,6 +323,7 @@ export function initScheduleView() {
 
 export function renderScheduleView() {
   renderDailyKPIStrip();
+  updateSyncAppointmentsBadge();
   renderPatientPalette();
   renderTimetableGrid();
 }
