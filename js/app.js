@@ -6,7 +6,8 @@ import { initAppointmentCalendarView, renderAppointmentCalendarView } from './vi
 import { initMonthlyView, renderMonthlyView } from './views/monthlyView.js';
 import { initPatientView, renderPatientView } from './views/patientView.js';
 import { initLoanView, renderLoanView } from './views/loanView.js';
-import { initExportView, showToast } from './views/exportView.js';
+import { initExportView } from './views/exportView.js';
+import { showToast } from './ui/toast.js';
 import { setupAppointmentModalListeners } from './views/modals/appointmentModal.js';
 
 document.addEventListener('DOMContentLoaded', () => {

@@ -4,7 +4,7 @@
 import { sanitizeHtml } from '../core/dataNormalizer.js';
 import { filterLoans, registerLoan, markAsReturned, deleteLoan } from '../store/loanStore.js';
 import { getAllPatients } from '../store/patientStore.js';
-import { showToast } from './exportView.js';
+import { showToast } from '../ui/toast.js';
 
 export function initLoanView() {
   const searchInput = document.getElementById('loanSearchInput');

@@ -1,6 +1,21 @@
-const { app, BrowserWindow, Menu, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, Menu, shell, protocol, net } = require('electron');
 const path = require('path');
-const fs = require('fs');
+const { pathToFileURL } = require('url');
+
+// file:// で開くと origin が null になり、type="module" の app.js が CORS で拒否される。
+// 標準スキーム app:// で配信し、モジュール読み込みを許可する。
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'app',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
+]);
 
 // 二重起動防止のロック取得
 const gotTheLock = app.requestSingleInstanceLock();
@@ -10,110 +25,25 @@ if (!gotTheLock) {
 
 let mainWindow = null;
 
-/**
- * バックアップ専用フォルダのパスを取得・未存在時は自動生成
- * 保存先: Windowsの「ドキュメント」フォルダ内 \ リハ業務管理_自動バックアップ
- */
-function getBackupDirectoryPath() {
-  const documentsPath = app.getPath('documents');
-  const backupDir = path.join(documentsPath, 'リハ業務管理_自動バックアップ');
-  if (!fs.existsSync(backupDir)) {
-    try {
-      fs.mkdirSync(backupDir, { recursive: true });
-    } catch (e) {
-      console.error('Failed to create backup directory:', e);
-    }
-  }
-  return backupDir;
+const { getBackupDirectoryPath, setupBackupIpc } = require('./main/backupIpc');
+
+function isInsideAppDirectory(filePath) {
+  const root = path.resolve(__dirname);
+  const target = path.resolve(filePath);
+  const relativePath = path.relative(root, target);
+  return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
 }
 
-/**
- * 直近14世代（14日分）を超過した古い自動バックアップJSONを安全に自動消去する
- */
-function cleanOldBackupFiles(backupDir, keepCount = 14) {
-  try {
-    if (!fs.existsSync(backupDir)) return;
-    const files = fs.readdirSync(backupDir);
-    const backupFiles = files
-      .filter((file) => file.startsWith('reha_autobackup_') && file.endsWith('.json'))
-      .sort(); // ファイル名昇順（日付順 YYYY-MM-DD）
-
-    while (backupFiles.length > keepCount) {
-      const oldestFile = backupFiles.shift();
-      if (oldestFile) {
-        const fullPath = path.join(backupDir, oldestFile);
-        fs.unlinkSync(fullPath);
-      }
+function registerAppProtocol() {
+  protocol.handle('app', (request) => {
+    const requestUrl = new URL(request.url);
+    let pathname = decodeURIComponent(requestUrl.pathname);
+    if (pathname === '/' || pathname === '') pathname = '/index.html';
+    const filePath = path.join(__dirname, pathname);
+    if (!isInsideAppDirectory(filePath)) {
+      return new Response('Forbidden', { status: 403 });
     }
-  } catch (error) {
-    console.error('cleanOldBackupFiles error:', error);
-  }
-}
-
-/**
- * レンダラー（画面側）からのファイル保存・取得要求を受信するIPC通信ハンドラー
- */
-function setupIpcHandlers() {
-  // 1. 自動バックアップJSONの直接書き出し
-  ipcMain.handle('save-daily-backup-file', async (event, payload) => {
-    try {
-      if (!payload) {
-        return { success: false, message: 'バックアップデータが空です。' };
-      }
-
-      // ★重要：dumpオブジェクト直渡し / { targetDate, data } 包み渡しの両方を自動吸収
-      let targetDate = '';
-      let dumpData = null;
-
-      if (payload.data && typeof payload.data === 'object') {
-        // パターンA: { targetDate: '...', data: dump } で渡された場合
-        targetDate = payload.targetDate || new Date().toISOString().slice(0, 10);
-        dumpData = payload.data;
-      } else {
-        // パターンB: dump オブジェクトそのものが渡された場合 (exportView.js の呼び出し形式)
-        targetDate = payload.targetDate || (payload.exportedAt ? payload.exportedAt.slice(0, 10) : new Date().toISOString().slice(0, 10));
-        dumpData = payload;
-      }
-
-      const backupDir = getBackupDirectoryPath();
-      const fileName = `reha_autobackup_${targetDate}.json`;
-      const filePath = path.join(backupDir, fileName);
-
-      // JSON文字列をインデント付きで整形してファイル書き出し
-      const jsonStr = typeof dumpData === 'string' ? dumpData : JSON.stringify(dumpData, null, 2);
-      fs.writeFileSync(filePath, jsonStr, 'utf8');
-
-      // 14日を超過した過去ファイルを自動消去
-      cleanOldBackupFiles(backupDir, 14);
-
-      console.log(`[IPC] バックアップ書き出し成功: ${filePath}`);
-      return {
-        success: true,
-        filePath,
-        fileName,
-        message: `「ドキュメント\\リハ業務管理_自動バックアップ」に保存しました。`
-      };
-    } catch (error) {
-      console.error('save-daily-backup-file error:', error);
-      return { success: false, message: error.message || 'ファイル書き出しに失敗しました。' };
-    }
-  });
-
-  // 2. バックアップ保存フォルダをエクスプローラーで直接開く
-  ipcMain.handle('open-backup-folder', async () => {
-    try {
-      const backupDir = getBackupDirectoryPath();
-      await shell.openPath(backupDir);
-      return { success: true };
-    } catch (error) {
-      console.error('open-backup-folder error:', error);
-      return { success: false, message: error.message };
-    }
-  });
-
-  // 3. バックアップフォルダのパス情報を取得する
-  ipcMain.handle('get-backup-dir-path', async () => {
-    return getBackupDirectoryPath();
+    return net.fetch(pathToFileURL(filePath).toString());
   });
 }
 
@@ -186,7 +116,7 @@ function createWindow() {
   const menu = Menu.buildFromTemplate(menuTemplate);
   Menu.setApplicationMenu(menu);
 
-  mainWindow.loadFile('index.html');
+  mainWindow.loadURL('app://localhost/index.html');
 
   // ウィンドウが閉じられたときの参照解除
   mainWindow.on('closed', () => {
@@ -195,7 +125,8 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  setupIpcHandlers();
+  registerAppProtocol();
+  setupBackupIpc();
   createWindow();
 
   app.on('activate', () => {

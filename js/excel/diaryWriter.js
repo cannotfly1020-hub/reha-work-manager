@@ -6,7 +6,7 @@ import { evaluateEarlyBonusPhase } from '../core/deadlineCalc.js';
 import { getDailySchedule } from '../store/scheduleStore.js';
 import { getPatientById } from '../store/patientStore.js';
 import { getAllTherapists, THERAPIST_STATUS } from '../store/therapistStore.js';
-import { getAssistantSettings } from '../views/modals/staffModal.js';
+import { getAssistantSettings } from '../store/assistantStore.js';
 
 const STYLES = {
   headerNavy: {

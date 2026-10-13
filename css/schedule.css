@@ -1,0 +1,178 @@
+.timetable-container {
+display: grid;
+grid-template-columns: 110px repeat(3, 1fr) 110px;
+background: var(--color-surface);
+border: 1px solid #94a3b8;
+border-radius: var(--radius-md);
+max-height: calc(100vh - 160px);
+overflow-y: auto;
+overflow-x: auto;
+position: relative;
+box-shadow: var(--shadow-sm);
+}
+.timetable-header {
+background: #f8fafc;
+font-weight: 700;
+padding: 10px;
+text-align: center;
+border-bottom: 2px solid #94a3b8;
+border-right: 1px solid #94a3b8;
+position: sticky;
+top: 0;
+z-index: 30;
+}
+.time-slot-row {
+height: 52px;
+min-height: 52px;
+max-height: 52px;
+display: contents;
+}
+.time-col {
+height: 52px;
+min-height: 52px;
+max-height: 52px;
+box-sizing: border-box;
+border-bottom: 1px solid #94a3b8;
+border-right: 1px solid #94a3b8;
+padding: 4px 8px;
+display: flex;
+align-items: center;
+justify-content: center;
+font-size: 0.78rem;
+font-weight: 600;
+color: var(--color-text-muted);
+background: #fafafa;
+white-space: nowrap;
+line-height: 1;
+}
+.cell-slot {
+height: 52px;
+min-height: 52px;
+max-height: 52px;
+box-sizing: border-box;
+border-bottom: 1px solid #94a3b8;
+border-right: 1px solid #94a3b8;
+position: relative;
+padding: 2px 4px;
+}
+.empty-slot-btn {
+width: 100%;
+height: 100%;
+border: 1px dashed transparent;
+background: transparent;
+border-radius: 4px;
+cursor: pointer;
+opacity: 0;
+transition: opacity 0.15s ease;
+font-size: 0.75rem;
+color: var(--color-primary);
+}
+.cell-slot:hover .empty-slot-btn {
+opacity: 1;
+border-color: #cbd5e1;
+background: #f8fafc;
+}
+
+.analgesia-slot-cell {
+display: flex;
+align-items: center;
+justify-content: center;
+padding: 3px;
+}
+.badge-analgesia-count {
+width: 100%;
+height: 44px;
+background: #f1f5f9;
+border: 1px solid #cbd5e1;
+border-radius: 6px;
+display: flex;
+flex-direction: column;
+align-items: center;
+justify-content: center;
+cursor: pointer;
+transition: all 0.15s ease;
+padding: 2px;
+}
+.badge-analgesia-count:hover {
+background: #e2e8f0;
+border-color: #94a3b8;
+transform: translateY(-1px);
+}
+.badge-analgesia-count.has-patients {
+background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+border-color: #86efac;
+}
+.badge-analgesia-count.has-patients:hover {
+background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+}
+
+.reha-slot-card {
+position: absolute;
+top: 2px;
+left: 4px;
+right: 4px;
+border-radius: var(--radius-sm);
+padding: 4px 8px;
+box-shadow: var(--shadow-sm);
+z-index: 10;
+cursor: pointer;
+overflow: hidden;
+transition: transform 0.1s ease, box-shadow 0.1s ease;
+display: flex;
+flex-direction: column;
+justify-content: space-between;
+}
+.reha-slot-card:hover {
+transform: translateY(-1px);
+box-shadow: var(--shadow-md);
+z-index: 20;
+}
+.card-inpatient {
+border-left: 6px solid var(--color-inpatient);
+}
+.card-outpatient {
+border-left: 6px solid var(--color-outpatient);
+}
+.card-unit-1 {
+height: 48px;
+background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+}
+.card-unit-2 {
+height: 100px;
+background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+}
+.card-unit-3 {
+height: 152px;
+background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
+}
+.card-unit-4 {
+height: 204px;
+background: linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%);
+}
+.slot-covered-placeholder {
+pointer-events: none;
+background: rgba(241, 245, 249, 0.4);
+}
+.badge-unit {
+font-size: 0.7rem;
+font-weight: 700;
+padding: 2px 6px;
+border-radius: 9999px;
+color: #fff;
+display: inline-block;
+}
+.badge-unit-1 { background-color: #059669; }
+.badge-unit-2 { background-color: #2563eb; }
+.badge-unit-3 { background-color: #7c3aed; }
+.badge-unit-4 { background-color: #e11d48; }
+.badge-plan {
+background: #fef08a;
+color: #854d0e;
+border: 1px solid #fde047;
+font-size: 0.68rem;
+font-weight: 700;
+padding: 1px 5px;
+border-radius: 4px;
+margin-left: 4px;
+}
+

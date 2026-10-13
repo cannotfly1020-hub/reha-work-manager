@@ -7,18 +7,11 @@ import { getAllPatients } from '../../store/patientStore.js';
 import {
   addAnalgesiaPatient, removeAnalgesiaPatient, getAnalgesiaSlotPatients
 } from '../../store/scheduleStore.js';
-import { showToast } from '../exportView.js';
+import { getLocalDateStr } from '../../core/dateUtils.js';
+import { showToast } from '../../ui/toast.js';
 
 let activeAnalgesiaSlotId = null;
 let onScheduleUpdatedCallback = null;
-
-function getLocalDateStr() {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
 
 export function setupAnalgesiaModalListeners(onUpdate) {
   onScheduleUpdatedCallback = onUpdate;
