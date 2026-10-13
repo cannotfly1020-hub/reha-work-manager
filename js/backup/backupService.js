@@ -1,6 +1,8 @@
 // js/backup/backupService.js
 // 手動バックアップ・年度確定バックアップ・復元・日次自動保存
 
+import { getLocalDateStr } from '../core/dateUtils.js';
+import { writeStorageItem } from '../store/storageWrite.js';
 import { showToast } from '../ui/toast.js';
 
 let autoBackupDebounceTimer = null;
@@ -47,47 +49,48 @@ export function triggerDailyAutoBackup() {
 }
 
 
+function removeLegacyAutoBackupCopies() {
+  const keys = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith('reha_autobackup_')) keys.push(key);
+  }
+  keys.forEach((key) => localStorage.removeItem(key));
+}
+
 export async function performDailyAutoBackup() {
   try {
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const backupKey = `reha_autobackup_${todayStr}`;
+    const todayStr = getLocalDateStr();
+    removeLegacyAutoBackupCopies();
     const dump = createSystemDump({ backupType: 'DAILY_AUTO', targetDate: todayStr });
 
-    // 1. アプリ内部LocalStorageへの上書き保管（常に最新状態へ更新）
-    localStorage.setItem(backupKey, JSON.stringify(dump));
+    if (!(window.desktopApp && typeof window.desktopApp.saveDailyBackup === 'function')) {
+      return;
+    }
 
-    // 2. PCの専用フォルダ（ドキュメント/リハ業務管理_自動バックアップ/）へ当日ファイルとして直接上書き書き出し
-    if (window.desktopApp && typeof window.desktopApp.saveDailyBackup === 'function') {
-      try {
-        // ★新旧main.jsのどちらでも100%確実に書き出せるよう、包み込み構造と直渡し構造を両立して送信
-        const payload = { targetDate: todayStr, data: dump, ...dump };
-        const res = await window.desktopApp.saveDailyBackup(payload);
-        if (res?.success) {
-          console.log(`[自動バックアップ] PCフォルダへ当日最新上書き保存完了: ${res.filePath}`);
-        }
-      } catch (ipcErr) {
-        console.warn('Desktop file auto-backup IPC error:', ipcErr);
+    try {
+      const payload = { targetDate: todayStr, data: dump, ...dump };
+      const res = await window.desktopApp.saveDailyBackup(payload);
+      if (res?.success) {
+        console.log(`[自動バックアップ] PCフォルダへ当日最新上書き保存完了: ${res.filePath}`);
+        return;
       }
-    }
-
-    // 3. 内部LocalStorage側も14日を超過した古い自動バックアップを自動消去（容量頭打ち処理）
-    const autoKeys = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith('reha_autobackup_')) autoKeys.push(k);
-    }
-    autoKeys.sort(); // 日付文字列昇順
-    while (autoKeys.length > 14) {
-      const oldestKey = autoKeys.shift();
-      if (oldestKey) localStorage.removeItem(oldestKey);
+      console.warn('Desktop file auto-backup failed:', res);
+      showToast(res?.message || '当日バックアップをPCフォルダへ保存できませんでした', 'error');
+    } catch (ipcErr) {
+      console.warn('Desktop file auto-backup IPC error:', ipcErr);
+      showToast('当日バックアップをPCフォルダへ保存できませんでした', 'error');
     }
   } catch (e) {
     console.warn('Daily auto backup error:', e);
+    showToast('当日バックアップの作成に失敗しました', 'error');
   }
 }
 
 
 export function setupBackupAndRestoreListeners() {
+  removeLegacyAutoBackupCopies();
+
   const btnBackup = document.getElementById('btnBackupDownload');
   const btnFiscalBackup = document.getElementById('btnFiscalYearBackup');
   const btnTriggerRestore = document.getElementById('btnTriggerRestore');
@@ -98,7 +101,7 @@ export function setupBackupAndRestoreListeners() {
     try {
       const dumpData = createSystemDump({ backupType: 'MANUAL' });
       const blob = new Blob([JSON.stringify(dumpData, null, 2)], { type: 'application/json' });
-      const nowStr = new Date().toISOString().slice(0, 10);
+      const nowStr = getLocalDateStr();
       const fileName = `reha_backup_${nowStr}.json`;
       downloadJsonBlob(blob, fileName);
       showToast(`全データを保存しました: ${fileName}`, 'success');
@@ -157,15 +160,20 @@ export function setupBackupAndRestoreListeners() {
         }
         keysToRemove.forEach((k) => localStorage.removeItem(k));
 
-        Object.entries(parsed.storage).forEach(([k, v]) => {
-          if (typeof v === 'string') localStorage.setItem(k, v);
-        });
+        for (const [k, v] of Object.entries(parsed.storage)) {
+          if (typeof v !== 'string') continue;
+          if (!writeStorageItem(k, v)) {
+            throw new Error('storage-write-failed');
+          }
+        }
 
         showToast('データを完全復元しました。画面を再読み込みします...', 'success');
         setTimeout(() => window.location.reload(), 1200);
       } catch (err) {
         console.error('Restore error:', err);
-        showToast('ファイルの復元に失敗しました。正しいJSONファイルかご確認ください。', 'error');
+        if (err?.message !== 'storage-write-failed') {
+          showToast('ファイルの復元に失敗しました。正しいJSONファイルかご確認ください。', 'error');
+        }
       }
     };
     reader.readAsText(file);

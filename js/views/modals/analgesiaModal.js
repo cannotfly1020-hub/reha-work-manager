@@ -28,7 +28,7 @@ export function setupAnalgesiaModalListeners(onUpdate) {
     const currentDateStr = getCurrentDateContext();
     if (!pId || !activeAnalgesiaSlotId) return;
 
-    addAnalgesiaPatient(currentDateStr, activeAnalgesiaSlotId, pId);
+    if (!addAnalgesiaPatient(currentDateStr, activeAnalgesiaSlotId, pId)) return;
     showToast('消炎鎮痛患者を追加しました', 'success');
     renderAnalgesiaModalList();
     if (typeof onScheduleUpdatedCallback === 'function') onScheduleUpdatedCallback();
@@ -93,7 +93,7 @@ function renderAnalgesiaModalList() {
 
   listEl.querySelectorAll('.btn-remove-analgesia').forEach((btn) => {
     btn.addEventListener('click', () => {
-      removeAnalgesiaPatient(currentDateStr, activeAnalgesiaSlotId, btn.dataset.patientId);
+      if (!removeAnalgesiaPatient(currentDateStr, activeAnalgesiaSlotId, btn.dataset.patientId)) return;
       showToast('消炎鎮痛から患者を解除しました', 'warn');
       renderAnalgesiaModalList();
       if (typeof onScheduleUpdatedCallback === 'function') onScheduleUpdatedCallback();

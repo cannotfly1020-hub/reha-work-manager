@@ -256,7 +256,7 @@ function setupWeeklyDragAndDrop(gridEl) {
         if (res.success) {
           showToast(`✅ ${payload.patientName} 様を ${date.slice(5)} ${time} に予約配置しました`, 'success');
           renderAppointmentCalendarView();
-        } else {
+        } else if (!res.storageFailed) {
           showToast(res.message || '二重予約のため配置できませんでした', 'error');
         }
       } else if (payload.type === 'MOVE_APPOINTMENT') {
@@ -272,7 +272,7 @@ function setupWeeklyDragAndDrop(gridEl) {
           if (res.success) {
             showToast(`🔄 予約日時を ${date.slice(5)} ${time} に変更しました`, 'info');
             renderAppointmentCalendarView();
-          } else {
+          } else if (!res.storageFailed) {
             showToast(res.message || '移動先の時間帯が重複しています', 'error');
           }
         }

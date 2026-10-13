@@ -1,6 +1,8 @@
 // js/store/assistantStore.js
 // リハビリ助手1・2の氏名
 
+import { writeStorageItem } from './storageWrite.js';
+
 const ASSISTANT_STORAGE_KEY = 'reha_assistant_settings';
 
 /**
@@ -33,8 +35,7 @@ export function saveAssistantSettings(a1 = '', a2 = '') {
       assistant1: String(a1).trim(),
       assistant2: String(a2).trim()
     };
-    localStorage.setItem(ASSISTANT_STORAGE_KEY, JSON.stringify(data));
-    return true;
+    return writeStorageItem(ASSISTANT_STORAGE_KEY, JSON.stringify(data));
   } catch (e) {
     console.error('saveAssistantSettings error:', e);
     return false;

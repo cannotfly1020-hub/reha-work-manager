@@ -2,6 +2,7 @@
 // 患者マスターCRUD・LocalStorage永続化・ステータス管理(継続/終了・退院)・計画書ステータス同期・消炎鎮痛制御層（200行制限準拠）
 
 import { normalizeString, normalizePatientId, normalizeDateString } from '../core/dataNormalizer.js';
+import { writeStorageItem } from './storageWrite.js';
 
 const STORAGE_KEY = 'reha_patients_master';
 
@@ -128,8 +129,7 @@ export function getPatientById(id) {
 export function saveAllPatients(patients) {
   try {
     if (!Array.isArray(patients)) return false;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(patients));
-    return true;
+    return writeStorageItem(STORAGE_KEY, JSON.stringify(patients));
   } catch (error) {
     console.error('saveAllPatients error:', error);
     return false;
@@ -170,7 +170,7 @@ export function upsertPatient(rawData) {
   else list.push(cleanPatient);
 
   const saved = saveAllPatients(list);
-  if (!saved) return { success: false, message: 'ストレージへの保存に失敗しました。' };
+  if (!saved) return { success: false, storageFailed: true };
   return { success: true, patient: cleanPatient };
 }
 

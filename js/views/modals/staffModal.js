@@ -62,7 +62,7 @@ export function setupStaffSettingsModalListeners(onUpdate) {
       if (newNameInput) newNameInput.value = '';
       renderStaffSettingsFields();
       if (typeof onStaffUpdatedCallback === 'function') onStaffUpdatedCallback();
-    } else {
+    } else if (!res.storageFailed) {
       showToast('セラピストの追加に失敗しました', 'error');
     }
   };
@@ -81,10 +81,9 @@ export function setupStaffSettingsModalListeners(onUpdate) {
       { id: 'B', name: 'PT B', color: '#0d9488', status: THERAPIST_STATUS.ACTIVE },
       { id: 'C', name: 'PT C', color: '#7c3aed', status: THERAPIST_STATUS.ACTIVE }
     ];
-    saveAllTherapists(defaultList);
-
-    // ★リハビリ助手設定も初期化
-    saveAssistantSettings('', '');
+    const staffReset = saveAllTherapists(defaultList);
+    const assistantReset = saveAssistantSettings('', '');
+    if (!staffReset || !assistantReset) return;
     if (assistant1Input) assistant1Input.value = '';
     if (assistant2Input) assistant2Input.value = '';
 
@@ -109,12 +108,12 @@ export function setupStaffSettingsModalListeners(onUpdate) {
       }
     });
 
-    updateTherapistSettings(updateMap);
+    const staffSaved = updateTherapistSettings(updateMap);
 
-    // ★リハビリ助手設定の保存
     const a1Val = assistant1Input ? assistant1Input.value.trim() : '';
     const a2Val = assistant2Input ? assistant2Input.value.trim() : '';
-    saveAssistantSettings(a1Val, a2Val);
+    const assistantSaved = saveAssistantSettings(a1Val, a2Val);
+    if (!staffSaved || !assistantSaved) return;
 
     closeModal();
     showToast('スタッフ設定（セラピスト・助手）を更新・保存しました', 'success');

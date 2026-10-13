@@ -138,7 +138,7 @@ export function setupAppointmentModalListeners(onUpdate) {
   // 削除処理
   btnDelete?.addEventListener('click', () => {
     if (!activeAppointmentId) return;
-    deleteAppointment(activeAppointmentId);
+    if (!deleteAppointment(activeAppointmentId)) return;
     closeModal();
     showToast('予約を削除しました', 'warn');
     if (typeof onAppointmentUpdatedCallback === 'function') {
@@ -193,7 +193,7 @@ function handleAppointmentFormSubmit() {
   });
 
   if (!res.success) {
-    showToast(res.message || '予約の登録に失敗しました', 'error');
+    if (!res.storageFailed) showToast(res.message || '予約の登録に失敗しました', 'error');
     return;
   }
 

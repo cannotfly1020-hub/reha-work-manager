@@ -164,7 +164,7 @@ function setupPatientModalListeners() {
 
   btnDelete?.addEventListener('click', () => {
     if (!editingPatientId) return;
-    deletePatient(editingPatientId);
+    if (!deletePatient(editingPatientId)) return;
     modal.classList.remove('active');
     showToast('患者レコードを削除しました', 'warn');
 
@@ -205,7 +205,7 @@ function setupPatientModalListeners() {
 
     const res = upsertPatient(rawData);
     if (!res.success) {
-      showToast(res.message || '患者情報の登録に失敗しました', 'error');
+      if (!res.storageFailed) showToast(res.message || '患者情報の登録に失敗しました', 'error');
       return;
     }
 

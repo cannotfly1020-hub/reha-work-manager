@@ -2,6 +2,7 @@
 // リハビリ物品・装具貸出CRUD・返却管理・LocalStorage永続化層
 
 import { normalizeString, normalizePatientId, normalizeDateString } from '../core/dataNormalizer.js';
+import { writeStorageItem } from './storageWrite.js';
 
 const STORAGE_KEY = 'reha_loans_master';
 
@@ -77,8 +78,7 @@ export function getAllLoans() {
 export function saveAllLoans(loans) {
   try {
     if (!Array.isArray(loans)) return false;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(loans));
-    return true;
+    return writeStorageItem(STORAGE_KEY, JSON.stringify(loans));
   } catch (error) {
     console.error('saveAllLoans write error:', error);
     return false;
@@ -120,7 +120,7 @@ export function registerLoan(rawData) {
   list.unshift(newLoan); // 新規レコードを先頭に追加
 
   const saved = saveAllLoans(list);
-  if (!saved) return { success: false, message: 'ストレージへの保存に失敗しました。' };
+  if (!saved) return { success: false, storageFailed: true };
   return { success: true, loan: newLoan };
 }
 

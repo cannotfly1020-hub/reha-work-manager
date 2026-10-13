@@ -2,6 +2,7 @@
 // セラピストマスター管理・LocalStorage永続化・ステータス管理（稼働中/休職/退職）・新規追加・増員対応（200行制限準拠）
 
 import { normalizeString } from '../core/dataNormalizer.js';
+import { writeStorageItem } from './storageWrite.js';
 
 const STORAGE_KEY = 'reha_therapists_master';
 
@@ -82,8 +83,7 @@ export function getTherapistById(id) {
 export function saveAllTherapists(list) {
   try {
     if (!Array.isArray(list)) return false;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-    return true;
+    return writeStorageItem(STORAGE_KEY, JSON.stringify(list));
   } catch (error) {
     console.error('saveAllTherapists error:', error);
     return false;
@@ -132,6 +132,7 @@ export function addTherapist(name = '', status = THERAPIST_STATUS.ACTIVE) {
   return {
     success: ok,
     therapist: ok ? newTherapist : null,
+    storageFailed: !ok,
     message: ok ? `セラピスト（枠 ${nextId}: ${cleanName}）を追加しました` : '保存に失敗しました'
   };
 }

@@ -3,6 +3,8 @@
 // 自由実時間（非20分縛り）・同一時間帯重複（並行来院/消炎複数人/PT別並行）対応
 // ★同一患者の同日・重複時間帯二重予約物理遮断ガード・LocalStorage永続化
 
+import { writeStorageItem } from './storageWrite.js';
+
 const APPOINTMENT_STORAGE_KEY = 'reha_outpatient_appointments';
 
 /**
@@ -42,7 +44,9 @@ export function getAllAppointments() {
  */
 export function saveAllAppointments(appointments) {
   try {
-    localStorage.setItem(APPOINTMENT_STORAGE_KEY, JSON.stringify(appointments));
+    if (!writeStorageItem(APPOINTMENT_STORAGE_KEY, JSON.stringify(appointments))) {
+      return false;
+    }
     // 日次バックアップ自動連携トリガー
     if (typeof window.triggerDailyBackup === 'function') {
       window.triggerDailyBackup();
@@ -201,7 +205,9 @@ export function upsertAppointment(rawData) {
   };
 
   all[id] = appointment;
-  saveAllAppointments(all);
+  if (!saveAllAppointments(all)) {
+    return { success: false, storageFailed: true };
+  }
 
   return { success: true, appointment, message: '予約を保存しました。' };
 }

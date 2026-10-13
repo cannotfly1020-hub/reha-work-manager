@@ -36,8 +36,12 @@ export function setupSlotModalListeners(onUpdate) {
   btnDelete?.addEventListener('click', () => {
     if (!activeModalSlot) return;
     const currentDateStr = getCurrentDateContext();
-    clearScheduleSlot(currentDateStr, activeModalSlot.therapistId, activeModalSlot.slotId);
+    const cleared = clearScheduleSlot(currentDateStr, activeModalSlot.therapistId, activeModalSlot.slotId);
     modal?.classList.remove('active');
+    if (!cleared) {
+      if (typeof onScheduleUpdatedCallback === 'function') onScheduleUpdatedCallback();
+      return;
+    }
     showToast('コマの配置を解除しました', 'warn');
 
     // ★解除後の最新確定データを当日バックアップファイルへ自動上書きトリガー
@@ -194,7 +198,11 @@ function handleSlotFormSubmit() {
     clearScheduleSlot(currentDateStr, origTherapist, origSlot);
   }
 
-  setScheduleSlot(currentDateStr, newTherapistId, newSlotId, { patientId, units, note, billingPlan });
+  const saved = setScheduleSlot(currentDateStr, newTherapistId, newSlotId, { patientId, units, note, billingPlan });
+  if (!saved) {
+    if (typeof onScheduleUpdatedCallback === 'function') onScheduleUpdatedCallback();
+    return;
+  }
 
   if (billingPlan) {
     updatePatientPlanStatus(patientId, billingPlan);

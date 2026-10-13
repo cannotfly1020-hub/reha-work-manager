@@ -9,6 +9,13 @@ const fs = require('fs');
  * バックアップ専用フォルダのパスを取得・未存在時は自動生成
  * 保存先: Windowsの「ドキュメント」フォルダ内 \ リハ業務管理_自動バックアップ
  */
+function formatLocalDate(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 function getBackupDirectoryPath() {
   const documentsPath = app.getPath('documents');
   const backupDir = path.join(documentsPath, 'リハ業務管理_自動バックアップ');
@@ -62,11 +69,11 @@ function setupIpcHandlers() {
 
       if (payload.data && typeof payload.data === 'object') {
         // パターンA: { targetDate: '...', data: dump } で渡された場合
-        targetDate = payload.targetDate || new Date().toISOString().slice(0, 10);
+        targetDate = payload.targetDate || formatLocalDate();
         dumpData = payload.data;
       } else {
         // パターンB: dump オブジェクトそのものが渡された場合 (exportView.js の呼び出し形式)
-        targetDate = payload.targetDate || (payload.exportedAt ? payload.exportedAt.slice(0, 10) : new Date().toISOString().slice(0, 10));
+        targetDate = payload.targetDate || formatLocalDate();
         dumpData = payload;
       }
 

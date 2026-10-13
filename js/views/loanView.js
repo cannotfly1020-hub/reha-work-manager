@@ -166,7 +166,7 @@ function setupLoanModalListeners() {
 
     const res = registerLoan(rawData);
     if (!res.success) {
-      showToast(res.message || '貸出登録に失敗しました', 'error');
+      if (!res.storageFailed) showToast(res.message || '貸出登録に失敗しました', 'error');
       return;
     }
 

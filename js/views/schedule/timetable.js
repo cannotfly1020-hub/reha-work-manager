@@ -180,7 +180,11 @@ function attachGridEventListeners(gridEl) {
           return;
         }
 
-        moveScheduleSlot(scheduleState.dateStr, fromTherapist, fromSlot, targetTId, targetSId);
+        const moved = moveScheduleSlot(scheduleState.dateStr, fromTherapist, fromSlot, targetTId, targetSId);
+        if (!moved) {
+          renderScheduleView();
+          return;
+        }
         showToast('コマを移動しました', 'success');
 
         // ★ドラッグ移動後の最新確定データを当日バックアップファイルへ自動上書きトリガー
@@ -217,7 +221,11 @@ function attachGridEventListeners(gridEl) {
       } catch (_) {}
       const sId = cell.dataset.analgesiaDrop;
       if (pId && sId && !pId.includes(':')) {
-        addAnalgesiaPatient(scheduleState.dateStr, sId, pId);
+        const added = addAnalgesiaPatient(scheduleState.dateStr, sId, pId);
+        if (!added) {
+          renderScheduleView();
+          return;
+        }
         showToast('消炎鎮痛に患者を追加しました', 'success');
 
         // ★消炎鎮痛追加後の最新確定データを当日バックアップファイルへ自動上書きトリガー

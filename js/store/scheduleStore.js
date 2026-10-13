@@ -2,6 +2,7 @@
 // 時間割コマCRUD・コマ移動・消炎鎮痛CRUD・LocalStorage永続化・月間集計（消炎/疾患別自動完全分離対応・高速O(1)最適化版）
 
 import { normalizeDateString, safeParseInt } from '../core/dataNormalizer.js';
+import { writeStorageItem } from './storageWrite.js';
 import { getPatientById } from './patientStore.js';
 import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
 
@@ -36,8 +37,7 @@ export function saveDailySchedule(dateStr, scheduleData) {
   const cleanDate = normalizeDateString(dateStr);
   if (!cleanDate || !scheduleData) return false;
   try {
-    localStorage.setItem(getStorageKey(cleanDate), JSON.stringify(scheduleData));
-    return true;
+    return writeStorageItem(getStorageKey(cleanDate), JSON.stringify(scheduleData));
   } catch (error) {
     console.error('saveDailySchedule error:', error);
     return false;
