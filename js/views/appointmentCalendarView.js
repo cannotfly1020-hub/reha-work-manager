@@ -3,8 +3,10 @@
 // 1. A4横1枚完結・原本Excel完全同一 週間タイムテーブル印刷
 // 2. A4縦1枚完結・1日30名以上対応 本日デイリー予約チェックリスト印刷
 // 3. 同一患者二重予約物理遮断トースト連携 ＆ 月間日付ダブルクリック週間ジャンプ完備
+// 4. 日本の祝日・振替休日の完全視覚化 ＆ 祝日枠入力物理遮断ガード完備
+// 5. 外来患者パレット並び替え（区分順・五十音順・ID順）完全対応版
 
-import { sanitizeHtml } from '../core/dataNormalizer.js';
+import { sanitizeHtml, normalizeToKatakana } from '../core/dataNormalizer.js';
 import { getPatientById, searchPatients } from '../store/patientStore.js';
 import { getAllTherapists } from '../store/therapistStore.js';
 import {
@@ -27,6 +29,90 @@ const TIME_SLOTS = [
   '13:40', '14:00', '14:20', '14:40', '15:00', '15:20', '15:40',
   '16:00', '16:20', '16:40', '17:00'
 ];
+
+/**
+ * 日本の祝日・振替休日・国民の休日オフライン高精度判定エンジン
+ */
+function getJapaneseHolidayName(dateInput) {
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return null;
+
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  const date = d.getDate();
+  const day = d.getDay();
+
+  // 単独祝日の判定
+  const checkBaseHoliday = (year, month, dayOfMonth) => {
+    const curDate = new Date(year, month - 1, dayOfMonth);
+    const dayOfWeek = curDate.getDay();
+    const nth = Math.floor((dayOfMonth - 1) / 7) + 1;
+
+    // 天文計算式による春分の日・秋分の日の算出 (1980〜2099年対応)
+    const vEq = Math.floor(20.8431 + 0.242194 * (year - 1980) - Math.floor((year - 1980) / 4));
+    const aEq = Math.floor(23.2488 + 0.242194 * (year - 1980) - Math.floor((year - 1980) / 4));
+
+    if (month === 1) {
+      if (dayOfMonth === 1) return '元日';
+      if (dayOfWeek === 1 && nth === 2) return '成人の日';
+    } else if (month === 2) {
+      if (dayOfMonth === 11) return '建国記念の日';
+      if (dayOfMonth === 23 && year >= 2020) return '天皇誕生日';
+    } else if (month === 3) {
+      if (dayOfMonth === vEq) return '春分の日';
+    } else if (month === 4) {
+      if (dayOfMonth === 29) return '昭和の日';
+    } else if (month === 5) {
+      if (dayOfMonth === 3) return '憲法記念日';
+      if (dayOfMonth === 4) return 'みどりの日';
+      if (dayOfMonth === 5) return 'こどもの日';
+    } else if (month === 7) {
+      if (dayOfWeek === 1 && nth === 3) return '海の日';
+    } else if (month === 8) {
+      if (dayOfMonth === 11 && year >= 2016) return '山の日';
+    } else if (month === 9) {
+      if (dayOfWeek === 1 && nth === 3) return '敬老の日';
+      if (dayOfMonth === aEq) return '秋分の日';
+    } else if (month === 10) {
+      if (dayOfWeek === 1 && nth === 2) return 'スポーツの日';
+    } else if (month === 11) {
+      if (dayOfMonth === 3) return '文化の日';
+      if (dayOfMonth === 23) return '勤労感謝の日';
+    }
+    return null;
+  };
+
+  const baseName = checkBaseHoliday(y, m, date);
+  if (baseName) return baseName;
+
+  // 国民の休日判定（祝日と祝日に挟まれた平日）
+  if (day !== 0) {
+    const prevDate = new Date(y, m - 1, date - 1);
+    const nextDate = new Date(y, m - 1, date + 1);
+    const prevHoliday = checkBaseHoliday(prevDate.getFullYear(), prevDate.getMonth() + 1, prevDate.getDate());
+    const nextHoliday = checkBaseHoliday(nextDate.getFullYear(), nextDate.getMonth() + 1, nextDate.getDate());
+    if (prevHoliday && nextHoliday) {
+      return '国民の休日';
+    }
+  }
+
+  // 振替休日判定（日曜日に祝日があり、その直後の連続した平日）
+  if (day !== 0) {
+    for (let back = 1; back <= 6; back++) {
+      const checkD = new Date(y, m - 1, date - back);
+      const isSunday = checkD.getDay() === 0;
+      const hName = checkBaseHoliday(checkD.getFullYear(), checkD.getMonth() + 1, checkD.getDate());
+      if (!hName) {
+        break;
+      }
+      if (isSunday) {
+        return '振替休日';
+      }
+    }
+  }
+
+  return null;
+}
 
 /**
  * 外来予約カレンダー画面の初期化
@@ -81,6 +167,10 @@ export function initAppointmentCalendarView() {
 
   btnNew?.addEventListener('click', () => {
     const defaultDateStr = formatDateYMD(currentBaseDate);
+    const holidayName = getJapaneseHolidayName(currentBaseDate);
+    if (holidayName) {
+      showToast(`⚠️ 選択中の日付は祝日（${holidayName}）です`, 'warn');
+    }
     openAppointmentModal(null, defaultDateStr, '09:00');
   });
 
@@ -152,7 +242,7 @@ export function renderAppointmentCalendarView() {
 }
 
 /* ==========================================================================
-   1. 左側：外来予約用 患者パレット
+   1. 左側：外来予約用 患者パレット（並び替え完全対応）
    ========================================================================== */
 
 let aptPaletteCategory = 'OUTPATIENT'; // 外来優先
@@ -186,18 +276,42 @@ function setupAptPaletteEvents() {
   });
 }
 
+function sortAptPalettePatients(list, sortKey) {
+  return [...list].sort((a, b) => {
+    if (sortKey === 'KANA') {
+      const kanaA = normalizeToKatakana(a.nameKana || a.name || '');
+      const kanaB = normalizeToKatakana(b.nameKana || b.name || '');
+      return kanaA.localeCompare(kanaB, 'ja');
+    }
+    if (sortKey === 'ID') {
+      return (a.id || '').localeCompare(b.id || '', undefined, { numeric: true });
+    }
+    // デフォルト: CATEGORY (外来優先: 外来 → 消炎 → 入院)
+    const getCatScore = (p) => {
+      if (p.category === 'OUTPATIENT' && p.diseaseType !== 'ANALGESIA') return 1;
+      if (p.diseaseType === 'ANALGESIA') return 2;
+      return 3;
+    };
+    const diff = getCatScore(a) - getCatScore(b);
+    if (diff !== 0) return diff;
+    return (a.id || '').localeCompare(b.id || '', undefined, { numeric: true });
+  });
+}
+
 function renderAptPalette() {
   const container = document.getElementById('aptPalettePatientList');
   const searchInput = document.getElementById('aptPaletteSearch');
   if (!container) return;
 
   const keyword = searchInput ? searchInput.value.trim() : '';
-  const patients = searchPatients(keyword, aptPaletteCategory, aptPaletteSort);
+  const rawPatients = searchPatients(keyword, aptPaletteCategory);
 
-  if (patients.length === 0) {
+  if (rawPatients.length === 0) {
     container.innerHTML = `<div style="font-size:0.75rem; color:#94a3b8; text-align:center; padding:16px;">該当する患者がいません</div>`;
     return;
   }
+
+  const patients = sortAptPalettePatients(rawPatients, aptPaletteSort);
 
   container.innerHTML = patients
     .map((p) => {
@@ -250,13 +364,13 @@ function renderAptPalette() {
 }
 
 /* ==========================================================================
-   2. 右側：週間タイムテーブル（月〜土 × 時間枠）
+   2. 右側：週間タイムテーブル（月〜土 × 時間枠・祝日判定完備）
    ========================================================================== */
 
 function getWeekDates(baseDate) {
   const d = new Date(baseDate);
   const day = d.getDay();
-  // 月曜日を週の始まりとする（日曜日は翌週扱いまたは前週扱い、日本の医療現場慣例）
+  // 月曜日を週の始まりとする（日曜日は前週または翌週扱い）
   const diffToMonday = (day === 0 ? -6 : 1) - day;
   const monday = new Date(d);
   monday.setDate(d.getDate() + diffToMonday);
@@ -317,20 +431,37 @@ function renderWeeklyTimetable() {
     <div class="apt-weekly-header">時間</div>
   `;
 
-  // 曜日ヘッダー
+  // 曜日ヘッダー（祝日の場合は赤色バッジとピンク背景で強調表示）
   weekDates.forEach((d, idx) => {
     const dateStr = formatDateYMD(d);
     const isToday = dateStr === todayStr;
     const isSat = d.getDay() === 6;
+    const holidayName = getJapaneseHolidayName(d);
+    const isHoliday = !!holidayName;
+
     let cls = 'apt-weekly-header';
-    if (isSat) cls += ' apt-col-sat';
-    if (isToday) cls += ' apt-col-today';
+    let headerStyle = '';
+
+    if (isHoliday) {
+      cls += ' apt-col-holiday';
+      headerStyle = 'background:#fff1f2; color:#be123c; border-bottom:2px solid #f43f5e;';
+    } else if (isSat) {
+      cls += ' apt-col-sat';
+    }
+    if (isToday) {
+      cls += ' apt-col-today';
+    }
 
     const mmdd = `${d.getMonth() + 1}/${d.getDate()}`;
+    const holidayBadgeHtml = isHoliday
+      ? `<div style="font-size:0.62rem; font-weight:800; background:#ffe4e6; color:#e11d48; border:1px solid #fecdd3; border-radius:3px; padding:1px 3px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${sanitizeHtml(holidayName)}">${sanitizeHtml(holidayName)}</div>`
+      : '';
+
     html += `
-      <div class="${cls}">
-        <div>${dayNames[idx]}</div>
+      <div class="${cls}" style="${headerStyle}">
+        <div style="font-weight:800;">${dayNames[idx]}</div>
         <div style="font-size:0.7rem; font-weight:normal; opacity:0.85;">${mmdd}</div>
+        ${holidayBadgeHtml}
       </div>
     `;
   });
@@ -343,15 +474,26 @@ function renderWeeklyTimetable() {
       const dateStr = formatDateYMD(d);
       const isToday = dateStr === todayStr;
       const isSat = d.getDay() === 6;
+      const holidayName = getJapaneseHolidayName(d);
+      const isHoliday = !!holidayName;
 
       let cellCls = 'apt-weekly-slot-cell';
-      if (isSat) cellCls += ' apt-sat-cell';
-      if (isToday) cellCls += ' apt-today-cell';
+      let cellStyle = '';
+
+      if (isHoliday) {
+        cellCls += ' apt-holiday-cell';
+        cellStyle = 'background:#fff5f5; border-left:1px dashed #fecdd3; border-right:1px dashed #fecdd3;';
+      } else if (isSat) {
+        cellCls += ' apt-sat-cell';
+      }
+      if (isToday) {
+        cellCls += ' apt-today-cell';
+      }
 
       const key = `${dateStr}_${slotTime}`;
       const aptsInSlot = slotAptMap[key] || [];
 
-      html += `<div class="${cellCls}" data-date="${dateStr}" data-time="${slotTime}">`;
+      html += `<div class="${cellCls}" data-date="${dateStr}" data-time="${slotTime}" data-is-holiday="${isHoliday ? 'true' : 'false'}" data-holiday-name="${holidayName || ''}" style="${cellStyle}">`;
 
       // 同一枠内の予約カードたち
       aptsInSlot.forEach((apt) => {
@@ -383,7 +525,7 @@ function renderWeeklyTimetable() {
 }
 
 /**
- * 週間タイムテーブルのドラッグ＆ドロップ ＆ クリックイベント
+ * 週間タイムテーブルのドラッグ＆ドロップ ＆ クリックイベント（祝日遮断ガード完備）
  */
 function setupWeeklyDragAndDrop(gridEl) {
   // 配置済み予約カードのドラッグ開始イベント（曜日・時間移動）
@@ -420,12 +562,16 @@ function setupWeeklyDragAndDrop(gridEl) {
   gridEl.querySelectorAll('.apt-weekly-slot-cell').forEach((cell) => {
     cell.addEventListener('dragover', (e) => {
       e.preventDefault();
+      const isHoliday = cell.dataset.isHoliday === 'true';
+      if (isHoliday) {
+        e.dataTransfer.dropEffect = 'none';
+        return;
+      }
       e.dataTransfer.dropEffect = 'copy';
       cell.classList.add('apt-drop-hover');
     });
 
     cell.addEventListener('dragleave', (e) => {
-      // 子要素への移動による誤発火を防止
       if (!cell.contains(e.relatedTarget)) {
         cell.classList.remove('apt-drop-hover');
       }
@@ -440,6 +586,15 @@ function setupWeeklyDragAndDrop(gridEl) {
 
       const date = targetCell.dataset.date;
       const time = targetCell.dataset.time;
+      const isHoliday = targetCell.dataset.isHoliday === 'true';
+      const holidayName = targetCell.dataset.holidayName;
+
+      // ★祝日へのドロップを物理遮断
+      if (isHoliday) {
+        showToast(`⚠️ 祝日（${holidayName || '休診日'}）のため予約は配置できません`, 'error');
+        activeDragPayload = null;
+        return;
+      }
 
       let payload = activeDragPayload;
       if (!payload) {
@@ -473,7 +628,6 @@ function setupWeeklyDragAndDrop(gridEl) {
           showToast(`✅ ${payload.patientName} 様を ${date.slice(5)} ${time} に予約配置しました`, 'success');
           renderAppointmentCalendarView();
         } else {
-          // ★同一患者重複予約防止ガードのメッセージ表示
           showToast(res.message || '二重予約のため配置できませんでした', 'error');
         }
       } else if (payload.type === 'MOVE_APPOINTMENT') {
@@ -498,9 +652,18 @@ function setupWeeklyDragAndDrop(gridEl) {
       activeDragPayload = null;
     });
 
-    // セルの空き余白クリックで新規予約モーダルを開く
+    // セルの空き余白クリックで新規予約モーダルを開く（祝日の場合は物理遮断）
     cell.addEventListener('click', (e) => {
       if (e.target.closest('.apt-weekly-card')) return;
+      const isHoliday = cell.dataset.isHoliday === 'true';
+      const holidayName = cell.dataset.holidayName;
+
+      // ★祝日セルのクリックを物理遮断
+      if (isHoliday) {
+        showToast(`⚠️ 祝日（${holidayName || '休診日'}）のため外来予約は登録できません`, 'warn');
+        return;
+      }
+
       const date = cell.dataset.date;
       const time = cell.dataset.time;
       openAppointmentModal(null, date, time);
@@ -509,7 +672,7 @@ function setupWeeklyDragAndDrop(gridEl) {
 }
 
 /* ==========================================================================
-   3. 月間カレンダー（マス目）フォールバックビュー ＆ ダブルクリック週間ジャンプ
+   3. 月間カレンダー（マス目・祝日判定 ＆ ダブルクリック週間ジャンプ）
    ========================================================================== */
 
 function renderMonthlyCalendar() {
@@ -554,23 +717,41 @@ function renderMonthlyCalendar() {
   }
 
   for (let day = 1; day <= daysInMonth; day++) {
+    const curDate = new Date(y, m - 1, day);
     const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    const dayOfWeek = new Date(y, m - 1, day).getDay();
+    const dayOfWeek = curDate.getDay();
     const isToday = dateStr === todayStr;
+    const holidayName = getJapaneseHolidayName(curDate);
+    const isHoliday = !!holidayName;
 
     let dayClass = 'calendar-day-cell';
-    if (dayOfWeek === 0) dayClass += ' cal-sun-cell';
-    else if (dayOfWeek === 6) dayClass += ' cal-sat-cell';
-    if (isToday) dayClass += ' cal-today-cell';
+    let customStyle = '';
+
+    if (isHoliday) {
+      dayClass += ' cal-holiday-cell';
+      customStyle = 'background:#fff8f8;';
+    } else if (dayOfWeek === 0) {
+      dayClass += ' cal-sun-cell';
+    } else if (dayOfWeek === 6) {
+      dayClass += ' cal-sat-cell';
+    }
+    if (isToday) {
+      dayClass += ' cal-today-cell';
+    }
 
     const dayApts = aptByDate[dateStr] || [];
 
     gridHtml += `
-      <div class="${dayClass}" data-date="${dateStr}" title="💡 ダブルクリックでこの週の週間タイムテーブルへ移動">
+      <div class="${dayClass}" data-date="${dateStr}" data-is-holiday="${isHoliday ? 'true' : 'false'}" data-holiday-name="${holidayName || ''}" style="${customStyle}" title="💡 ダブルクリックでこの週の週間タイムテーブルへ移動">
         <div class="cal-day-header">
-          <span class="cal-day-number ${isToday ? 'cal-today-badge' : ''}">${day}</span>
-          ${dayApts.length > 0 ? `<span class="cal-day-count">${dayApts.length}件</span>` : ''}
-          <button type="button" class="btn-cal-add-day" data-date="${dateStr}" title="この日に予約を追加">＋</button>
+          <div style="display:flex; align-items:center; gap:4px;">
+            <span class="cal-day-number ${isToday ? 'cal-today-badge' : ''}" style="${isHoliday ? 'color:#e11d48; font-weight:800;' : ''}">${day}</span>
+            ${isHoliday ? `<span style="font-size:0.63rem; font-weight:800; background:#fee2e2; color:#be123c; padding:1px 4px; border-radius:3px;">${sanitizeHtml(holidayName)}</span>` : ''}
+          </div>
+          <div style="display:flex; align-items:center; gap:4px;">
+            ${dayApts.length > 0 ? `<span class="cal-day-count">${dayApts.length}件</span>` : ''}
+            <button type="button" class="btn-cal-add-day" data-date="${dateStr}" data-is-holiday="${isHoliday ? 'true' : 'false'}" data-holiday-name="${holidayName || ''}" title="${isHoliday ? '祝日のため追加不可' : 'この日に予約を追加'}" style="${isHoliday ? 'opacity:0.4; cursor:not-allowed;' : ''}">＋</button>
+          </div>
         </div>
         <div class="cal-day-body">
     `;
@@ -615,10 +796,16 @@ function renderMonthlyCalendar() {
   gridHtml += `</div>`;
   container.innerHTML = gridHtml;
 
-  // 月間ビューのイベント
+  // 月間ビューのイベント（祝日の場合は追加を物理遮断）
   container.querySelectorAll('.btn-cal-add-day').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
+      const isHoliday = btn.dataset.isHoliday === 'true';
+      const holidayName = btn.dataset.holidayName;
+      if (isHoliday) {
+        showToast(`⚠️ 祝日（${holidayName || '休診日'}）のため予約は追加できません`, 'warn');
+        return;
+      }
       openAppointmentModal(null, btn.dataset.date, '09:00');
     });
   });
@@ -653,8 +840,7 @@ function renderMonthlyCalendar() {
    ========================================================================== */
 
 /**
- * 印刷スタイル 1: 週間タイムテーブル (A4横1枚完結・原本Excel完全同一レイアウト)
- * 月〜土 × 08:40〜17:00 のマトリクスで、週150〜200名規模でもA4横1枚に綺麗に収まります。
+ * 印刷スタイル 1: 週間タイムテーブル (A4横1枚完結・原本Excel完全同一レイアウト・祝日表記対応)
  */
 function handlePrintWeeklyTable() {
   const weekDates = getWeekDates(currentBaseDate);
@@ -693,9 +879,17 @@ function handlePrintWeeklyTable() {
   weekDates.forEach((d, idx) => {
     const mmdd = `${d.getMonth() + 1}/${d.getDate()}`;
     const isSat = d.getDay() === 6;
+    const holidayName = getJapaneseHolidayName(d);
+    let thStyle = '';
+    if (holidayName) {
+      thStyle = 'color:#be123c; background:#fff1f2;';
+    } else if (isSat) {
+      thStyle = 'color:#1e40af; background:#eff6ff;';
+    }
+
     tableHtml += `
-      <th style="${isSat ? 'color:#1e40af; background:#eff6ff;' : ''}">
-        ${dayNames[idx]} (${mmdd})
+      <th style="${thStyle}">
+        ${dayNames[idx]} (${mmdd})${holidayName ? ` [${holidayName}]` : ''}
       </th>
     `;
   });
@@ -715,10 +909,15 @@ function handlePrintWeeklyTable() {
     weekDates.forEach((d) => {
       const dateStr = formatDateYMD(d);
       const isSat = d.getDay() === 6;
+      const holidayName = getJapaneseHolidayName(d);
       const key = `${dateStr}_${slotTime}`;
       const apts = slotAptMap[key] || [];
 
-      tableHtml += `<td class="slot-content-cell ${isSat ? 'sat-col' : ''}">`;
+      let colClass = 'slot-content-cell';
+      if (holidayName) colClass += ' holiday-col';
+      else if (isSat) colClass += ' sat-col';
+
+      tableHtml += `<td class="${colClass}">`;
 
       if (apts.length > 0) {
         apts.forEach((apt) => {
@@ -814,6 +1013,9 @@ function handlePrintWeeklyTable() {
         .slot-content-cell.sat-col {
           background: #fafcff;
         }
+        .slot-content-cell.holiday-col {
+          background: #fff5f5;
+        }
         .print-card {
           display: flex;
           align-items: center;
@@ -892,8 +1094,7 @@ function handlePrintWeeklyTable() {
 }
 
 /**
- * 印刷スタイル 2: 本日デイリー予約チェックリスト (A4縦1枚・30名以上高密度対応)
- * 選択中（または本日）の予約患者を早い順に並べ、毎朝バインダーに挟んで手元でレ点チェックできる専用帳票。
+ * 印刷スタイル 2: 本日デイリー予約チェックリスト (A4縦1枚・30名以上高密度対応・祝日表示対応)
  */
 function handlePrintDailyChecklist() {
   const targetDateStr = formatDateYMD(currentBaseDate);
@@ -912,6 +1113,7 @@ function handlePrintDailyChecklist() {
   const therapists = getAllTherapists();
   const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
   const dayOfWeek = dayNames[currentBaseDate.getDay()];
+  const holidayName = getJapaneseHolidayName(currentBaseDate);
 
   let rowsHtml = '';
   dailyAptList.forEach((apt, idx) => {
@@ -927,7 +1129,7 @@ function handlePrintDailyChecklist() {
 
     rowsHtml += `
       <tr>
-        <td style="text-align:center; font-weight:bold; font-size:10pt;">[　]</td>
+        <td style="text-align:center; font-weight:bold; font-size:10pt;">[ ]</td>
         <td style="text-align:center; font-weight:700; color:#64748b;">${idx + 1}</td>
         <td style="text-align:center; font-weight:800; font-size:9.5pt; color:#0f172a;">${apt.startTime}</td>
         <td style="font-weight:800; font-size:9.5pt; color:#0f172a;">
@@ -941,13 +1143,13 @@ function handlePrintDailyChecklist() {
     `;
   });
 
-  // 予約が少ない場合でも30名分枠を確保して手書き追記可能にする
+  // 予約が少ない場合でも32名分枠を確保して手書き追記可能にする
   const emptyRowsNeeded = Math.max(0, 32 - dailyAptList.length);
   for (let i = 0; i < emptyRowsNeeded; i++) {
     const seq = dailyAptList.length + i + 1;
     rowsHtml += `
       <tr class="empty-memo-row">
-        <td style="text-align:center;">[　]</td>
+        <td style="text-align:center;">[ ]</td>
         <td style="text-align:center; color:#94a3b8;">${seq}</td>
         <td></td>
         <td></td>
@@ -991,11 +1193,11 @@ function handlePrintDailyChecklist() {
         .date-badge {
           font-size: 11pt;
           font-weight: 800;
-          color: #15803d;
-          background: #f0fdf4;
+          color: ${holidayName ? '#be123c' : '#15803d'};
+          background: ${holidayName ? '#fff1f2' : '#f0fdf4'};
           padding: 2px 8px;
           border-radius: 4px;
-          border: 1px solid #86efac;
+          border: 1px solid ${holidayName ? '#fecdd3' : '#86efac'};
         }
         .daily-table {
           width: 100%;
@@ -1034,7 +1236,9 @@ function handlePrintDailyChecklist() {
       <div class="page-header">
         <div>
           <span class="title">外来リハビリテーション 来院チェック表</span>
-          <span class="date-badge" style="margin-left:8px;">${targetDateStr.replace(/-/g, '/')} (${dayOfWeek})</span>
+          <span class="date-badge" style="margin-left:8px;">
+            ${targetDateStr.replace(/-/g, '/')} (${dayOfWeek}) ${holidayName ? `[${holidayName}]` : ''}
+          </span>
         </div>
         <div style="font-size:9pt; font-weight:800; color:#334155;">
           予約総数: ${dailyAptList.length} 名
