@@ -1,8 +1,9 @@
 // js/views/scheduleView.js
-// VIEW 1: 当日時間割（動的CSSグリッド・パレット並び替え・ドラッグ＆ドロップ・KPIストリップ・各モーダル連携・セル枠内完全ジャストフィット対応版）
+// VIEW 1: 当日時間割（動的CSSグリッド・パレット並び替え・ドラッグ＆ドロップ・KPIストリップ・各モーダル連携・セル枠内完全ジャストフィット・外来予約一括反映自己回復バインド対応版）
 
+/* STREAMING_CHUNK:Importing modules and configurations... */
 import { TIME_SLOTS, REHA_RULES } from '../config/rules.js';
-import { sanitizeHtml, safeParseInt, normalizeToKatakana } from '../core/dataNormalizer.js';
+import { sanitizeHtml, safeParseInt, normalizeToKatakana, normalizeDateString } from '../core/dataNormalizer.js';
 import { getActiveTherapists } from '../store/therapistStore.js';
 import { getPatientById, searchPatients } from '../store/patientStore.js';
 import {
@@ -18,6 +19,7 @@ import { setupSlotModalListeners, openSlotModal } from './modals/slotModal.js';
 import { setupStaffSettingsModalListeners } from './modals/staffModal.js';
 import { setupAnalgesiaModalListeners, openAnalgesiaModal } from './modals/analgesiaModal.js';
 
+/* STREAMING_CHUNK:Initializing state and local date helpers... */
 function getLocalDateStr() {
   const d = new Date();
   const yyyy = d.getFullYear();
@@ -30,22 +32,43 @@ let currentDateStr = getLocalDateStr();
 let paletteCategory = 'ALL';
 let paletteSortKey = 'CATEGORY'; // 'CATEGORY' | 'KANA' | 'ID'
 
+/* STREAMING_CHUNK:Defining appointment data retrieval helper... */
 /**
- * 外来予約データストアから指定日の予約（キャンセル以外）を取得する安全ヘルパー
+ * 外来予約データストアから指定日の予約（キャンセル以外）を堅牢に取得するヘルパー
+ * 複数キー（reha_outpatient_appointments / reha_appointments）およびオブジェクト・配列両形式に対応
  */
 function getAppointmentsForDate(dateStr) {
   try {
-    const raw = localStorage.getItem('reha_outpatient_appointments');
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    const list = Array.isArray(parsed) ? parsed : Object.values(parsed);
-    return list.filter((apt) => apt && apt.date === dateStr && apt.status !== 'CANCELLED');
+    const cleanTargetDate = normalizeDateString(dateStr);
+    const candidateKeys = ['reha_outpatient_appointments', 'reha_appointments'];
+    let allAppointments = [];
+
+    for (const key of candidateKeys) {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw);
+        const list = Array.isArray(parsed) ? parsed : Object.values(parsed);
+        if (list.length > 0) {
+          allAppointments = list;
+          break;
+        }
+      } catch (_) {}
+    }
+
+    return allAppointments.filter((apt) => {
+      if (!apt || !apt.patientId) return false;
+      const aptDate = normalizeDateString(apt.date || apt.appointmentDate || '');
+      const isStatusOk = apt.status !== 'CANCELLED' && apt.status !== 'CANCELED';
+      return aptDate === cleanTargetDate && isStatusOk;
+    });
   } catch (err) {
     console.error('外来予約データ取得エラー:', err);
     return [];
   }
 }
 
+/* STREAMING_CHUNK:Defining time slot snapping algorithm... */
 /**
  * 実時間（例: "09:15"）から最も近い20分コマのIDを判定して返す
  */
@@ -82,6 +105,7 @@ function findNearestSlotId(timeStr) {
   return bestSlotId;
 }
 
+/* STREAMING_CHUNK:Converting duration to units... */
 /**
  * 所要時間（分）から単位数（1〜4単位）を変換判定
  */
@@ -93,6 +117,7 @@ function convertDurationToUnits(durationMin) {
   return 4;
 }
 
+/* STREAMING_CHUNK:Updating appointment sync count badge... */
 /**
  * 本日の外来予約一括反映ボタンの更新・件数バッジ描画
  */
@@ -108,14 +133,16 @@ function updateSyncAppointmentsBadge() {
   }
 }
 
+/* STREAMING_CHUNK:Executing bulk sync of appointments with safety guard... */
 /**
  * 本日の予約データを時間割へ安全に自動流し込み（手入力保護ガード完備）
  */
 function syncAppointmentsToSchedule() {
+  console.log(`[外来予約反映] 処理開始: 日付=${currentDateStr}`);
   const appointments = getAppointmentsForDate(currentDateStr);
 
   if (appointments.length === 0) {
-    showToast('本日（' + currentDateStr + '）の外来予約データはありません', 'info');
+    showToast(`本日（${currentDateStr}）の外来予約データはありません`, 'info');
     return;
   }
 
@@ -132,6 +159,7 @@ function syncAppointmentsToSchedule() {
   appointments.forEach((apt) => {
     const patient = getPatientById(apt.patientId);
     if (!patient) {
+      console.warn(`[外来予約反映] 患者ID未登録のためスキップ: ${apt.patientId}`);
       skippedCount++;
       return;
     }
@@ -177,6 +205,7 @@ function syncAppointmentsToSchedule() {
     }
 
     if (alreadyScheduledAnywhere) {
+      console.log(`[外来予約反映] 同日他枠に既存配置のためスキップ: 患者=${patient.name}`);
       skippedCount++;
       return;
     }
@@ -210,6 +239,7 @@ function syncAppointmentsToSchedule() {
 
     if (!canAssign) {
       // 既存の手入力データが埋まっているため安全にスキップ
+      console.log(`[外来予約反映] 空き枠不足のためスキップ: 患者=${patient.name}, 要求単位=${units}`);
       skippedCount++;
       return;
     }
@@ -259,13 +289,24 @@ function syncAppointmentsToSchedule() {
   }
 }
 
+/* STREAMING_CHUNK:Binding UI event listeners with self-healing guard... */
+function bindSyncButtonListener() {
+  const btnSyncAppointments = document.getElementById('btnSyncAppointmentsToSchedule');
+  if (btnSyncAppointments && !btnSyncAppointments.dataset.bound) {
+    btnSyncAppointments.dataset.bound = 'true';
+    btnSyncAppointments.addEventListener('click', (e) => {
+      e.preventDefault();
+      syncAppointmentsToSchedule();
+    });
+  }
+}
+
 export function initScheduleView() {
   const dateInput = document.getElementById('scheduleDateInput');
   const btnToday = document.getElementById('btnTodaySchedule');
   const btnRefresh = document.getElementById('btnRefreshSchedule');
   const searchInput = document.getElementById('paletteSearch');
   const sortSelect = document.getElementById('paletteSortSelect');
-  const btnSyncAppointments = document.getElementById('btnSyncAppointmentsToSchedule');
 
   if (dateInput) {
     dateInput.value = currentDateStr;
@@ -290,12 +331,7 @@ export function initScheduleView() {
     });
   }
 
-  // ★外来予約一括反映ボタンのリスナー登録
-  if (btnSyncAppointments) {
-    btnSyncAppointments.addEventListener('click', () => {
-      syncAppointmentsToSchedule();
-    });
-  }
+  bindSyncButtonListener();
 
   if (searchInput) searchInput.addEventListener('input', () => renderPatientPalette());
 
@@ -321,7 +357,9 @@ export function initScheduleView() {
   setupAnalgesiaModalListeners(renderScheduleView);
 }
 
+/* STREAMING_CHUNK:Rendering main schedule view components... */
 export function renderScheduleView() {
+  bindSyncButtonListener();
   renderDailyKPIStrip();
   updateSyncAppointmentsBadge();
   renderPatientPalette();
@@ -341,6 +379,7 @@ function renderDailyKPIStrip() {
   `;
 }
 
+/* STREAMING_CHUNK:Sorting and rendering patient palette... */
 function sortPalettePatients(list, sortKey) {
   return [...list].sort((a, b) => {
     if (sortKey === 'KANA') {
@@ -405,6 +444,7 @@ function renderPatientPalette() {
   });
 }
 
+/* STREAMING_CHUNK:Building slot card HTML with pixel-perfect formula... */
 function buildSlotCardHtml(p, u, cellData, tId, slotId) {
   const isOut = p.category === 'OUTPATIENT';
   const cardClass = isOut ? 'card-outpatient' : 'card-inpatient';
@@ -453,6 +493,7 @@ function buildSlotCardHtml(p, u, cellData, tId, slotId) {
     </div>`;
 }
 
+/* STREAMING_CHUNK:Rendering dynamic timetable grid... */
 function renderTimetableGrid() {
   const gridEl = document.getElementById('timetableGrid');
   if (!gridEl) return;
@@ -513,6 +554,7 @@ function renderTimetableGrid() {
   attachGridEventListeners(gridEl);
 }
 
+/* STREAMING_CHUNK:Attaching drag-drop and click listeners to grid... */
 function attachGridEventListeners(gridEl) {
   gridEl.querySelectorAll('.empty-slot-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
@@ -619,3 +661,15 @@ function attachGridEventListeners(gridEl) {
     });
   });
 }
+```eof
+
+---
+
+### 改修内容のポイント
+1. **イベントリスナーの自己回復バインド (`bindSyncButtonListener`)**:
+   - `renderScheduleView()` の実行時にも確実にリスナー未登録状態を検知してバインドするガードを配置し、初期化タイミングのズレによる「ボタンの無反応」を解消しました。
+2. **予約データキーの多重フォールバック対応 (`getAppointmentsForDate`)**:
+   - `reha_outpatient_appointments` および `reha_appointments` の双方を自動走査し、配列・オブジェクト形式の双方に対応しました。
+   - `normalizeDateString` により日付の書式差異を吸収して正確に当日の予約を照合します。
+3. **安全設計ガード＆既存計算式の完全維持**:
+   - 既存の手入力データ上書きスキップ、二重予約の防止、元予約の実時間メモ保持、および `(52 * u) - 5` px の枠内ジャストフィット計算式を100%維持しています。
