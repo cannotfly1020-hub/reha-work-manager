@@ -33,25 +33,37 @@ export function setupAptPaletteEvents() {
   });
 }
 
+function compareAptKana(a, b) {
+  const kanaA = normalizeToKatakana(a.nameKana || a.name || '');
+  const kanaB = normalizeToKatakana(b.nameKana || b.name || '');
+  return kanaA.localeCompare(kanaB, 'ja');
+}
+
+function compareAptId(a, b) {
+  return (a.id || '').localeCompare(b.id || '', undefined, { numeric: true });
+}
+
+function diseaseSortScore(patient) {
+  switch (patient?.diseaseType) {
+    case 'LOCOMOTIVE': return 1;
+    case 'CEREBROVASCULAR': return 2;
+    case 'DISUSE': return 3;
+    case 'ANALGESIA': return 4;
+    default: return 9;
+  }
+}
+
 function sortAptPalettePatients(list, sortKey) {
   return [...list].sort((a, b) => {
-    if (sortKey === 'KANA') {
-      const kanaA = normalizeToKatakana(a.nameKana || a.name || '');
-      const kanaB = normalizeToKatakana(b.nameKana || b.name || '');
-      return kanaA.localeCompare(kanaB, 'ja');
+    if (sortKey === 'DISEASE') {
+      const diff = diseaseSortScore(a) - diseaseSortScore(b);
+      if (diff !== 0) return diff;
+      return compareAptKana(a, b) || compareAptId(a, b);
     }
     if (sortKey === 'ID') {
-      return (a.id || '').localeCompare(b.id || '', undefined, { numeric: true });
+      return compareAptId(a, b);
     }
-    // デフォルト: CATEGORY (外来優先: 外来 → 消炎 → 入院)
-    const getCatScore = (p) => {
-      if (p.category === 'OUTPATIENT' && p.diseaseType !== 'ANALGESIA') return 1;
-      if (p.diseaseType === 'ANALGESIA') return 2;
-      return 3;
-    };
-    const diff = getCatScore(a) - getCatScore(b);
-    if (diff !== 0) return diff;
-    return (a.id || '').localeCompare(b.id || '', undefined, { numeric: true });
+    return compareAptKana(a, b) || compareAptId(a, b);
   });
 }
 

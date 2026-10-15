@@ -6,5 +6,5 @@ export const calendarState = {
   viewMode: 'WEEK',
   dragPayload: null,
   paletteCategory: 'OUTPATIENT',
-  paletteSort: 'CATEGORY',
+  paletteSort: 'KANA',
 };

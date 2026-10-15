@@ -124,8 +124,8 @@ export function writeExecutiveSummarySheet(wb, aggregated) {
   const r1 = renderDataRow('運動器リハビリテーション(Ⅱ)', inStats.LOCOMOTIVE, REHA_RULES.LIMIT_DAYS.LOCOMOTIVE.defaultPoints, null, '単位 (170点)');
   const r2 = renderDataRow('脳血管疾患等リハビリテーション(Ⅲ)', inStats.CEREBROVASCULAR, REHA_RULES.LIMIT_DAYS.CEREBROVASCULAR.defaultPoints, null, '単位 (100点)');
   const r3 = renderDataRow('廃用症候群リハビリテーション(Ⅲ)', inStats.DISUSE, REHA_RULES.LIMIT_DAYS.DISUSE.defaultPoints, null, '単位 (77点)');
-  const r4 = renderDataRow('早期加算(Ⅰ) 1〜4日目', inStats.early1, REHA_RULES.EARLY_BONUS.PHASE_1.points, null, '件数 (入院のみ 60点)');
-  const r5 = renderDataRow('早期加算(Ⅱ) 5〜14日目', inStats.early2, REHA_RULES.EARLY_BONUS.PHASE_2.points, null, '件数 (入院のみ 25点)');
+  const r4 = renderDataRow('早期加算(Ⅰ) 1〜3日目', inStats.early1, REHA_RULES.EARLY_BONUS.PHASE_1.points, null, '件数 (入院のみ 60点)');
+  const r5 = renderDataRow('早期加算(Ⅱ) 4〜14日目', inStats.early2, REHA_RULES.EARLY_BONUS.PHASE_2.points, null, '件数 (入院のみ 25点)');
   const r6 = renderDataRow('総合実施計画書 (入院計)', inStats.planCount, 0, inStats.planPts, '件数 (初回300点/継続240点/固定196点)');
 
   inTotalPts = r1.pts + r2.pts + r3.pts + r4.pts + r5.pts + r6.pts;

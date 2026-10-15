@@ -57,14 +57,14 @@ export const REHA_RULES = {
   // 令和8年度改定 早期加算判定ルール（入院患者のみ）
   EARLY_BONUS: {
     PHASE_1: {
-      maxDays: 4,
+      maxDays: 3,
       points: 60,
-      label: '早期加算(4日以内)'
+      label: '早期加算(3日以内)'
     },
     PHASE_2: {
       maxDays: 14,
       points: 25,
-      label: '早期加算(14日以内)'
+      label: '早期加算(4〜14日目)'
     }
   },
 

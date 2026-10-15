@@ -6,5 +6,5 @@ import { getLocalDateStr } from '../../core/dateUtils.js';
 export const scheduleState = {
   dateStr: getLocalDateStr(),
   paletteCategory: 'ALL',
-  paletteSortKey: 'CATEGORY',
+  paletteSortKey: 'KANA',
 };

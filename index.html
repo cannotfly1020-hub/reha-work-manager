@@ -66,9 +66,9 @@
         <input type="text" id="paletteSearch" placeholder="患者名・ID検索..." style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem;">
         <!-- 患者パレット並び替えドロップダウン -->
         <select id="paletteSortSelect" style="width:100%; padding:5px 6px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.75rem; background:#fff; font-weight:600; color:#334155; cursor:pointer;">
-          <option value="CATEGORY" selected>並べ替え: 区分順 (入院→外来→消炎)</option>
-          <option value="KANA">並べ替え: 五十音順 (あいうえお)</option>
-          <option value="ID">並べ替え: 患者ID順</option>
+          <option value="KANA" selected>並べ替え: 五十音順 (あいうえお)</option>
+          <option value="DISEASE">並べ替え: 疾患別 (運動器 → 脳血管 → 廃用)</option>
+          <option value="ID">並べ替え: 患者ID (カルテ番号) 順</option>
         </select>
         <div style="display:flex; gap:4px;">
           <button class="palette-cat-btn active" data-cat="ALL" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">全て</button>
@@ -128,9 +128,9 @@
         </div>
         <input type="text" id="aptPaletteSearch" placeholder="患者名・ID検索..." style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem;">
         <select id="aptPaletteSortSelect" style="width:100%; padding:5px 6px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.75rem; background:#fff; font-weight:600; color:#334155; cursor:pointer;">
-          <option value="CATEGORY" selected>並べ替え: 区分順 (外来→消炎→入院)</option>
-          <option value="KANA">並べ替え: 五十音順 (あいうえお)</option>
-          <option value="ID">並べ替え: 患者ID順</option>
+          <option value="KANA" selected>並べ替え: 五十音順 (あいうえお)</option>
+          <option value="DISEASE">並べ替え: 疾患別 (運動器 → 脳血管 → 廃用)</option>
+          <option value="ID">並べ替え: 患者ID (カルテ番号) 順</option>
         </select>
         <div style="display:flex; gap:4px;">
           <button class="apt-palette-cat-btn" data-cat="ALL" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">全て</button>
@@ -184,8 +184,8 @@
 
   <!-- VIEW 3: 患者台帳（ステータス絞り込み対応） -->
   <section id="viewPatient" class="view-panel">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-      <div style="display:flex; gap:8px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; gap:8px; flex-wrap:wrap;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
         <input type="text" id="patientSearchInput" placeholder="氏名・ID・疾患名で検索..." style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; width:240px;">
         <select id="patientCategoryFilter" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem;">
           <option value="ALL">全患者区分</option>
@@ -197,6 +197,13 @@
           <option value="ACTIVE" selected>● 継続（通院・入院中）</option>
           <option value="DISCONTINUED">■ 終了・退院（中止）</option>
           <option value="ALL">全ステータス（全件表示）</option>
+        </select>
+        <select id="patientSortSelect" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; font-weight:600; background:#fff; color:#334155; cursor:pointer;">
+          <option value="ID_ASC" selected>並べ替え: 患者ID順 (昇順)</option>
+          <option value="KANA_ASC">並べ替え: 五十音順 (あいうえお)</option>
+          <option value="DEADLINE_URGENT">並べ替え: 算定期限 残日数が少ない順 (要点検⚠️)</option>
+          <option value="ONSET_DESC">並べ替え: 起算日 (新しい順)</option>
+          <option value="ADMISSION_DESC">並べ替え: 入院日 (新しい順)</option>
         </select>
       </div>
       <button id="btnNewPatient" style="padding:8px 16px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.85rem; cursor:pointer;">＋ 新規患者登録</button>

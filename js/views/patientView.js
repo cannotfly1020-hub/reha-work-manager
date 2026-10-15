@@ -1,7 +1,7 @@
 // js/views/patientView.js
 // VIEW 3: 患者台帳・算定期限管理・計画書2行表示・通院中/終了ステータス管理・患者登録編集モーダル制御層（200行制限準拠）
 
-import { sanitizeHtml } from '../core/dataNormalizer.js';
+import { sanitizeHtml, normalizeToKatakana } from '../core/dataNormalizer.js';
 import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
 import {
   getPatientById, upsertPatient, deletePatient, searchPatients, PATIENT_STATUS
@@ -9,16 +9,22 @@ import {
 import { showToast } from '../ui/toast.js';
 
 let editingPatientId = null;
+let patientSortKey = 'ID_ASC';
 
 export function initPatientView() {
   const searchInput = document.getElementById('patientSearchInput');
   const catFilter = document.getElementById('patientCategoryFilter');
   const statusFilter = document.getElementById('patientStatusFilter');
+  const sortSelect = document.getElementById('patientSortSelect');
   const btnNew = document.getElementById('btnNewPatient');
 
   searchInput?.addEventListener('input', () => renderPatientView());
   catFilter?.addEventListener('change', () => renderPatientView());
   statusFilter?.addEventListener('change', () => renderPatientView());
+  sortSelect?.addEventListener('change', (e) => {
+    patientSortKey = e.target.value;
+    renderPatientView();
+  });
   btnNew?.addEventListener('click', () => openPatientModal(null));
 
   setupPatientModalListeners();
@@ -46,6 +52,44 @@ function getPlanPhaseCellHtml(patient, deadlines) {
   return `<div>${badgeHtml}${subTextHtml}</div>`;
 }
 
+function comparePatientId(a, b) {
+  return (a.id || '').localeCompare(b.id || '', undefined, { numeric: true });
+}
+
+function compareDateDesc(aDate, bDate) {
+  const a = aDate || '';
+  const b = bDate || '';
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  return b.localeCompare(a);
+}
+
+function sortPatientList(list, sortKey) {
+  const today = new Date();
+  return [...list].sort((a, b) => {
+    let diff = 0;
+    if (sortKey === 'KANA_ASC') {
+      const kanaA = normalizeToKatakana(a.nameKana || a.name || '');
+      const kanaB = normalizeToKatakana(b.nameKana || b.name || '');
+      diff = kanaA.localeCompare(kanaB, 'ja');
+    } else if (sortKey === 'DEADLINE_URGENT') {
+      const remainA = calculatePatientDeadlines(a, today).remainingDays;
+      const remainB = calculatePatientDeadlines(b, today).remainingDays;
+      const scoreA = typeof remainA === 'number' ? remainA : 9999;
+      const scoreB = typeof remainB === 'number' ? remainB : 9999;
+      diff = scoreA - scoreB;
+    } else if (sortKey === 'ONSET_DESC') {
+      diff = compareDateDesc(a.onsetDate, b.onsetDate);
+    } else if (sortKey === 'ADMISSION_DESC') {
+      diff = compareDateDesc(a.admissionDate, b.admissionDate);
+    } else {
+      diff = comparePatientId(a, b);
+    }
+    return diff || comparePatientId(a, b);
+  });
+}
+
 export function renderPatientView() {
   const container = document.getElementById('patientTableContainer');
   if (!container) return;
@@ -63,6 +107,8 @@ export function renderPatientView() {
   } else if (statusFilter === 'DISCONTINUED') {
     patients = patients.filter((p) => p.status === PATIENT_STATUS.DISCONTINUED);
   }
+
+  patients = sortPatientList(patients, patientSortKey);
 
   if (patients.length === 0) {
     container.innerHTML = '<div style="padding:32px; text-align:center; color:#94a3b8; font-size:0.85rem;">該当する患者データがありません</div>';

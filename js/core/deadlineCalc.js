@@ -36,9 +36,10 @@ export function formatDate(date) {
 }
 
 /**
- * 2つの日付間の経過日数を計算する（開始日当日は0日目、diffDays=0）
- * @param {string|Date} fromDate 
- * @param {string|Date} toDate 
+ * 2つの日付の暦日差を返す。同日は 0。算定日数（初日算入）そのものではない。
+ * ローカル日付の 0:00 同士で引くため、JST と UTC の 9 時間差は入らない。
+ * @param {string|Date} fromDate
+ * @param {string|Date} toDate
  * @returns {number|null}
  */
 export function getDiffDays(fromDate, toDate) {
@@ -47,6 +48,19 @@ export function getDiffDays(fromDate, toDate) {
   if (!f || !t) return null;
   const diffTime = t.getTime() - f.getTime();
   return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+}
+
+/**
+ * 起算日当日を 1 日目とする経過日数（診療報酬の初日算入）。
+ * 同日は 1。起算日の前日は 0。
+ * @param {string|Date} fromDate 起算日
+ * @param {string|Date} toDate 判定日
+ * @returns {number|null}
+ */
+export function getInclusiveDayCount(fromDate, toDate) {
+  const diff = getDiffDays(fromDate, toDate);
+  if (diff === null) return null;
+  return diff + 1;
 }
 
 /**
@@ -74,8 +88,9 @@ export function addDays(baseDate, daysToAdd) {
 
 /**
  * 入院患者の早期加算フェーズ・終了日・残日数を自動評価する（令和8年度改定準拠）
- * 起算日（転院患者は前医入院日、直接入院は当院入院日）含めての日数判定
- * 1〜4日目: 第1期 (60点), 5〜14日目: 第2期 (25点), 15日目以降/外来: なし
+ * 起算日（転院患者は前医入院日、直接入院は当院入院日）当日を 1 日目とする
+ * 1〜3日目: 60点, 4〜14日目: 25点, 15日目以降: なし
+ * 告示は「起算日から4日目以降は25点」「14日を限度」。旧30日限度は令和8年度で廃止。
  * @param {string|Date} admissionOrStart 早期起算日
  * @param {string|Date} sessionDate 実施日
  * @param {string} category 患者区分 (INPATIENT | OUTPATIENT)
@@ -85,12 +100,10 @@ export function evaluateEarlyBonusPhase(admissionOrStart, sessionDate, category 
   if (category !== 'INPATIENT') {
     return { phase: null, points: 0, label: '外来対象外', isEligible: false, endDateStr: '', remainingDays: null, shortLabel: '' };
   }
-  const diff = getDiffDays(admissionOrStart, sessionDate);
-  if (diff === null || diff < 0) {
+  const dayCount = getInclusiveDayCount(admissionOrStart, sessionDate);
+  if (dayCount === null || dayCount < 1) {
     return { phase: null, points: 0, label: '対象外', isEligible: false, endDateStr: '', remainingDays: null, shortLabel: '' };
   }
-
-  const dayCount = diff + 1;
   const maxAllowedDays = REHA_RULES.EARLY_BONUS.PHASE_2.maxDays;
   const endDateStr = addDays(admissionOrStart, maxAllowedDays - 1);
   const remainingDays = maxAllowedDays - dayCount;
@@ -147,13 +160,18 @@ export function calculatePatientDeadlines(patient, baseDate = new Date()) {
 
   let limitDateStr = '';
   let remainingDays = null;
+  let elapsedDays = null;
   let isLimitExceeded = false;
 
   if (startDateStr && disease.days < 9000) {
-    limitDateStr = addDays(startDateStr, disease.days);
-    const diff = getDiffDays(baseDate, limitDateStr);
-    remainingDays = diff !== null ? diff : null;
-    isLimitExceeded = remainingDays !== null && remainingDays < 0;
+    // 満了日 = 起算日 + (標準日数 - 1)。起算日が1日目、標準日数日目が最終算定日。
+    // 翌日（標準日数 + 1 日目）から期限超過（月13単位）。
+    limitDateStr = addDays(startDateStr, disease.days - 1);
+    elapsedDays = getInclusiveDayCount(startDateStr, baseDate);
+    if (elapsedDays !== null) {
+      isLimitExceeded = elapsedDays > disease.days;
+      remainingDays = disease.days - elapsedDays;
+    }
   }
 
   const earlyBonus = evaluateEarlyBonusPhase(earlyStartStr, baseDate, patient?.category);
@@ -163,6 +181,7 @@ export function calculatePatientDeadlines(patient, baseDate = new Date()) {
   let isPlan2Required = false;
 
   if (patient?.careInsuranceType === 'CARE' && startDateStr && disease.oneThirdDays < 9000) {
+    // 「3分の1を超えた」翌日が移行日。50日なら起算日から数えて51日目 = 起算日+50日。
     plan2TransitionDateStr = addDays(startDateStr, disease.oneThirdDays);
     const diffToPlan2 = getDiffDays(baseDate, plan2TransitionDateStr);
     plan2RemainingDays = diffToPlan2 !== null ? diffToPlan2 : null;
@@ -177,6 +196,7 @@ export function calculatePatientDeadlines(patient, baseDate = new Date()) {
     diseaseFullName: disease.fullName,
     standardDays: disease.days,
     startDateStr,
+    elapsedDays,
     limitDateStr,
     remainingDays,
     isLimitExceeded,
