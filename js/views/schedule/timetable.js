@@ -20,19 +20,32 @@ import { renderScheduleView } from '../scheduleView.js';
 function buildTaskCardHtml(cellData, tId, slotId) {
   const u = Math.min(12, Math.max(1, safeParseInt(cellData.slotsCount || cellData.units, 1)));
   const calculatedHeight = (52 * u) - 5;
-  const badge = '業務';
+  const title = cellData.title || '';
+  let cardClass = 'card-task';
+  let badgeClass = 'badge-task';
+  let badgeText = '業務';
+  if (cellData.itemType === 'LEAVE' || title.includes('有休') || title.includes('有給')) {
+    cardClass = 'card-leave';
+    badgeClass = 'badge-leave';
+    badgeText = '有休';
+  } else if (cellData.itemType === 'HOLIDAY' || title.includes('公休')) {
+    cardClass = 'card-holiday';
+    badgeClass = 'badge-holiday';
+    badgeText = '公休';
+  }
+  const durationLabel = u >= 12 ? '終日' : (u >= 6 ? '半日' : `${u * 20}分`);
   return `
     <div class="cell-slot">
-      <div class="reha-slot-card card-task card-unit-${u}" draggable="true" data-therapist="${tId}" data-slot="${slotId}"
+      <div class="reha-slot-card ${cardClass} card-unit-${u}" draggable="true" data-therapist="${tId}" data-slot="${slotId}"
            style="height:${calculatedHeight}px !important; max-height:${calculatedHeight}px !important; box-sizing:border-box; overflow:hidden; cursor:grab;">
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <div style="display:flex; align-items:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-            <span class="badge-task">${badge}</span>
-            <span style="font-weight:800; font-size:0.8rem; margin-left:4px; color:#1e293b;">${sanitizeHtml(cellData.title || '業務')}</span>
+            <span class="${badgeClass}">${badgeText}</span>
+            <span style="font-weight:800; font-size:0.8rem; margin-left:4px;">${sanitizeHtml(title || badgeText)}</span>
           </div>
-          <span style="font-size:0.68rem; font-weight:700; color:#475569;">${u * 20}分</span>
+          <span style="font-size:0.68rem; font-weight:700;">${durationLabel}</span>
         </div>
-        <div style="font-size:0.68rem; color:#64748b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px;">
+        <div style="font-size:0.68rem; opacity:0.8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px;">
           ${sanitizeHtml(cellData.note || '')}
         </div>
       </div>

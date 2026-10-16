@@ -115,7 +115,14 @@ export function setupSlotModalListeners(onUpdate) {
   document.querySelectorAll('.btn-task-preset').forEach((btn) => {
     btn.addEventListener('click', () => {
       const titleInput = document.getElementById('slotTaskTitleInput');
-      if (titleInput) titleInput.value = btn.dataset.title || '';
+      const durationSelect = document.getElementById('slotTaskDurationSelect');
+      if (titleInput) {
+        titleInput.value = btn.dataset.title || '';
+        titleInput.dataset.blockType = btn.dataset.type || 'TASK';
+      }
+      if (durationSelect && btn.dataset.duration) {
+        durationSelect.value = String(btn.dataset.duration);
+      }
     });
   });
 
@@ -251,7 +258,7 @@ function handleSlotFormSubmit() {
 function handleTaskSlotSubmit() {
   const currentDateStr = getCurrentDateContext();
   const modal = document.getElementById('modalSlotEdit');
-  const taskTitle = document.getElementById('slotTaskTitleInput')?.value.trim() || '業務';
+  const taskTitle = document.getElementById('slotTaskTitleInput')?.value.trim() || '予定';
   const slotsCount = safeParseInt(document.getElementById('slotTaskDurationSelect')?.value, 1);
   const note = document.getElementById('slotNoteInput')?.value.trim() || '';
   const newTherapistId = document.getElementById('slotModalTherapistSelect')?.value || activeModalSlot.therapistId;
@@ -271,8 +278,12 @@ function handleTaskSlotSubmit() {
     clearScheduleSlot(currentDateStr, origTherapist, origSlot);
   }
 
+  let itemType = 'TASK';
+  if (taskTitle.includes('有休') || taskTitle.includes('有給')) itemType = 'LEAVE';
+  else if (taskTitle.includes('公休')) itemType = 'HOLIDAY';
+
   const saved = setScheduleSlot(currentDateStr, newTherapistId, newSlotId, {
-    itemType: 'TASK',
+    itemType,
     title: taskTitle,
     slotsCount,
     units: slotsCount,
@@ -286,7 +297,8 @@ function handleTaskSlotSubmit() {
   }
 
   modal?.classList.remove('active');
-  showToast('業務ブロックを保存しました', 'success');
+  const savedLabel = itemType === 'LEAVE' ? '有休' : (itemType === 'HOLIDAY' ? '公休' : '業務');
+  showToast(`${savedLabel}ブロックを保存しました`, 'success');
   if (typeof window.triggerDailyBackup === 'function') window.triggerDailyBackup();
   if (typeof onScheduleUpdatedCallback === 'function') onScheduleUpdatedCallback();
 }

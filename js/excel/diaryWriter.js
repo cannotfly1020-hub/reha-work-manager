@@ -119,7 +119,7 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
     activeStaffList.forEach((t) => {
       const slots = schedule[t.id] || {};
       Object.values(slots).forEach((item) => {
-        if (item?.itemType === 'TASK' || item?.itemType === 'LEAVE') return;
+        if (item?.itemType === 'TASK' || item?.itemType === 'LEAVE' || item?.itemType === 'HOLIDAY') return;
         if (item?.patientId) {
           const p = getPatientById(item.patientId);
           const u = item.units || 1;

@@ -393,13 +393,18 @@
         </div>
 
         <div id="slotTaskSection" style="display:none; flex-direction:column; gap:10px;">
-          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px;">
-            <button type="button" class="btn-task-preset" data-title="カンファレンス">👥 会議・カンファ</button>
-            <button type="button" class="btn-task-preset" data-title="計画書・書類作成">📝 計画書作成</button>
-            <button type="button" class="btn-task-preset" data-title="午後有休 / 午前半休">🏖 有休・半休</button>
-            <button type="button" class="btn-task-preset" data-title="実習指導">🎓 実習指導</button>
-            <button type="button" class="btn-task-preset" data-title="研修・勉強会">📚 研修参加</button>
-            <button type="button" class="btn-task-preset" data-title="業務">💼 その他業務</button>
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; color:#334155;">業務・休暇種別（クイック選択）</label>
+            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:6px; margin-top:4px;">
+              <button type="button" class="btn-task-preset" data-type="LEAVE" data-duration="12" data-title="終日有休" style="background:#fffbeb; border-color:#fde68a; color:#b45309;">🏖 終日有休</button>
+              <button type="button" class="btn-task-preset" data-type="LEAVE" data-duration="6" data-title="半日有休" style="background:#fffbeb; border-color:#fde68a; color:#b45309;">🏖 半日有休</button>
+              <button type="button" class="btn-task-preset" data-type="HOLIDAY" data-duration="12" data-title="終日公休" style="background:#fdf2f8; border-color:#fbcfe8; color:#be185d;">🎌 終日公休</button>
+              <button type="button" class="btn-task-preset" data-type="HOLIDAY" data-duration="6" data-title="半日公休" style="background:#fdf2f8; border-color:#fbcfe8; color:#be185d;">🎌 半日公休</button>
+              <button type="button" class="btn-task-preset" data-type="TASK" data-duration="2" data-title="カンファレンス">👥 会議・カンファ</button>
+              <button type="button" class="btn-task-preset" data-type="TASK" data-duration="2" data-title="計画書・書類作成">📝 計画書作成</button>
+              <button type="button" class="btn-task-preset" data-type="TASK" data-duration="2" data-title="実習・指導">🎓 実習指導</button>
+              <button type="button" class="btn-task-preset" data-type="TASK" data-duration="2" data-title="業務">💼 その他業務</button>
+            </div>
           </div>
           <div>
             <label for="slotTaskTitleInput" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">表示名</label>
