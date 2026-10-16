@@ -55,6 +55,7 @@ function findNearestSlotId(timeStr) {
   const targetMinutes = (parseInt(hStr, 10) || 0) * 60 + (parseInt(mStr, 10) || 0);
 
   let bestSlotId = TIME_SLOTS[0].id;
+  let bestMinutes = 0;
   let minDiff = Infinity;
 
   TIME_SLOTS.forEach((slot) => {
@@ -72,8 +73,9 @@ function findNearestSlotId(timeStr) {
     const slotMinutes = (parseInt(sh, 10) || 0) * 60 + (parseInt(sm, 10) || 0);
     const diff = Math.abs(targetMinutes - slotMinutes);
 
-    if (diff < minDiff) {
+    if (diff < minDiff || (diff === minDiff && slotMinutes > bestMinutes)) {
       minDiff = diff;
+      bestMinutes = slotMinutes;
       bestSlotId = slot.id;
     }
   });
@@ -85,10 +87,11 @@ function findNearestSlotId(timeStr) {
  * 所要時間（分）から単位数（1〜4単位）を変換判定
  */
 function convertDurationToUnits(durationMin) {
-  const dur = parseInt(durationMin, 10) || 20;
-  if (dur <= 20) return 1;
-  if (dur <= 40) return 2;
-  if (dur <= 60) return 3;
+  const dur = parseInt(durationMin, 10);
+  const minutes = Number.isFinite(dur) ? dur : 20;
+  if (minutes <= 25) return 1;
+  if (minutes <= 45) return 2;
+  if (minutes <= 65) return 3;
   return 4;
 }
 
@@ -131,7 +134,7 @@ export function syncAppointmentsToSchedule(dateStr, onApplied) {
     }
 
     // ① 消炎鎮痛（物療）の場合
-    const isAnalgesia = apt.treatmentType === 'ANALGESIA' || patient.diseaseType === 'ANALGESIA';
+    const isAnalgesia = apt.treatmentType === 'ANALGESIA' || apt.therapistId === 'ANALGESIA';
     if (isAnalgesia) {
       const existingAnalgesia = getAnalgesiaSlotPatients(currentDateStr, nearestSlotId);
       const isAlreadyAdded = existingAnalgesia.some((p) => p && p.id === apt.patientId);
@@ -176,19 +179,11 @@ export function syncAppointmentsToSchedule(dateStr, onApplied) {
       return !slotRangeOverlaps(schedule, tId, startId, reqUnits).blocked;
     };
 
-    let canAssign = false;
-    if (therapistValid && isSlotRangeAvailable(targetTherapistId, slotIndex, units)) {
-      canAssign = true;
-    } else {
-      // 指定PTが埋まっている、または未指定の場合は空いている他の稼働セラピスト枠を検索
-      for (const altT of activeTherapists) {
-        if (isSlotRangeAvailable(altT.id, slotIndex, units)) {
-          targetTherapistId = altT.id;
-          canAssign = true;
-          break;
-        }
-      }
+    if (!therapistValid) {
+      targetTherapistId = activeTherapists[0].id;
     }
+
+    let canAssign = isSlotRangeAvailable(targetTherapistId, slotIndex, units);
 
     if (!canAssign) {
       // 既存の手入力データが埋まっているため安全にスキップ
@@ -198,11 +193,10 @@ export function syncAppointmentsToSchedule(dateStr, onApplied) {
     }
 
     // メモ欄に元の実時間・特記メモを保持（実時間と制度時間の二重レイヤー分離）
-    const timeMemo = apt.startTime ? `予約:${apt.startTime}〜` : '';
-    const noteMemo = apt.notes ? ` (${apt.notes})` : '';
-    const combinedNote = `${timeMemo}${noteMemo}`.trim();
+    const combinedNote = `[予約 ${apt.startTime}〜] ${apt.notes || ''}`.trim();
 
     const cellData = {
+      itemType: 'PATIENT',
       patientId: apt.patientId,
       units: units,
       note: combinedNote,
@@ -225,10 +219,7 @@ export function syncAppointmentsToSchedule(dateStr, onApplied) {
   });
 
   if (appliedCount > 0) {
-    let msg = `外来予約 ${appointments.length}件中 ${appliedCount}件を時間割に反映しました`;
-    if (skippedCount > 0) {
-      msg += `（${skippedCount}件は既存配置または重複のためスキップ）`;
-    }
+    let msg = `✅ 外来予約 ${appointments.length}件中 ${appliedCount}件を時間割に反映しました（${skippedCount}件スキップ）`;
     showToast(msg, 'success');
 
     // 自動バックアップトリガー
