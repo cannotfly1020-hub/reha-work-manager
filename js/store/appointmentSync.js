@@ -90,7 +90,7 @@ function convertDurationToUnits(durationMin) {
   const dur = parseInt(durationMin, 10);
   const minutes = Number.isFinite(dur) ? dur : 20;
   if (minutes <= 25) return 1;
-  if (minutes <= 45) return 2;
+  if (minutes <= 40) return 2;
   if (minutes <= 65) return 3;
   return 4;
 }
@@ -229,6 +229,6 @@ export function syncAppointmentsToSchedule(dateStr, onApplied) {
 
     if (typeof onApplied === 'function') onApplied();
   } else {
-    showToast(`反映可能な空きコマがありませんでした（${skippedCount}件スキップ）`, 'warn');
+    showToast(`✅ 外来予約 ${appointments.length}件中 ${appliedCount}件を時間割に反映しました（${skippedCount}件スキップ）`, 'warn');
   }
 }

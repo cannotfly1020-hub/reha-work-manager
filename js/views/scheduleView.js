@@ -55,7 +55,7 @@ function updateSyncAppointmentBadge() {
  * @param {string} startTimeStr
  * @returns {string}
  */
-function findNearestTimeSlot(startTimeStr) {
+export function findNearestTimeSlot(startTimeStr) {
   if (!TIME_SLOTS.length) return '';
   if (!startTimeStr || !String(startTimeStr).includes(':')) return TIME_SLOTS[0].id;
 
@@ -81,15 +81,15 @@ function findNearestTimeSlot(startTimeStr) {
 
 /**
  * 所要分を20分1単位へ換算する（1〜4単位）
- * 〜25分=1、26〜45分=2、46〜65分=3、66分以上=4
+ * 〜25分=1、26〜40分=2、41〜65分=3（45分・60分）、66分以上=4
  * @param {number} durationMinutes
  * @returns {number}
  */
-function durationToUnits(durationMinutes) {
+export function durationToUnits(durationMinutes) {
   const minutes = parseInt(durationMinutes, 10);
   const dur = Number.isFinite(minutes) ? minutes : 20;
   if (dur <= 25) return 1;
-  if (dur <= 45) return 2;
+  if (dur <= 40) return 2;
   if (dur <= 65) return 3;
   return 4;
 }
