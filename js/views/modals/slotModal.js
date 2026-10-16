@@ -7,7 +7,7 @@ import { getAllTherapists, getActiveTherapists } from '../../store/therapistStor
 import { getPatientById, searchPatients, updatePatientPlanStatus } from '../../store/patientStore.js';
 import {
   getDailySchedule, setScheduleSlot, clearScheduleSlot,
-  findPatientMonthlyPlanDate, hasPatientPastPlan
+  findPatientMonthlyPlanDate, hasPatientPastPlan, isNonPatientBlock, slotRangeOverlaps
 } from '../../store/scheduleStore.js';
 import { evaluateRecommendedPlan } from '../../core/deadlineCalc.js';
 import {
@@ -110,6 +110,15 @@ export function setupSlotModalListeners(onUpdate) {
     }
   });
 
+  document.getElementById('btnSlotTypePatient')?.addEventListener('click', () => setSlotEditMode('PATIENT'));
+  document.getElementById('btnSlotTypeTask')?.addEventListener('click', () => setSlotEditMode('TASK'));
+  document.querySelectorAll('.btn-task-preset').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const titleInput = document.getElementById('slotTaskTitleInput');
+      if (titleInput) titleInput.value = btn.dataset.title || '';
+    });
+  });
+
   // 単位数ボタングループの選択
   document.querySelectorAll('.btn-unit-select').forEach((b) => {
     b.addEventListener('click', (e) => {
@@ -127,8 +136,24 @@ export function setupSlotModalListeners(onUpdate) {
   });
 }
 
+function setSlotEditMode(mode) {
+  const isTask = mode === 'TASK';
+  const patientSection = document.getElementById('slotPatientSection');
+  const taskSection = document.getElementById('slotTaskSection');
+  const patientBtn = document.getElementById('btnSlotTypePatient');
+  const taskBtn = document.getElementById('btnSlotTypeTask');
+  if (patientSection) patientSection.style.display = isTask ? 'none' : 'flex';
+  if (taskSection) taskSection.style.display = isTask ? 'flex' : 'none';
+  patientBtn?.classList.toggle('active', !isTask);
+  taskBtn?.classList.toggle('active', isTask);
+}
+
 function handleSlotFormSubmit() {
   if (!activeModalSlot) return;
+  if (document.getElementById('btnSlotTypeTask')?.classList.contains('active')) {
+    handleTaskSlotSubmit();
+    return;
+  }
 
   const currentDateStr = getCurrentDateContext();
   const modal = document.getElementById('modalSlotEdit');
@@ -154,8 +179,10 @@ function handleSlotFormSubmit() {
   const origSlot = activeModalSlot.slotId;
   const isRelocated = origTherapist !== newTherapistId || origSlot !== newSlotId;
 
-  if (isRelocated && dailySchedule[newTherapistId]?.[newSlotId]) {
-    showToast('変更先の時間枠にはすでに患者が配置されています', 'warn');
+  const excludeSlotId = (activeModalSlot.currentItem && origTherapist === newTherapistId) ? origSlot : null;
+  const overlap = slotRangeOverlaps(dailySchedule, newTherapistId, newSlotId, units, excludeSlotId);
+  if (overlap.blocked) {
+    showToast(overlap.message, 'warn');
     return;
   }
 
@@ -198,7 +225,9 @@ function handleSlotFormSubmit() {
     clearScheduleSlot(currentDateStr, origTherapist, origSlot);
   }
 
-  const saved = setScheduleSlot(currentDateStr, newTherapistId, newSlotId, { patientId, units, note, billingPlan });
+  const saved = setScheduleSlot(currentDateStr, newTherapistId, newSlotId, {
+    itemType: 'PATIENT', patientId, units, note, billingPlan
+  });
   if (!saved) {
     if (typeof onScheduleUpdatedCallback === 'function') onScheduleUpdatedCallback();
     return;
@@ -216,6 +245,49 @@ function handleSlotFormSubmit() {
     window.triggerDailyBackup();
   }
 
+  if (typeof onScheduleUpdatedCallback === 'function') onScheduleUpdatedCallback();
+}
+
+function handleTaskSlotSubmit() {
+  const currentDateStr = getCurrentDateContext();
+  const modal = document.getElementById('modalSlotEdit');
+  const taskTitle = document.getElementById('slotTaskTitleInput')?.value.trim() || '業務';
+  const slotsCount = safeParseInt(document.getElementById('slotTaskDurationSelect')?.value, 1);
+  const note = document.getElementById('slotNoteInput')?.value.trim() || '';
+  const newTherapistId = document.getElementById('slotModalTherapistSelect')?.value || activeModalSlot.therapistId;
+  const newSlotId = document.getElementById('slotModalSlotSelect')?.value || activeModalSlot.slotId;
+  const origTherapist = activeModalSlot.therapistId;
+  const origSlot = activeModalSlot.slotId;
+  const isRelocated = origTherapist !== newTherapistId || origSlot !== newSlotId;
+  const dailySchedule = getDailySchedule(currentDateStr);
+  const excludeSlotId = (activeModalSlot.currentItem && origTherapist === newTherapistId) ? origSlot : null;
+  const overlap = slotRangeOverlaps(dailySchedule, newTherapistId, newSlotId, slotsCount, excludeSlotId);
+  if (overlap.blocked) {
+    showToast(overlap.message, 'warn');
+    return;
+  }
+
+  if (isRelocated && activeModalSlot.currentItem) {
+    clearScheduleSlot(currentDateStr, origTherapist, origSlot);
+  }
+
+  const saved = setScheduleSlot(currentDateStr, newTherapistId, newSlotId, {
+    itemType: 'TASK',
+    title: taskTitle,
+    slotsCount,
+    units: slotsCount,
+    note,
+    patientId: null,
+    billingPlan: ''
+  });
+  if (!saved) {
+    if (typeof onScheduleUpdatedCallback === 'function') onScheduleUpdatedCallback();
+    return;
+  }
+
+  modal?.classList.remove('active');
+  showToast('業務ブロックを保存しました', 'success');
+  if (typeof window.triggerDailyBackup === 'function') window.triggerDailyBackup();
   if (typeof onScheduleUpdatedCallback === 'function') onScheduleUpdatedCallback();
 }
 
@@ -288,6 +360,18 @@ export function openSlotModal(therapistId, slotId, currentItem) {
 
   const noteInput = document.getElementById('slotNoteInput');
   if (noteInput) noteInput.value = currentItem?.note || '';
+
+  const taskTitleInput = document.getElementById('slotTaskTitleInput');
+  const taskDurationSelect = document.getElementById('slotTaskDurationSelect');
+  if (isNonPatientBlock(currentItem)) {
+    setSlotEditMode('TASK');
+    if (taskTitleInput) taskTitleInput.value = currentItem.title || '';
+    if (taskDurationSelect) taskDurationSelect.value = String(currentItem.slotsCount || currentItem.units || 1);
+  } else {
+    setSlotEditMode('PATIENT');
+    if (taskTitleInput) taskTitleInput.value = '';
+    if (taskDurationSelect) taskDurationSelect.value = '2';
+  }
 
   modal?.classList.add('active');
 }

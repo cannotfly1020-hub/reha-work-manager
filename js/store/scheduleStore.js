@@ -1,10 +1,46 @@
 // js/store/scheduleStore.js
 // 時間割コマCRUD・コマ移動・消炎鎮痛CRUD・LocalStorage永続化・月間集計（消炎/疾患別自動完全分離対応・高速O(1)最適化版）
 
+import { TIME_SLOTS } from '../config/rules.js';
 import { normalizeDateString, safeParseInt } from '../core/dataNormalizer.js';
 import { writeStorageItem } from './storageWrite.js';
 import { getPatientById } from './patientStore.js';
 import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
+
+export function isNonPatientBlock(item) {
+  return item?.itemType === 'TASK' || item?.itemType === 'LEAVE';
+}
+
+export function getSlotSpan(item) {
+  if (!item) return 0;
+  if (isNonPatientBlock(item)) {
+    return Math.min(12, Math.max(1, safeParseInt(item.slotsCount || item.units, 1)));
+  }
+  if (item.patientId) return Math.min(4, Math.max(1, safeParseInt(item.units, 1)));
+  return 0;
+}
+
+export function slotRangeOverlaps(schedule, therapistId, startSlotId, span, excludeSlotId = null) {
+  const startIndex = TIME_SLOTS.findIndex((slot) => slot.id === startSlotId);
+  if (startIndex < 0) return { blocked: true, message: '時間枠が見つかりません。' };
+  if (startIndex + span > TIME_SLOTS.length) {
+    return { blocked: true, message: 'コマの終了時間が診療時間枠を超過しています。' };
+  }
+
+  const slots = schedule?.[therapistId] || {};
+  for (const [slotId, item] of Object.entries(slots)) {
+    if (!item || slotId === excludeSlotId) continue;
+    const itemStart = TIME_SLOTS.findIndex((slot) => slot.id === slotId);
+    const itemSpan = getSlotSpan(item);
+    if (itemStart < 0 || itemSpan <= 0) continue;
+    const overlaps = startIndex < itemStart + itemSpan && itemStart < startIndex + span;
+    if (overlaps) {
+      const label = isNonPatientBlock(item) ? (item.title || '業務') : '患者予定';
+      return { blocked: true, message: `この時間枠は「${label}」と重なるため配置できません。` };
+    }
+  }
+  return { blocked: false, message: '' };
+}
 
 const STORAGE_PREFIX = 'reha_schedule_';
 
@@ -50,14 +86,27 @@ export function setScheduleSlot(dateStr, therapistId, slotId, slotData) {
 
   const rawPlan = slotData.billingPlan;
   const billingPlanVal = rawPlan ? String(rawPlan) : '';
+  const isBlock = isNonPatientBlock(slotData);
+  const units = isBlock
+    ? Math.min(12, Math.max(1, safeParseInt(slotData.slotsCount || slotData.units, 1)))
+    : Math.max(1, safeParseInt(slotData.units, 1));
 
-  current[therapistId][slotId] = {
-    patientId: slotData.patientId,
-    units: Math.max(1, safeParseInt(slotData.units, 1)),
+  const record = {
+    patientId: isBlock ? null : (slotData.patientId || ''),
+    units,
     note: slotData.note ? String(slotData.note).trim() : '',
-    billingPlan: billingPlanVal,
+    billingPlan: isBlock ? '' : billingPlanVal,
     updatedAt: new Date().toISOString()
   };
+  if (isBlock) {
+    record.itemType = slotData.itemType;
+    record.title = String(slotData.title || '業務').trim() || '業務';
+    record.slotsCount = units;
+  } else if (record.patientId) {
+    record.itemType = 'PATIENT';
+  }
+
+  current[therapistId][slotId] = record;
   return saveDailySchedule(dateStr, current);
 }
 
@@ -125,6 +174,7 @@ export function getDailyStats(dateStr) {
     const tSlots = schedule[tId] || {};
     const tSet = new Set();
     Object.values(tSlots).forEach((item) => {
+      if (isNonPatientBlock(item)) return;
       if (item?.patientId) {
         const u = safeParseInt(item.units, 1);
         stats.therapists[tId].units += u;
@@ -250,7 +300,7 @@ export function aggregateFromAppSchedule(year, month) {
     ['A', 'B', 'C'].forEach((tId) => {
       const tSlots = schedule[tId] || {};
       Object.entries(tSlots).forEach(([slotId, item]) => {
-        if (!item?.patientId) return;
+        if (!item?.patientId || isNonPatientBlock(item)) return;
         const pId = item.patientId;
         const u = safeParseInt(item.units, 1);
         const entry = ensurePatientEntry(pId);

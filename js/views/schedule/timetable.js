@@ -6,7 +6,8 @@ import { sanitizeHtml, safeParseInt } from '../../core/dataNormalizer.js';
 import { getActiveTherapists } from '../../store/therapistStore.js';
 import { getPatientById } from '../../store/patientStore.js';
 import {
-  getDailySchedule, moveScheduleSlot, addAnalgesiaPatient, getAnalgesiaSlotPatients
+  getDailySchedule, moveScheduleSlot, addAnalgesiaPatient, getAnalgesiaSlotPatients,
+  isNonPatientBlock, getSlotSpan, slotRangeOverlaps
 } from '../../store/scheduleStore.js';
 import { calculatePatientDeadlines } from '../../core/deadlineCalc.js';
 import { validateTimeConflict } from '../../core/validator.js';
@@ -15,6 +16,28 @@ import { openSlotModal } from '../modals/slotModal.js';
 import { openAnalgesiaModal } from '../modals/analgesiaModal.js';
 import { scheduleState } from './scheduleState.js';
 import { renderScheduleView } from '../scheduleView.js';
+
+function buildTaskCardHtml(cellData, tId, slotId) {
+  const u = Math.min(12, Math.max(1, safeParseInt(cellData.slotsCount || cellData.units, 1)));
+  const calculatedHeight = (52 * u) - 5;
+  const badge = '業務';
+  return `
+    <div class="cell-slot">
+      <div class="reha-slot-card card-task card-unit-${u}" draggable="true" data-therapist="${tId}" data-slot="${slotId}"
+           style="height:${calculatedHeight}px !important; max-height:${calculatedHeight}px !important; box-sizing:border-box; overflow:hidden; cursor:grab;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; align-items:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+            <span class="badge-task">${badge}</span>
+            <span style="font-weight:800; font-size:0.8rem; margin-left:4px; color:#1e293b;">${sanitizeHtml(cellData.title || '業務')}</span>
+          </div>
+          <span style="font-size:0.68rem; font-weight:700; color:#475569;">${u * 20}分</span>
+        </div>
+        <div style="font-size:0.68rem; color:#64748b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px;">
+          ${sanitizeHtml(cellData.note || '')}
+        </div>
+      </div>
+    </div>`;
+}
 
 export function buildSlotCardHtml(p, u, cellData, tId, slotId) {
   const isOut = p.category === 'OUTPATIENT';
@@ -100,7 +123,11 @@ export function renderTimetableGrid() {
         return;
       }
 
-      if (cellData && cellData.patientId) {
+      if (cellData && isNonPatientBlock(cellData)) {
+        const u = getSlotSpan(cellData);
+        coveredUntil[tId] = index + u;
+        html += buildTaskCardHtml(cellData, tId, slot.id);
+      } else if (cellData && cellData.patientId) {
         const p = getPatientById(cellData.patientId) || { name: '未登録', category: 'OUTPATIENT', diseaseType: 'LOCOMOTIVE' };
         const u = Math.min(4, Math.max(1, safeParseInt(cellData.units, 1)));
         coveredUntil[tId] = index + u;
@@ -165,19 +192,23 @@ function attachGridEventListeners(gridEl) {
         if (fromTherapist === targetTId && fromSlot === targetSId) return;
 
         const sched = getDailySchedule(scheduleState.dateStr);
-        if (sched[targetTId]?.[targetSId]) {
-          showToast('移動先の時間枠にはすでに患者が配置されています', 'warn');
-          return;
-        }
-
         const sourceItem = sched[fromTherapist]?.[fromSlot];
         if (!sourceItem) return;
 
-        const units = sourceItem.units || 1;
-        const confCheck = validateTimeConflict(sched, targetTId, targetSId, sourceItem.patientId, units, fromSlot);
-        if (!confCheck.valid) {
-          showToast(confCheck.message, 'error');
+        const units = getSlotSpan(sourceItem) || sourceItem.units || 1;
+        const excludeSlotId = fromTherapist === targetTId ? fromSlot : null;
+        const overlap = slotRangeOverlaps(sched, targetTId, targetSId, units, excludeSlotId);
+        if (overlap.blocked) {
+          showToast(overlap.message, 'warn');
           return;
+        }
+
+        if (!isNonPatientBlock(sourceItem)) {
+          const confCheck = validateTimeConflict(sched, targetTId, targetSId, sourceItem.patientId, units, fromSlot);
+          if (!confCheck.valid) {
+            showToast(confCheck.message, 'error');
+            return;
+          }
         }
 
         const moved = moveScheduleSlot(scheduleState.dateStr, fromTherapist, fromSlot, targetTId, targetSId);
@@ -198,7 +229,13 @@ function attachGridEventListeners(gridEl) {
 
       const patientId = rawData?.patientId || e.dataTransfer.getData('text/plain');
       if (patientId && !patientId.includes(':')) {
-        openSlotModal(targetTId, targetSId, { patientId, units: 1, note: '', billingPlan: '' });
+        const sched = getDailySchedule(scheduleState.dateStr);
+        const overlap = slotRangeOverlaps(sched, targetTId, targetSId, 1);
+        if (overlap.blocked) {
+          showToast(overlap.message, 'warn');
+          return;
+        }
+        openSlotModal(targetTId, targetSId, { itemType: 'PATIENT', patientId, units: 1, note: '', billingPlan: '' });
       }
     });
   });

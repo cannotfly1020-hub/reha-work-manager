@@ -6,7 +6,7 @@ import { normalizeDateString } from '../core/dataNormalizer.js';
 import { getActiveTherapists } from './therapistStore.js';
 import { getPatientById } from './patientStore.js';
 import {
-  getDailySchedule, setScheduleSlot, addAnalgesiaPatient, getAnalgesiaSlotPatients
+  getDailySchedule, setScheduleSlot, addAnalgesiaPatient, getAnalgesiaSlotPatients, slotRangeOverlaps
 } from './scheduleStore.js';
 import { showToast } from '../ui/toast.js';
 
@@ -171,15 +171,9 @@ export function syncAppointmentsToSchedule(dateStr, onApplied) {
 
     // 指定PT枠で units 分の連続した空き枠があるか検査（手入力データ保護ガード）
     const isSlotRangeAvailable = (tId, startIdx, reqUnits) => {
-      for (let i = 0; i < reqUnits; i++) {
-        const curIdx = startIdx + i;
-        if (curIdx >= TIME_SLOTS.length) return false;
-        const sId = TIME_SLOTS[curIdx].id;
-        if (schedule[tId]?.[sId] && schedule[tId][sId].patientId) {
-          return false; // すでに手作業配置済みコマが存在するため配置不可
-        }
-      }
-      return true;
+      const startId = TIME_SLOTS[startIdx]?.id;
+      if (!startId) return false;
+      return !slotRangeOverlaps(schedule, tId, startId, reqUnits).blocked;
     };
 
     let canAssign = false;
@@ -223,7 +217,7 @@ export function syncAppointmentsToSchedule(dateStr, onApplied) {
       if (idx < TIME_SLOTS.length) {
         const sId = TIME_SLOTS[idx].id;
         if (!schedule[targetTherapistId]) schedule[targetTherapistId] = {};
-        schedule[targetTherapistId][sId] = cellData;
+        schedule[targetTherapistId][sId] = u === 0 ? cellData : { ...cellData, units: 1 };
       }
     }
 

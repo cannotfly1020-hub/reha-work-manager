@@ -4,3 +4,50 @@
 @import url('./modals.css');
 @import url('./toast.css');
 @import url('./appointment.css');
+
+/* 業務・予定・有休ブロック専用スタイル */
+.card-task {
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%) !important;
+  border: 1px solid #cbd5e1 !important;
+  border-left: 5px solid #475569 !important;
+  color: #1e293b !important;
+}
+.badge-task {
+  font-size: 0.65rem;
+  font-weight: 700;
+  background: #475569;
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.btn-task-preset {
+  padding: 6px 4px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn-task-preset:hover {
+  background: #e2e8f0;
+  border-color: #94a3b8;
+}
+.slot-type-tab {
+  flex: 1;
+  padding: 8px;
+  font-weight: 700;
+  font-size: 0.82rem;
+  border: none;
+  background: #f1f5f9;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.slot-type-tab.active {
+  background: #0284c7;
+  color: #ffffff;
+}

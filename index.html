@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="css/modals.css">
   <link rel="stylesheet" href="css/toast.css">
   <link rel="stylesheet" href="css/appointment.css">
+  <link rel="stylesheet" href="css/style.css">
   <!-- SheetJS スタイル対応版 (セル装飾・枠固定・カラー出力完全対応) -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 </head>
@@ -339,6 +340,12 @@
         <input type="hidden" id="slotPatientId">
         <input type="hidden" id="slotUnitsInput" value="1">
 
+        <div style="display:flex; border:1px solid #cbd5e1; border-radius:6px; overflow:hidden; margin-bottom:12px;">
+          <button type="button" id="btnSlotTypePatient" class="slot-type-tab active">👤 患者リハビリ</button>
+          <button type="button" id="btnSlotTypeTask" class="slot-type-tab">📋 業務・会議・有休</button>
+        </div>
+
+        <div id="slotPatientSection" style="display:flex; flex-direction:column; gap:12px;">
         <!-- 患者選択・リアルタイム検索エリア -->
         <div style="background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; padding:10px;">
           <label for="slotPatientSearchInput" style="font-size:0.8rem; font-weight:800; color:#0f172a; display:block; margin-bottom:6px;">
@@ -354,22 +361,6 @@
 
         <!-- 選択中患者サマリー & 計画書レコメンド案内 -->
         <div id="slotPatientInfo" style="font-size:0.82rem; color:#475569; background:#f8fafc; padding:8px; border-radius:4px; border:1px solid #e2e8f0;"></div>
-        
-        <!-- 担当セラピスト ＆ 時間帯選択 -->
-        <div style="display:grid; grid-template-columns: 1fr 1.6fr; gap:8px;">
-          <div>
-            <label for="slotModalTherapistSelect" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">担当セラピスト</label>
-            <select id="slotModalTherapistSelect" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff; font-weight:600;">
-              <option value="A">PT A</option>
-              <option value="B">PT B</option>
-              <option value="C">PT C</option>
-            </select>
-          </div>
-          <div>
-            <label for="slotModalSlotSelect" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">時間帯</label>
-            <select id="slotModalSlotSelect" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff; font-weight:600;"></select>
-          </div>
-        </div>
 
         <div>
           <label style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">単位数選択</label>
@@ -398,6 +389,48 @@
             <option value="PLAN_2_FOLLOW">総合実施計画書2 (2回目以降: 196点 / ¥1,960)</option>
           </select>
           <div id="slotPlanRecommendGuide" style="display:none; font-size:0.72rem; margin-top:6px; background:#eff6ff; border:1px solid #bfdbfe; color:#1d4ed8; padding:4px 8px; border-radius:4px;"></div>
+        </div>
+        </div>
+
+        <div id="slotTaskSection" style="display:none; flex-direction:column; gap:10px;">
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px;">
+            <button type="button" class="btn-task-preset" data-title="カンファレンス">👥 会議・カンファ</button>
+            <button type="button" class="btn-task-preset" data-title="計画書・書類作成">📝 計画書作成</button>
+            <button type="button" class="btn-task-preset" data-title="午後有休 / 午前半休">🏖 有休・半休</button>
+            <button type="button" class="btn-task-preset" data-title="実習指導">🎓 実習指導</button>
+            <button type="button" class="btn-task-preset" data-title="研修・勉強会">📚 研修参加</button>
+            <button type="button" class="btn-task-preset" data-title="業務">💼 その他業務</button>
+          </div>
+          <div>
+            <label for="slotTaskTitleInput" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">表示名</label>
+            <input type="text" id="slotTaskTitleInput" placeholder="例: 退院時カンファレンス（3F病棟）" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem;">
+          </div>
+          <div>
+            <label for="slotTaskDurationSelect" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">所要コマ数</label>
+            <select id="slotTaskDurationSelect" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; background:#fff;">
+              <option value="1">1コマ (20分)</option>
+              <option value="2" selected>2コマ (40分)</option>
+              <option value="3">3コマ (60分)</option>
+              <option value="4">4コマ (80分)</option>
+              <option value="6">6コマ (午前中ブロック・120分)</option>
+              <option value="12">12コマ (終日ブロック)</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1fr 1.6fr; gap:8px;">
+          <div>
+            <label for="slotModalTherapistSelect" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">担当セラピスト</label>
+            <select id="slotModalTherapistSelect" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff; font-weight:600;">
+              <option value="A">PT A</option>
+              <option value="B">PT B</option>
+              <option value="C">PT C</option>
+            </select>
+          </div>
+          <div>
+            <label for="slotModalSlotSelect" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">時間帯</label>
+            <select id="slotModalSlotSelect" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff; font-weight:600;"></select>
+          </div>
         </div>
 
         <div>
