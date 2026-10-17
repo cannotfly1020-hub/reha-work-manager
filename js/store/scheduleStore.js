@@ -14,7 +14,7 @@ export function isNonPatientBlock(item) {
 export function getSlotSpan(item) {
   if (!item) return 0;
   if (isNonPatientBlock(item)) {
-    return Math.min(12, Math.max(1, safeParseInt(item.slotsCount || item.units, 1)));
+    return Math.min(24, Math.max(1, safeParseInt(item.slotsCount || item.units, 1)));
   }
   if (item.patientId) return Math.min(4, Math.max(1, safeParseInt(item.units, 1)));
   return 0;
@@ -88,7 +88,7 @@ export function setScheduleSlot(dateStr, therapistId, slotId, slotData) {
   const billingPlanVal = rawPlan ? String(rawPlan) : '';
   const isBlock = isNonPatientBlock(slotData);
   const units = isBlock
-    ? Math.min(12, Math.max(1, safeParseInt(slotData.slotsCount || slotData.units, 1)))
+    ? Math.min(24, Math.max(1, safeParseInt(slotData.slotsCount || slotData.units, 1)))
     : Math.max(1, safeParseInt(slotData.units, 1));
 
   const record = {

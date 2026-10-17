@@ -278,9 +278,12 @@ function handleTaskSlotSubmit() {
     clearScheduleSlot(currentDateStr, origTherapist, origSlot);
   }
 
+  const presetType = document.getElementById('slotTaskTitleInput')?.dataset.blockType || '';
   let itemType = 'TASK';
   if (taskTitle.includes('有休') || taskTitle.includes('有給')) itemType = 'LEAVE';
   else if (taskTitle.includes('公休')) itemType = 'HOLIDAY';
+  else if (presetType === 'LEAVE') itemType = 'LEAVE';
+  else if (presetType === 'HOLIDAY') itemType = 'HOLIDAY';
 
   const saved = setScheduleSlot(currentDateStr, newTherapistId, newSlotId, {
     itemType,
@@ -377,11 +380,17 @@ export function openSlotModal(therapistId, slotId, currentItem) {
   const taskDurationSelect = document.getElementById('slotTaskDurationSelect');
   if (isNonPatientBlock(currentItem)) {
     setSlotEditMode('TASK');
-    if (taskTitleInput) taskTitleInput.value = currentItem.title || '';
+    if (taskTitleInput) {
+      taskTitleInput.value = currentItem.title || '';
+      taskTitleInput.dataset.blockType = currentItem.itemType || 'TASK';
+    }
     if (taskDurationSelect) taskDurationSelect.value = String(currentItem.slotsCount || currentItem.units || 1);
   } else {
     setSlotEditMode('PATIENT');
-    if (taskTitleInput) taskTitleInput.value = '';
+    if (taskTitleInput) {
+      taskTitleInput.value = '';
+      taskTitleInput.dataset.blockType = 'TASK';
+    }
     if (taskDurationSelect) taskDurationSelect.value = '2';
   }
 

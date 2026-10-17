@@ -39,6 +39,23 @@ const STYLES = {
   }
 };
 
+function detectDiaryLeaveType(slots) {
+  const rank = { FULL_HOLIDAY: 4, FULL_LEAVE: 3, HALF_HOLIDAY: 2, HALF_LEAVE: 1 };
+  let leaveType = null;
+  Object.values(slots || {}).forEach((item) => {
+    if (!item) return;
+    const title = item.title || '';
+    const count = Number(item.slotsCount || item.units || 1);
+    const isHoliday = item.itemType === 'HOLIDAY' || title.includes('公休');
+    const isLeave = item.itemType === 'LEAVE' || title.includes('有休') || title.includes('有給');
+    let next = null;
+    if (isHoliday) next = count >= 20 ? 'FULL_HOLIDAY' : 'HALF_HOLIDAY';
+    else if (isLeave) next = count >= 20 ? 'FULL_LEAVE' : 'HALF_LEAVE';
+    if (next && (!leaveType || rank[next] > rank[leaveType])) leaveType = next;
+  });
+  return leaveType;
+}
+
 function thinBorder(colorHex = 'CBD5E1') {
   const b = { style: 'thin', color: { rgb: colorHex } };
   return { top: b, bottom: b, left: b, right: b };
@@ -166,10 +183,23 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
     let curLeftRow = 4;
     activeStaffList.forEach((t) => {
       const isWorking = ptStats[t.id]?.units > 0;
+      const leaveType = detectDiaryLeaveType(schedule[t.id] || {});
       let statusStr = '出勤';
       let statusColor = { rgb: '15803D' };
 
-      if (isSunday && !isWorking) {
+      if (leaveType === 'FULL_HOLIDAY') {
+        statusStr = '公休';
+        statusColor = { rgb: 'DB2777' };
+      } else if (leaveType === 'HALF_HOLIDAY') {
+        statusStr = '半日公休 (出勤)';
+        statusColor = { rgb: 'BE185D' };
+      } else if (leaveType === 'FULL_LEAVE') {
+        statusStr = '有休';
+        statusColor = { rgb: 'D97706' };
+      } else if (leaveType === 'HALF_LEAVE') {
+        statusStr = '半日有休 (出勤)';
+        statusColor = { rgb: 'B45309' };
+      } else if (isSunday && !isWorking) {
         statusStr = '公休';
         statusColor = { rgb: '64748B' };
       } else if (t.status === THERAPIST_STATUS.LEAVE) {

@@ -18,7 +18,7 @@ import { scheduleState } from './scheduleState.js';
 import { renderScheduleView } from '../scheduleView.js';
 
 function buildTaskCardHtml(cellData, tId, slotId) {
-  const u = Math.min(12, Math.max(1, safeParseInt(cellData.slotsCount || cellData.units, 1)));
+  const u = Math.min(24, Math.max(1, safeParseInt(cellData.slotsCount || cellData.units, 1)));
   const calculatedHeight = (52 * u) - 5;
   const title = cellData.title || '';
   let cardClass = 'card-task';
@@ -33,7 +33,7 @@ function buildTaskCardHtml(cellData, tId, slotId) {
     badgeClass = 'badge-holiday';
     badgeText = '公休';
   }
-  const durationLabel = u >= 12 ? '終日' : (u >= 6 ? '半日' : `${u * 20}分`);
+  const durationLabel = u >= 24 ? '終日' : (u >= 12 ? '半日' : `${u * 20}分`);
   return `
     <div class="cell-slot">
       <div class="reha-slot-card ${cardClass} card-unit-${u}" draggable="true" data-therapist="${tId}" data-slot="${slotId}"
