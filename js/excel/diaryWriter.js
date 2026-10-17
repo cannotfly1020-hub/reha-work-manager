@@ -1,7 +1,7 @@
 // js/excel/diaryWriter.js
 // 業務日誌Excel生成層（原本R8.6準拠 / 検印欄 / 動的スタッフ名・リハ助手名完全反映 / 当日までの累積シート生成 / 外来0名・公休スマート自動記録 / 右側テーブル本日収益金額¥完全連携 / A4横用紙完全均整・堂々美麗レイアウト版）
 
-import { REHA_RULES } from '../config/rules.js';
+import { REHA_RULES, TIME_SLOTS } from '../config/rules.js';
 import { evaluateEarlyBonusPhase } from '../core/deadlineCalc.js';
 import { getDailySchedule } from '../store/scheduleStore.js';
 import { getPatientById } from '../store/patientStore.js';
@@ -39,21 +39,55 @@ const STYLES = {
   }
 };
 
-function detectDiaryLeaveType(slots) {
-  const rank = { FULL_HOLIDAY: 4, FULL_LEAVE: 3, HALF_HOLIDAY: 2, HALF_LEAVE: 1 };
-  let leaveType = null;
-  Object.values(slots || {}).forEach((item) => {
+export function detectDiaryLeaveType(slots) {
+  const rank = {
+    FULL_HOLIDAY: 6,
+    FULL_LEAVE: 5,
+    AM_HOLIDAY: 4,
+    PM_HOLIDAY: 3,
+    AM_LEAVE: 2,
+    PM_LEAVE: 1
+  };
+  let leaveStatus = null;
+  let sawAmHoliday = false;
+  let sawPmHoliday = false;
+  let sawAmLeave = false;
+  let sawPmLeave = false;
+
+  Object.entries(slots || {}).forEach(([slotId, item]) => {
     if (!item) return;
     const title = item.title || '';
     const count = Number(item.slotsCount || item.units || 1);
     const isHoliday = item.itemType === 'HOLIDAY' || title.includes('公休');
     const isLeave = item.itemType === 'LEAVE' || title.includes('有休') || title.includes('有給');
+    const slotIdx = TIME_SLOTS.findIndex((slot) => slot.id === slotId);
+    const isAfternoon = slotIdx >= 12;
     let next = null;
-    if (isHoliday) next = count >= 20 ? 'FULL_HOLIDAY' : 'HALF_HOLIDAY';
-    else if (isLeave) next = count >= 20 ? 'FULL_LEAVE' : 'HALF_LEAVE';
-    if (next && (!leaveType || rank[next] > rank[leaveType])) leaveType = next;
+    if (isHoliday) {
+      if (count >= 20) next = 'FULL_HOLIDAY';
+      else if (isAfternoon) {
+        next = 'PM_HOLIDAY';
+        sawPmHoliday = true;
+      } else {
+        next = 'AM_HOLIDAY';
+        sawAmHoliday = true;
+      }
+    } else if (isLeave) {
+      if (count >= 20) next = 'FULL_LEAVE';
+      else if (isAfternoon) {
+        next = 'PM_LEAVE';
+        sawPmLeave = true;
+      } else {
+        next = 'AM_LEAVE';
+        sawAmLeave = true;
+      }
+    }
+    if (next && (!leaveStatus || rank[next] > rank[leaveStatus])) leaveStatus = next;
   });
-  return leaveType;
+
+  if (sawAmHoliday && sawPmHoliday) return 'FULL_HOLIDAY';
+  if (sawAmLeave && sawPmLeave && !sawAmHoliday && !sawPmHoliday) return 'FULL_LEAVE';
+  return leaveStatus;
 }
 
 function thinBorder(colorHex = 'CBD5E1') {
@@ -190,14 +224,20 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
       if (leaveType === 'FULL_HOLIDAY') {
         statusStr = '公休';
         statusColor = { rgb: 'DB2777' };
-      } else if (leaveType === 'HALF_HOLIDAY') {
-        statusStr = '半日公休 (出勤)';
+      } else if (leaveType === 'AM_HOLIDAY') {
+        statusStr = '午前公休 (出勤)';
+        statusColor = { rgb: 'BE185D' };
+      } else if (leaveType === 'PM_HOLIDAY') {
+        statusStr = '午後公休 (出勤)';
         statusColor = { rgb: 'BE185D' };
       } else if (leaveType === 'FULL_LEAVE') {
         statusStr = '有休';
         statusColor = { rgb: 'D97706' };
-      } else if (leaveType === 'HALF_LEAVE') {
-        statusStr = '半日有休 (出勤)';
+      } else if (leaveType === 'AM_LEAVE') {
+        statusStr = '午前有休 (出勤)';
+        statusColor = { rgb: 'B45309' };
+      } else if (leaveType === 'PM_LEAVE') {
+        statusStr = '午後有休 (出勤)';
         statusColor = { rgb: 'B45309' };
       } else if (isSunday && !isWorking) {
         statusStr = '公休';
