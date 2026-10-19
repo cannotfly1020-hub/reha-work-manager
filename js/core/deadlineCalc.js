@@ -286,3 +286,73 @@ export function evaluateRecommendedPlan(patient, targetDateStr, hasPastPlan = fa
         reason: '通常算定 (2回目以降)'
       };
 }
+
+function sumUnits(dailyUnitsMap) {
+  return Object.values(dailyUnitsMap || {}).reduce((sum, units) => sum + (Number(units) || 0), 0);
+}
+
+/**
+ * 対象月の実施が月13単位制限を超えるかを、期限満了日の翌日から数えて判定する。
+ * 要介護・要支援だけでは制限しない。標準算定日数の満了後、または個別の13単位指定があるときだけ対象。
+ * @param {Object} patient
+ * @param {number} year
+ * @param {number} month 1〜12
+ * @param {Object|number[]} dailyUnitsMap 日別単位。キーは日（1〜31）
+ * @returns {{ isOver13: boolean, applicableUnits: number, reason: string }}
+ */
+export function checkMonth13UnitsViolation(patient, year, month, dailyUnitsMap = {}) {
+  const force13 = patient?.force13Limit === true || patient?.force13UnitsLimit === true;
+  if (force13) {
+    const totalMonthUnits = sumUnits(dailyUnitsMap);
+    return {
+      isOver13: totalMonthUnits > 13,
+      applicableUnits: totalMonthUnits,
+      reason: 'FORCE_13_LIMIT'
+    };
+  }
+
+  const onsetStr = normalizeDateString(patient?.onsetDate);
+  if (!patient || patient.diseaseType === 'ANALGESIA' || !onsetStr) {
+    return { isOver13: false, applicableUnits: 0, reason: 'NOT_APPLICABLE' };
+  }
+
+  const rule = REHA_RULES.LIMIT_DAYS[patient.diseaseType];
+  if (!rule || !rule.days || rule.days >= 9000) {
+    return { isOver13: false, applicableUnits: 0, reason: 'NO_LIMIT_RULE' };
+  }
+
+  const deadlineStr = addDays(onsetStr, rule.days - 1);
+  if (!deadlineStr) {
+    return { isOver13: false, applicableUnits: 0, reason: 'NOT_APPLICABLE' };
+  }
+
+  const y = Number(year);
+  const m = Number(month);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const monthStartStr = `${y}-${String(m).padStart(2, '0')}-01`;
+  const monthEndStr = `${y}-${String(m).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
+
+  if (deadlineStr < monthStartStr) {
+    const totalMonthUnits = sumUnits(dailyUnitsMap);
+    return {
+      isOver13: totalMonthUnits > 13,
+      applicableUnits: totalMonthUnits,
+      reason: 'EXPIRED_BEFORE_MONTH'
+    };
+  }
+
+  if (deadlineStr >= monthStartStr && deadlineStr < monthEndStr) {
+    const deadlineDay = Number(deadlineStr.slice(8, 10));
+    let postDeadlineUnits = 0;
+    for (let day = deadlineDay + 1; day <= daysInMonth; day += 1) {
+      postDeadlineUnits += Number(dailyUnitsMap[day]) || 0;
+    }
+    return {
+      isOver13: postDeadlineUnits > 13,
+      applicableUnits: postDeadlineUnits,
+      reason: 'EXPIRED_DURING_MONTH'
+    };
+  }
+
+  return { isOver13: false, applicableUnits: 0, reason: 'WITHIN_LIMIT' };
+}

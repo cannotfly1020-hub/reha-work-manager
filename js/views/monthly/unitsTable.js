@@ -3,7 +3,7 @@
 
 import { REHA_RULES } from '../../config/rules.js';
 import { sanitizeHtml, normalizeToKatakana } from '../../core/dataNormalizer.js';
-import { calculatePatientDeadlines } from '../../core/deadlineCalc.js';
+import { checkMonth13UnitsViolation } from '../../core/deadlineCalc.js';
 import { monthlyState } from './monthlyState.js';
 
 function sortPatients(patients, sortKey) {
@@ -73,16 +73,32 @@ export function renderMonthlyUnitsTable(aggregated) {
       catBadge = '<span style="color:#16a34a; font-weight:700;">消</span>';
     }
 
-    // 13単位制限判定
-    const is13Target = !isAnalgesia && (p.careInsuranceType === 'CARE' || p.careInsuranceType === 'SUPPORT' || p.force13Limit);
-    const isExceeded = is13Target && item.totalUnits > 13;
-    const isNearLimit = is13Target && item.totalUnits >= 11 && item.totalUnits <= 13;
+    const dailyUnitsMap = {};
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      dailyUnitsMap[day] = item.dailyRehaUnits?.[day] || 0;
+    }
+    const violation = checkMonth13UnitsViolation(p, monthlyState.year, monthlyState.month, dailyUnitsMap);
+    const isNearLimit = !violation.isOver13
+      && violation.reason !== 'WITHIN_LIMIT'
+      && violation.reason !== 'NOT_APPLICABLE'
+      && violation.reason !== 'NO_LIMIT_RULE'
+      && violation.applicableUnits >= 11
+      && violation.applicableUnits <= 13;
+
+    let totalTitle = '';
+    if (violation.reason === 'EXPIRED_DURING_MONTH') {
+      totalTitle = `算定期限超過後(${violation.applicableUnits}単位)が月13単位制限を超えています`;
+    } else if (violation.reason === 'EXPIRED_BEFORE_MONTH') {
+      totalTitle = '算定期限超過患者のため月13単位制限を超えています';
+    } else if (violation.reason === 'FORCE_13_LIMIT') {
+      totalTitle = '個別13単位制限設定中';
+    }
 
     let totalBadge = `<strong>${item.totalUnits}</strong>`;
-    if (isExceeded) {
-      totalBadge = `<span style="background:#ffe4e6; color:#e11d48; padding:1px 3px; border-radius:3px; font-weight:700;">${item.totalUnits}!</span>`;
+    if (violation.isOver13) {
+      totalBadge = `<span style="color:#dc2626; font-weight:800;" title="${sanitizeHtml(totalTitle)}">${item.totalUnits}⚠️</span>`;
     } else if (isNearLimit) {
-      totalBadge = `<span style="background:#fef3c7; color:#b45309; padding:1px 3px; border-radius:3px; font-weight:700;">${item.totalUnits}</span>`;
+      totalBadge = `<span style="background:#fef3c7; color:#b45309; padding:1px 3px; border-radius:3px; font-weight:700;" title="${sanitizeHtml(totalTitle)}">${item.totalUnits}</span>`;
     }
 
     const planBadge = item.planCount > 0
