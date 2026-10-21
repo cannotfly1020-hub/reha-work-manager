@@ -37,9 +37,9 @@ export function renderRevenueDashboard(aggregated) {
         return;
       }
 
-      // 個別リハビリ単位・加算計算
+      // 個別リハビリ単位・加算計算（医療保険のみは減算せず currentBasePoints＝所定点数）
       const deadlines = calculatePatientDeadlines(p, s.date);
-      const basePoint = deadlines.isMaintenanceReduction ? disease.maintPoints : disease.defaultPoints;
+      const basePoint = deadlines.currentBasePoints || disease.defaultPoints;
       const earlyBonusPerUnit = (deadlines.earlyBonus && deadlines.earlyBonus.points > 0) ? deadlines.earlyBonus.points : 0;
 
       let slotPoints = (basePoint + earlyBonusPerUnit) * s.units;
@@ -127,25 +127,29 @@ export function openRevenueBreakdownModal() {
 
       totalRehaUnits += s.units;
       const deadlines = calculatePatientDeadlines(p, s.date);
-      const isMaint = deadlines.isMaintenanceReduction;
+      const isMaint = deadlines.isMaintenanceReduction === true;
+      const basePoint = deadlines.currentBasePoints
+        || (isMaint
+          ? (REHA_RULES.LIMIT_DAYS[p.diseaseType]?.maintPoints || 0)
+          : (REHA_RULES.LIMIT_DAYS[p.diseaseType]?.defaultPoints || 0));
 
-      // 疾患別基本料
+      // 疾患別基本料（医療保険のみは常に正規点数側へ計上）
       if (p.diseaseType === 'LOCOMOTIVE') {
         const target = isMaint ? breakdown.LOCO_MAINT : breakdown.LOCO_STD;
         target.units += s.units;
-        const yen = target.points * s.units * REHA_RULES.POINT_RATE;
+        const yen = basePoint * s.units * REHA_RULES.POINT_RATE;
         target.amount += yen;
         grandTotalYen += yen;
       } else if (p.diseaseType === 'CEREBROVASCULAR') {
         const target = isMaint ? breakdown.CEREBRO_MAINT : breakdown.CEREBRO_STD;
         target.units += s.units;
-        const yen = target.points * s.units * REHA_RULES.POINT_RATE;
+        const yen = basePoint * s.units * REHA_RULES.POINT_RATE;
         target.amount += yen;
         grandTotalYen += yen;
       } else if (p.diseaseType === 'DISUSE') {
         const target = isMaint ? breakdown.DISUSE_MAINT : breakdown.DISUSE_STD;
         target.units += s.units;
-        const yen = target.points * s.units * REHA_RULES.POINT_RATE;
+        const yen = basePoint * s.units * REHA_RULES.POINT_RATE;
         target.amount += yen;
         grandTotalYen += yen;
       }

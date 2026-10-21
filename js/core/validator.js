@@ -100,12 +100,13 @@ export function validateDailyLimit(dailySchedule, patient, currentDate, newUnits
 
 /**
  * 3. 月13単位制限ガード
+ * 対象は「標準算定日数超過」または「個別13単位指定」のみ。
+ * 要介護・要支援であること自体では制限しない（点数減算とは独立）。
+ * 医療保険のみ(NONE)でも日数超過後は本制限の対象となる。
  */
 export function validateMonthly13Limit(monthlyCurrentUnits, patient, isLimitExceeded, newUnits, currentSlotUnits = 0) {
-  const isTarget = isLimitExceeded ||
-    patient.careInsuranceType === 'CARE' ||
-    patient.careInsuranceType === 'SUPPORT' ||
-    patient.force13Limit === true;
+  const force13 = patient?.force13Limit === true || patient?.force13UnitsLimit === true;
+  const isTarget = isLimitExceeded === true || force13;
 
   if (!isTarget) return { valid: true, message: '' };
 
@@ -115,7 +116,7 @@ export function validateMonthly13Limit(monthlyCurrentUnits, patient, isLimitExce
   if (nextMonthly > maxMonthly) {
     return {
       valid: false,
-      message: `要介護・維持期患者の「月13単位制限」を超過します。（当月累計: ${monthlyCurrentUnits}単位 / 変更後: ${nextMonthly}単位）`
+      message: `算定期限超過後の「月13単位制限」を超過します。（当月累計: ${monthlyCurrentUnits}単位 / 変更後: ${nextMonthly}単位）`
     };
   }
   return { valid: true, message: '' };

@@ -73,6 +73,7 @@ export function renderMonthlyUnitsTable(aggregated) {
       catBadge = '<span style="color:#16a34a; font-weight:700;">消</span>';
     }
 
+    // 月13単位⚠️は介護保険の有無・点数減算と独立。医療保険のみでも期限超過後は警告対象。
     const dailyUnitsMap = {};
     for (let day = 1; day <= daysInMonth; day += 1) {
       dailyUnitsMap[day] = item.dailyRehaUnits?.[day] || 0;

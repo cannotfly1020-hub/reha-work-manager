@@ -188,7 +188,15 @@ export function calculatePatientDeadlines(patient, baseDate = new Date()) {
     isPlan2Required = plan2RemainingDays !== null && plan2RemainingDays <= 0;
   }
 
-  const isMaintenanceReduction = isLimitExceeded || patient?.careInsuranceType === 'SUPPORT' || patient?.careInsuranceType === 'CARE';
+  // 介護保険未所持（医療保険のみ / NONE）は、標準日数超過後も所定点数の減算対象外（常に正規満額）。
+  // 減算は「要介護・要支援」かつ「標準日数超過（または個別13単位設定）」の場合のみ。
+  // ※月13単位制限（回数天井）は checkMonth13UnitsViolation 側で別判定する。点数減算と連動させない。
+  const isCareInsured = patient?.careInsuranceType === 'CARE' || patient?.careInsuranceType === 'SUPPORT';
+  const isMaintenanceReduction = isCareInsured && (
+    isLimitExceeded
+    || patient?.force13Limit === true
+    || patient?.force13UnitsLimit === true
+  );
   const currentBasePoints = isMaintenanceReduction ? disease.maintPoints : disease.defaultPoints;
 
   return {
@@ -201,8 +209,9 @@ export function calculatePatientDeadlines(patient, baseDate = new Date()) {
     remainingDays,
     isLimitExceeded,
     earlyBonus,
-    isMaintenanceReduction,
-    currentBasePoints,
+    isCareInsured,            // 要介護被保険者等か（CARE / SUPPORT）
+    isMaintenanceReduction,   // 医療保険のみ(NONE)なら常に false
+    currentBasePoints,        // 医療保険のみなら常に defaultPoints（170/100/77）
     careInsuranceType: patient?.careInsuranceType || 'NONE',
     plan2TransitionDateStr,
     plan2RemainingDays,
