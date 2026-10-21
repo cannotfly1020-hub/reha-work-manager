@@ -217,7 +217,9 @@ function attachGridEventListeners(gridEl) {
         }
 
         if (!isNonPatientBlock(sourceItem)) {
-          const confCheck = validateTimeConflict(sched, targetTId, targetSId, sourceItem.patientId, units, fromSlot);
+          const confCheck = validateTimeConflict(
+            sched, targetTId, targetSId, sourceItem.patientId, units, fromSlot, fromTherapist
+          );
           if (!confCheck.valid) {
             showToast(confCheck.message, 'error');
             return;

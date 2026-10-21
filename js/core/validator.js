@@ -27,13 +27,24 @@ export function getOccupiedSlotIds(startSlotId, units) {
  * 指定患者が同時間帯に他セラピストまたは自身と重複していないか検証
  * @param {Object} dailySchedule { A: {}, B: {}, C: {} }
  * @param {string} targetTherapist A | B | C
- * @param {string} targetSlotId 
- * @param {string} patientId 
- * @param {number} units 
+ * @param {string} targetSlotId
+ * @param {string} patientId
+ * @param {number} units
  * @param {string|null} excludeSlotId 編集時に除外する元スロットID
+ * @param {string|null} excludeTherapistId 担当変更時に除外する元セラピストID
  * @returns {{ valid: boolean, message: string }}
  */
-export function validateTimeConflict(dailySchedule, targetTherapist, targetSlotId, patientId, units, excludeSlotId = null) {
+export function validateTimeConflict(
+  dailySchedule,
+  targetTherapist,
+  targetSlotId,
+  patientId,
+  units,
+  excludeSlotId = null,
+  excludeTherapistId = null
+) {
+  if (!patientId) return { valid: true, message: '' };
+
   const targetSlots = getOccupiedSlotIds(targetSlotId, units);
   if (targetSlots.length < units) {
     return { valid: false, message: 'コマの終了時間が診療時間枠を超過しています。' };
@@ -44,7 +55,15 @@ export function validateTimeConflict(dailySchedule, targetTherapist, targetSlotI
     const tSchedule = dailySchedule[tId] || {};
     for (const [sId, item] of Object.entries(tSchedule)) {
       if (!item || !item.patientId) continue;
-      if (tId === targetTherapist && sId === excludeSlotId) continue;
+
+      // 担当・時間変更時: 変更元コマは自分自身なので重複とみなさない
+      if (excludeTherapistId && excludeSlotId && tId === excludeTherapistId && sId === excludeSlotId) {
+        continue;
+      }
+      // 互換: 除外セラピスト未指定時は、保存先セラピスト上の excludeSlotId のみ除外
+      if (!excludeTherapistId && excludeSlotId && tId === targetTherapist && sId === excludeSlotId) {
+        continue;
+      }
 
       const itemOccupied = getOccupiedSlotIds(sId, item.units || 1);
       const isOverlap = targetSlots.some((slot) => itemOccupied.includes(slot));
@@ -54,7 +73,10 @@ export function validateTimeConflict(dailySchedule, targetTherapist, targetSlotI
           return { valid: false, message: `担当セラピスト(${tId})の同時間帯に既に別の予定があります。` };
         }
         if (item.patientId === patientId) {
-          return { valid: false, message: `患者様が同時間帯にPT ${tId} と重複しています。` };
+          return {
+            valid: false,
+            message: `【二重登録防止】同時刻にすでに該当患者が配置されています (${tId === targetTherapist ? '同セラピスト' : '他セラピスト'})`
+          };
         }
       }
     }

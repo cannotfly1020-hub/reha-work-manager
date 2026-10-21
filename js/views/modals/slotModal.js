@@ -196,7 +196,17 @@ function handleSlotFormSubmit() {
   const currentUnits = activeModalSlot.currentItem ? activeModalSlot.currentItem.units : 0;
   const patient = getPatientById(patientId);
 
-  const conflictCheck = validateTimeConflict(dailySchedule, newTherapistId, newSlotId, patientId, units, origSlot);
+  const excludeOrigTherapist = activeModalSlot.currentItem ? origTherapist : null;
+  const excludeOrigSlot = activeModalSlot.currentItem ? origSlot : null;
+  const conflictCheck = validateTimeConflict(
+    dailySchedule,
+    newTherapistId,
+    newSlotId,
+    patientId,
+    units,
+    excludeOrigSlot,
+    excludeOrigTherapist
+  );
   if (!conflictCheck.valid) {
     showToast(conflictCheck.message, 'error');
     return;
@@ -245,7 +255,11 @@ function handleSlotFormSubmit() {
   }
 
   modal?.classList.remove('active');
-  showToast('スケジュールを保存しました', 'success');
+  if (isRelocated && origTherapist !== newTherapistId) {
+    showToast('担当セラピストを変更しました', 'success');
+  } else {
+    showToast('スケジュールを保存しました', 'success');
+  }
 
   // ★時間割保存後の最新データを当日バックアップファイルへ自動上書きトリガー
   if (typeof window.triggerDailyBackup === 'function') {
