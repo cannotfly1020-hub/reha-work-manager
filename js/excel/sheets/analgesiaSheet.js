@@ -1,46 +1,41 @@
 // js/excel/sheets/analgesiaSheet.js
-// 消炎鎮痛の実施リスト
+// 消炎鎮痛の実施リスト（A4横1枚幅。ID・氏名・区分・1〜31日・回数）
 
-import { REHA_RULES } from '../../config/rules.js';
-import { evaluateEarlyBonusPhase } from '../../core/deadlineCalc.js';
-import { aggregateFromAppSchedule } from '../../store/scheduleStore.js';
 import {
-  STYLES, thinBorder, getDiseaseInitial, getEarlyBaseDate,
-  setStyledCell, setSheetCols, updateSheetRange, appendOrReplaceSheet,
-  applyA4LandscapePrintSetup, SUMMARY_SHEET, YEARLY_TREND_SHEET
+  STYLES, setStyledCell, updateSheetRange, appendOrReplaceSheet, applyA4LandscapePrintSetup
 } from '../sheetUtils.js';
 
 export function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
   const { daysInMonth, patientMap, year, month } = aggregated;
   const ws = {};
   const dayOfWeekNames = ['日', '月', '火', '水', '木', '金', '土'];
+  const dayColStart = 3;
+  const countCol = dayColStart + 31;
 
   setStyledCell(ws, 0, 0, `【${year}年${month}月 ${sheetName} (1日1回35点 / 入外合同)】`, {
     font: { name: 'Meiryo UI', sz: 12, bold: true, color: { rgb: '15803D' } }
   });
 
-  setStyledCell(ws, 1, 0, '患者ID', STYLES.headerNavy);
-  setStyledCell(ws, 1, 1, '患者氏名', STYLES.headerNavy);
+  setStyledCell(ws, 1, 0, 'ID', STYLES.headerNavy);
+  setStyledCell(ws, 1, 1, '氏名', STYLES.headerNavy);
   setStyledCell(ws, 1, 2, '区分', STYLES.headerNavy);
-  setStyledCell(ws, 1, 3, '疾患名 / 部位', STYLES.headerNavy);
-  setStyledCell(ws, 1, 4, '回数', { ...STYLES.headerNavy, fill: { fgColor: { rgb: '15803D' } } });
-  setStyledCell(ws, 1, 5, '総点数', { ...STYLES.headerNavy, fill: { fgColor: { rgb: '15803D' } } });
 
-  const dayColStart = 6;
-  for (let d = 1; d <= daysInMonth; d++) {
+  for (let d = 1; d <= 31; d++) {
+    const col = dayColStart + (d - 1);
+    if (d > daysInMonth) {
+      setStyledCell(ws, 1, col, '', STYLES.headerNavy);
+      continue;
+    }
     const dateObj = new Date(year, month - 1, d);
     const dayOfWeek = dateObj.getDay();
-    const col = dayColStart + (d - 1);
     const hLabel = `${d}\n${dayOfWeekNames[dayOfWeek]}`;
-
     let style = STYLES.headerNavy;
     if (dayOfWeek === 6) style = STYLES.headerSat;
     else if (dayOfWeek === 0) style = STYLES.headerSun;
     setStyledCell(ws, 1, col, hLabel, style);
   }
 
-  const extraCol = dayColStart + daysInMonth;
-  setStyledCell(ws, 1, extraCol, '備考', STYLES.headerNavy);
+  setStyledCell(ws, 1, countCol, '回数', { ...STYLES.headerNavy, fill: { fgColor: { rgb: '15803D' } } });
 
   const analgesiaPatients = Object.values(patientMap)
     .filter((item) => {
@@ -73,46 +68,42 @@ export function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
 
     const catLabel = p.category === 'INPATIENT' ? '入' : '外';
     const totalDays = item.totalAnalgesiaDays !== undefined && item.totalAnalgesiaDays > 0 ? item.totalAnalgesiaDays : analgesiaDaysSet.size;
-    const totalPoints = totalDays * 35;
 
-    setStyledCell(ws, curRow, 0, p.id, { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true } });
-    setStyledCell(ws, curRow, 1, p.name, { ...STYLES.cellNormal, fill: zebraBg, font: { bold: true } });
-    setStyledCell(ws, curRow, 2, catLabel, { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true } });
-    setStyledCell(ws, curRow, 3, p.diseaseName || '消炎鎮痛等処置', { ...STYLES.cellNormal, fill: zebraBg, font: { sz: 8 } });
+    setStyledCell(ws, curRow, 0, p.id, { ...STYLES.cellCenter, fill: zebraBg, font: { name: 'Meiryo UI', sz: 9, bold: true } });
+    setStyledCell(ws, curRow, 1, p.name, { ...STYLES.cellNormal, fill: zebraBg, font: { name: 'Meiryo UI', sz: 9, bold: true } });
+    setStyledCell(ws, curRow, 2, catLabel, { ...STYLES.cellCenter, fill: zebraBg, font: { name: 'Meiryo UI', sz: 9, bold: true } });
 
-    setStyledCell(ws, curRow, 4, totalDays, {
-      ...STYLES.cellCenter,
-      fill: { fgColor: { rgb: 'DCFCE7' } },
-      font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: '15803D' } },
-      numFmt: '#,##0'
-    });
-
-    setStyledCell(ws, curRow, 5, totalPoints, {
-      ...STYLES.cellCenter,
-      fill: { fgColor: { rgb: 'DCFCE7' } },
-      font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: '15803D' } },
-      numFmt: '#,##0'
-    });
-
-    for (let d = 1; d <= daysInMonth; d++) {
+    for (let d = 1; d <= 31; d++) {
+      const col = dayColStart + (d - 1);
+      if (d > daysInMonth) {
+        setStyledCell(ws, curRow, col, '', { ...STYLES.cellCenter, fill: zebraBg });
+        continue;
+      }
       const dateObj = new Date(year, month - 1, d);
       const dayOfWeek = dateObj.getDay();
-      const col = dayColStart + (d - 1);
       const isDone = analgesiaDaysSet.has(d);
 
-      let cellStyle = { ...STYLES.cellCenter };
-      if (dayOfWeek === 6) cellStyle.fill = STYLES.cellSatCol;
-      else if (dayOfWeek === 0) cellStyle.fill = STYLES.cellSunCol;
-      else cellStyle.fill = zebraBg;
-
       if (isDone) {
-        setStyledCell(ws, curRow, col, '○', { ...STYLES.cellCenter, fill: { fgColor: { rgb: 'DCFCE7' } }, font: { bold: true, color: { rgb: '15803D' } } });
+        setStyledCell(ws, curRow, col, '○', {
+          ...STYLES.cellCenter,
+          fill: { fgColor: { rgb: 'DCFCE7' } },
+          font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '15803D' } }
+        });
       } else {
+        let cellStyle = { ...STYLES.cellCenter };
+        if (dayOfWeek === 6) cellStyle.fill = STYLES.cellSatCol;
+        else if (dayOfWeek === 0) cellStyle.fill = STYLES.cellSunCol;
+        else cellStyle.fill = zebraBg;
         setStyledCell(ws, curRow, col, '', cellStyle);
       }
     }
 
-    setStyledCell(ws, curRow, extraCol, p.notes || '', { ...STYLES.cellNormal, fill: zebraBg });
+    setStyledCell(ws, curRow, countCol, totalDays, {
+      ...STYLES.cellCenter,
+      fill: { fgColor: { rgb: 'DCFCE7' } },
+      font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '15803D' } },
+      numFmt: '#,##0'
+    });
     curRow++;
   });
 
@@ -122,23 +113,19 @@ export function writeAnalgesiaDedicatedSheet(wb, aggregated, sheetName) {
   }
   ws['!rows'] = aHeights;
 
-  const colProps = [
-    { wch: 7.5 },       // 患者ID
-    { wpx: 130 },       // 患者氏名 (130px固定)
-    { wch: 4.5 },       // 区分
-    { wch: 14.0 },      // 疾患名
-    { wch: 6.5 },       // 回数
-    { wch: 7.5 }        // 総点数
+  ws['!cols'] = [
+    { wch: 5.0 },
+    { wch: 11.5 },
+    { wch: 4.0 },
+    ...Array.from({ length: 31 }, () => ({ wch: 3.2 })),
+    { wch: 3.8 }
   ];
-  for (let d = 1; d <= daysInMonth; d++) colProps.push({ wch: 3.6 });
-  colProps.push({ wch: 10.0 });
-  ws['!cols'] = colProps;
 
   ws['!autofilter'] = {
-    ref: window.XLSX.utils.encode_range({ r: 1, c: 0 }, { r: Math.max(1, curRow - 1), c: 3 })
+    ref: window.XLSX.utils.encode_range({ r: 1, c: 0 }, { r: Math.max(1, curRow - 1), c: 2 })
   };
 
-  ws['!freeze'] = { xSplit: 'F', ySplit: '2', topLeftCell: 'G3', activePane: 'bottomRight', state: 'frozen' };
+  ws['!freeze'] = { xSplit: 3, ySplit: 2, topLeftCell: 'D3', activePane: 'bottomRight', state: 'frozen' };
 
   applyA4LandscapePrintSetup(ws, false);
   updateSheetRange(ws);
