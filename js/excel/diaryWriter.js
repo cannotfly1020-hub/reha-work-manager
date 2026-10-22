@@ -2,7 +2,7 @@
 // 業務日誌Excel生成層（原本R8.6準拠 / 検印欄 / 動的スタッフ名・リハ助手名完全反映 / 当日までの累積シート生成 / 外来0名・公休スマート自動記録 / 右側テーブル本日収益金額¥完全連携 / A4横用紙完全均整・堂々美麗レイアウト版）
 
 import { REHA_RULES, TIME_SLOTS } from '../config/rules.js';
-import { evaluateEarlyBonusPhase } from '../core/deadlineCalc.js';
+import { evaluateEarlyBonusPhase, getDailyBasePoints } from '../core/deadlineCalc.js';
 import { getDailySchedule } from '../store/scheduleStore.js';
 import { getPatientById } from '../store/patientStore.js';
 import { getAllTherapists, THERAPIST_STATUS } from '../store/therapistStore.js';
@@ -182,7 +182,9 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
           const isInput = p?.category === 'INPATIENT';
           const catKey = isInput ? 'IN' : 'OUT';
           const dKey = p?.diseaseType in breakdown[catKey] ? p.diseaseType : 'LOCOMOTIVE';
-          const unitPts = REHA_RULES.LIMIT_DAYS[dKey]?.defaultPoints || 170;
+          const unitPts = getDailyBasePoints(p, dateStr).points
+            || REHA_RULES.LIMIT_DAYS[dKey]?.defaultPoints
+            || 170;
           const baseYen = u * unitPts * 10;
 
           breakdown[catKey][dKey].u += u;

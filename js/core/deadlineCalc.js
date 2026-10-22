@@ -188,16 +188,11 @@ export function calculatePatientDeadlines(patient, baseDate = new Date()) {
     isPlan2Required = plan2RemainingDays !== null && plan2RemainingDays <= 0;
   }
 
-  // 介護保険未所持（医療保険のみ / NONE）は、標準日数超過後も所定点数の減算対象外（常に正規満額）。
-  // 減算は「要介護・要支援」かつ「標準日数超過（または個別13単位設定）」の場合のみ。
-  // ※月13単位制限（回数天井）は checkMonth13UnitsViolation 側で別判定する。点数減算と連動させない。
-  const isCareInsured = patient?.careInsuranceType === 'CARE' || patient?.careInsuranceType === 'SUPPORT';
-  const isMaintenanceReduction = isCareInsured && (
-    isLimitExceeded
-    || patient?.force13Limit === true
-    || patient?.force13UnitsLimit === true
-  );
-  const currentBasePoints = isMaintenanceReduction ? disease.maintPoints : disease.defaultPoints;
+  // 単価は実施日（baseDate）単位で判定。月一括の一律掛けはしない。
+  const rate = getDailyBasePoints(patient, baseDate);
+  const isCareInsured = rate.isCareInsured;
+  const isMaintenanceReduction = rate.isCareReduced;
+  const currentBasePoints = rate.points;
 
   return {
     diseaseLabel: disease.shortLabel,
@@ -209,13 +204,90 @@ export function calculatePatientDeadlines(patient, baseDate = new Date()) {
     remainingDays,
     isLimitExceeded,
     earlyBonus,
-    isCareInsured,            // 要介護被保険者等か（CARE / SUPPORT）
-    isMaintenanceReduction,   // 医療保険のみ(NONE)なら常に false
-    currentBasePoints,        // 医療保険のみなら常に defaultPoints（170/100/77）
+    isCareInsured,
+    isMaintenanceReduction,
+    currentBasePoints,
     careInsuranceType: patient?.careInsuranceType || 'NONE',
     plan2TransitionDateStr,
     plan2RemainingDays,
-    isPlan2Required
+    isPlan2Required,
+    dailyRateReason: rate.reason
+  };
+}
+
+/**
+ * 特定の実施日におけるリハビリ1単位あたりの算定点数を厳密取得する。
+ * 満了日当日（第N日）までは正規点数、翌日（第N+1日）から維持期判定へ切り替える。
+ * 医療保険のみ（NONE）は超過後も所定点数のまま。要介護・要支援のみ maintPoints を適用する。
+ * @param {Object} patient
+ * @param {string|Date} sessionDateStr
+ * @returns {{ points: number, isMaintenance: boolean, isCareReduced: boolean, isCareInsured: boolean, reason: string }}
+ */
+export function getDailyBasePoints(patient, sessionDateStr) {
+  const disease = REHA_RULES.LIMIT_DAYS[patient?.diseaseType] || REHA_RULES.LIMIT_DAYS.ANALGESIA;
+  const isCareInsured = patient?.careInsuranceType === 'CARE' || patient?.careInsuranceType === 'SUPPORT';
+
+  if (!patient || patient.diseaseType === 'ANALGESIA' || disease.days >= 9000) {
+    return {
+      points: disease.defaultPoints,
+      isMaintenance: false,
+      isCareReduced: false,
+      isCareInsured,
+      reason: 'REGULAR'
+    };
+  }
+
+  const force13 = patient.force13Limit === true || patient.force13UnitsLimit === true;
+  if (force13 && isCareInsured) {
+    return {
+      points: disease.maintPoints,
+      isMaintenance: true,
+      isCareReduced: true,
+      isCareInsured,
+      reason: 'FORCE_CARE_MAINTENANCE'
+    };
+  }
+
+  const startDateStr = normalizeDateString(patient.onsetDate || patient.admissionDate || '');
+  if (!startDateStr) {
+    return {
+      points: disease.defaultPoints,
+      isMaintenance: false,
+      isCareReduced: false,
+      isCareInsured,
+      reason: 'NO_START_DATE'
+    };
+  }
+
+  const elapsedDays = getInclusiveDayCount(startDateStr, sessionDateStr);
+  // 標準算定日数以内（満了日当日を含む）: 誰でも正規満額
+  if (elapsedDays === null || elapsedDays <= disease.days) {
+    return {
+      points: disease.defaultPoints,
+      isMaintenance: false,
+      isCareReduced: false,
+      isCareInsured,
+      reason: 'WITHIN_STANDARD_DAYS'
+    };
+  }
+
+  // 標準算定日数超過後（満了日の翌日以降）
+  if (!isCareInsured) {
+    return {
+      points: disease.defaultPoints,
+      isMaintenance: true,
+      isCareReduced: false,
+      isCareInsured,
+      reason: 'MEDICAL_ONLY_EXPIRED'
+    };
+  }
+
+  return {
+    points: disease.maintPoints,
+    isMaintenance: true,
+    isCareReduced: true,
+    isCareInsured,
+    reason: 'CARE_MAINTENANCE_REDUCED'
   };
 }
 

@@ -2,7 +2,7 @@
 // 月間収益の数値と本日内訳モーダル
 
 import { REHA_RULES } from '../../config/rules.js';
-import { calculatePatientDeadlines } from '../../core/deadlineCalc.js';
+import { calculatePatientDeadlines, getDailyBasePoints } from '../../core/deadlineCalc.js';
 import { getLocalDateStr } from '../../core/dateUtils.js';
 import { monthlyState } from './monthlyState.js';
 
@@ -37,9 +37,10 @@ export function renderRevenueDashboard(aggregated) {
         return;
       }
 
-      // 個別リハビリ単位・加算計算（医療保険のみは減算せず currentBasePoints＝所定点数）
+      // 実施日単位で単価を判定（当月中期限切れは日割り。医療保険のみは超過後も正規点数）
       const deadlines = calculatePatientDeadlines(p, s.date);
-      const basePoint = deadlines.currentBasePoints || disease.defaultPoints;
+      const rate = getDailyBasePoints(p, s.date);
+      const basePoint = rate.points || disease.defaultPoints;
       const earlyBonusPerUnit = (deadlines.earlyBonus && deadlines.earlyBonus.points > 0) ? deadlines.earlyBonus.points : 0;
 
       let slotPoints = (basePoint + earlyBonusPerUnit) * s.units;
@@ -127,13 +128,11 @@ export function openRevenueBreakdownModal() {
 
       totalRehaUnits += s.units;
       const deadlines = calculatePatientDeadlines(p, s.date);
-      const isMaint = deadlines.isMaintenanceReduction === true;
-      const basePoint = deadlines.currentBasePoints
-        || (isMaint
-          ? (REHA_RULES.LIMIT_DAYS[p.diseaseType]?.maintPoints || 0)
-          : (REHA_RULES.LIMIT_DAYS[p.diseaseType]?.defaultPoints || 0));
+      const rate = getDailyBasePoints(p, s.date);
+      const isMaint = rate.isCareReduced === true;
+      const basePoint = rate.points;
 
-      // 疾患別基本料（医療保険のみは常に正規点数側へ計上）
+      // 疾患別基本料（点数減算時のみ維持期行へ。医療保険のみ超過は正規点数行）
       if (p.diseaseType === 'LOCOMOTIVE') {
         const target = isMaint ? breakdown.LOCO_MAINT : breakdown.LOCO_STD;
         target.units += s.units;
