@@ -1,8 +1,12 @@
 // js/app.js
 // 全体初期化・タブ切替自動再同期・ヘッダー＆時間割更新ボタン連動・全体再描画司令塔
-// ★起動最優先: IndexedDB 透過ストレージ → ローカルバックアップセーフティネット → 各画面
+// ★起動: IndexedDB透過ストレージ（アクティブ窓のみメモリ）→ アーカイブ → ローカルバックアップ → 各画面
 
 import { initStorage } from './core/storageAdapter.js';
+import {
+  registerArchiveHydrationFilter,
+  initArchiveManager
+} from './store/archiveManager.js';
 import { initLocalFileBackup, logBackupNetStatus } from './backup/localFileBackup.js';
 import { performDailyAutoBackup, triggerDailyAutoBackup } from './backup/backupService.js';
 import { initScheduleView, renderScheduleView } from './views/scheduleView.js';
@@ -10,22 +14,40 @@ import { initAppointmentCalendarView, renderAppointmentCalendarView } from './vi
 import { initMonthlyView, renderMonthlyView } from './views/monthlyView.js';
 import { initPatientView, renderPatientView } from './views/patientView.js';
 import { initLoanView, renderLoanView } from './views/loanView.js';
-import { initExportView, refreshBackupFolderStatusUi } from './views/exportView.js';
+import {
+  initExportView,
+  refreshBackupFolderStatusUi,
+  refreshArchiveStatusUi
+} from './views/exportView.js';
 import { showToast } from './ui/toast.js';
 import { setupAppointmentModalListeners } from './views/modals/appointmentModal.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // 1. 最優先: ストレージ層（IndexedDB）のプリロード＆マイグレーション完了を待機
+  // 0. アーカイブ窓フィルタを initStorage より先に登録（起動メモリをスリム化）
+  try {
+    registerArchiveHydrationFilter();
+  } catch (e) {
+    console.warn('[app] registerArchiveHydrationFilter soft-fail:', e);
+  }
+
+  // 1. IndexedDB プリロード＆マイグレーション（アクティブスケジュールのみメモリ常駐）
   try {
     const result = await initStorage();
     if (result?.migrated) {
-      console.log(`[app] Storage migration complete (${result.keyCount} keys)`);
+      console.log(`[app] Storage migration complete (index=${result.keyCount}, memory=${result.memoryCount})`);
     }
   } catch (err) {
     console.error('[app] initStorage failed — continuing with fallback cache:', err);
   }
 
-  // 1.5 ローカルフォルダ／IDBスナップショット セーフティネット初期化
+  // 1.25 アーカイブ統計・余剰パージ
+  try {
+    await initArchiveManager();
+  } catch (err) {
+    console.warn('[app] initArchiveManager soft-fail:', err);
+  }
+
+  // 1.5 ローカルフォルダ／IDBスナップショット セーフティネット
   try {
     const backupInit = await initLocalFileBackup();
     logBackupNetStatus();
@@ -44,14 +66,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   initNavigationTabs();
   initRefreshButtons();
 
-  // 外来予約モーダルのリスナー初期化（保存・削除時は全ビューを即座に再同期）
   setupAppointmentModalListeners(() => {
     renderAllViews();
   });
 
-  // フォルダバッジをハンドル復元後の状態で再同期
   try {
     refreshBackupFolderStatusUi();
+    refreshArchiveStatusUi();
   } catch (_) { /* ignore */ }
 
   // 3. 画面描画
@@ -62,11 +83,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.warn('[app] startup auto backup soft-fail:', e);
   });
 
-  // グローバル公開（exportView でも設定するが起動順の保険）
   window.triggerDailyBackup = triggerDailyAutoBackup;
 });
 
-// ウィンドウ終了前に最終状態をフラッシュ（ブロッキングしない）
 window.addEventListener('beforeunload', () => {
   try {
     performDailyAutoBackup();
@@ -76,9 +95,13 @@ window.addEventListener('beforeunload', () => {
 export function renderAllViews() {
   try { renderScheduleView(); } catch (e) { console.error('ScheduleView error:', e); }
   try { renderAppointmentCalendarView(); } catch (e) { console.error('AppointmentCalendarView error:', e); }
-  try { renderMonthlyView(); } catch (e) { console.error('MonthlyView error:', e); }
+  try {
+    const p = renderMonthlyView();
+    if (p && typeof p.catch === 'function') p.catch((e) => console.error('MonthlyView error:', e));
+  } catch (e) { console.error('MonthlyView error:', e); }
   try { renderPatientView(); } catch (e) { console.error('PatientView error:', e); }
   try { renderLoanView(); } catch (e) { console.error('LoanView error:', e); }
+  try { refreshArchiveStatusUi(); } catch (_) { /* ignore */ }
 }
 
 function initNavigationTabs() {
@@ -103,11 +126,11 @@ function initRefreshButtons() {
   const btnHeader = document.getElementById('btnRefreshHeader');
   const btnSchedule = document.getElementById('btnRefreshSchedule');
 
-  const handleRefresh = (sourceLabel) => {
+  const handleRefresh = () => {
     renderAllViews();
     showToast('🔄 画面表示と集計データを最新化しました', 'success');
   };
 
-  btnHeader?.addEventListener('click', () => handleRefresh('header'));
-  btnSchedule?.addEventListener('click', () => handleRefresh('schedule'));
+  btnHeader?.addEventListener('click', () => handleRefresh());
+  btnSchedule?.addEventListener('click', () => handleRefresh());
 }

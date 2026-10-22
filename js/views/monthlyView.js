@@ -1,8 +1,9 @@
 // js/views/monthlyView.js
-// 月間単位・収益画面の初期化と再描画
+// 月間単位・収益画面の初期化と再描画（過去月はオンデマンドハイドレーション後に集計）
 
 import { safeParseInt } from '../core/dataNormalizer.js';
 import { aggregateFromAppSchedule } from '../store/scheduleStore.js';
+import { loadMonthOnDemand } from '../store/archiveManager.js';
 import { monthlyState } from './monthly/monthlyState.js';
 import {
   renderRevenueDashboard, setupRevenueBreakdownModalListeners, openRevenueBreakdownModal
@@ -60,7 +61,17 @@ function syncMonthInput() {
   if (input) input.value = `${monthlyState.year}-${String(monthlyState.month).padStart(2, '0')}`;
 }
 
-export function renderMonthlyView() {
+/**
+ * 月間画面再描画（過去月選択時は IndexedDB から該当月を先読みしてから同期集計）
+ * @returns {Promise<void>}
+ */
+export async function renderMonthlyView() {
+  try {
+    await loadMonthOnDemand(monthlyState.year, monthlyState.month);
+  } catch (e) {
+    console.warn('[monthlyView] loadMonthOnDemand soft-fail:', e);
+  }
+
   monthlyState.lastAggregated = aggregateFromAppSchedule(monthlyState.year, monthlyState.month);
   renderRevenueDashboard(monthlyState.lastAggregated);
   renderMonthlyUnitsTable(monthlyState.lastAggregated);

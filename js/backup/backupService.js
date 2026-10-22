@@ -3,11 +3,11 @@
 // 方式A: File System Access / Electron PCフォルダ
 // 方式B: IndexedDB 14日スナップショット（常時）
 // 方式C: ワンクリック手動ダウンロード（従来維持）
-// ★データ収集は透過ストレージ層（メモリ/IndexedDB）スナップショットを正本とする
+// ★アーカイブ済みスケジュールも含め IndexedDB 全件スナップショットを正本とする
 
 import { getLocalDateStr } from '../core/dateUtils.js';
 import {
-  storageKeys, storageRemove, storageRemoveByPrefix, storageSnapshot, storageSet
+  storageKeys, storageRemove, storageRemoveByPrefix, storageFullSnapshotAsync, storageSet
 } from '../core/storageAdapter.js';
 import { writeStorageItem } from '../store/storageWrite.js';
 import { showToast } from '../ui/toast.js';
@@ -21,11 +21,11 @@ let autoBackupDebounceTimer = null;
 let lastFolderWarnAt = 0;
 
 /**
- * 全ストアの最新スナップショット JSON オブジェクトを生成
+ * 全ストアの最新スナップショット（アーカイブ冷データ含む）を非同期生成
  * @param {Object} meta
- * @returns {Object}
+ * @returns {Promise<Object>}
  */
-export function createSystemDump(meta = {}) {
+export async function createSystemDump(meta = {}) {
   const dump = {
     app: 'reha-work-manager',
     version: '1.0.0',
@@ -34,23 +34,12 @@ export function createSystemDump(meta = {}) {
     storage: {}
   };
 
-  const snapshot = storageSnapshot('reha_');
+  const snapshot = await storageFullSnapshotAsync('reha_');
   Object.entries(snapshot).forEach(([key, value]) => {
     if (key.startsWith('reha_autobackup_')) return;
     if (key.startsWith('reha_backup_folder_')) return;
     dump.storage[key] = value;
   });
-
-  if (Object.keys(dump.storage).length === 0) {
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith('reha_') && !key.startsWith('reha_autobackup_')) {
-          dump.storage[key] = localStorage.getItem(key);
-        }
-      }
-    } catch (_) { /* ignore */ }
-  }
 
   return dump;
 }
@@ -73,7 +62,6 @@ function downloadJsonBlob(blob, filename) {
 export function triggerDailyAutoBackup() {
   if (autoBackupDebounceTimer) clearTimeout(autoBackupDebounceTimer);
   autoBackupDebounceTimer = setTimeout(() => {
-    // fire-and-forget（await しない → UI フリーズ防止）
     performDailyAutoBackup().catch((e) => {
       console.warn('[backup] debounced auto backup error:', e);
     });
@@ -99,25 +87,20 @@ function maybeWarnFolder(reason) {
 }
 
 /**
- * 日次セーフティネット実行（非ブロッキング前提の async）
- * 1) IndexedDB 14日スナップショット（常時）
- * 2) Electron desktopApp（あれば）
- * 3) File System Access ユーザー指定フォルダ（設定ON時）
+ * 日次セーフティネット実行
  */
 export async function performDailyAutoBackup() {
   try {
     const todayStr = getLocalDateStr();
     removeLegacyAutoBackupCopies();
-    const dump = createSystemDump({ backupType: 'DAILY_AUTO', targetDate: todayStr });
+    const dump = await createSystemDump({ backupType: 'DAILY_AUTO', targetDate: todayStr });
 
-    // ── 方式 B: IndexedDB 内スナップショット（常時・サイレント）──
     try {
       await saveIdbDailySnapshot(dump, todayStr);
     } catch (snapErr) {
       console.warn('[backup] IDB snapshot layer failed:', snapErr);
     }
 
-    // ── 方式 A-1: Electron 専用フォルダ（既存 IPC・互換維持）──
     if (window.desktopApp && typeof window.desktopApp.saveDailyBackup === 'function') {
       try {
         const payload = { targetDate: todayStr, data: dump, ...dump };
@@ -132,7 +115,6 @@ export async function performDailyAutoBackup() {
       }
     }
 
-    // ── 方式 A-2: File System Access ユーザー指定フォルダ──
     if (isAutoWriteEnabled()) {
       try {
         const fileRes = await autoWriteDailyBackupToFile(dump, todayStr);
@@ -159,10 +141,10 @@ export function setupBackupAndRestoreListeners() {
   const btnTriggerRestore = document.getElementById('btnTriggerRestore');
   const fileInput = document.getElementById('backupFileInput');
 
-  // C: 通常の手動全データバックアップ (随時)
-  btnBackup?.addEventListener('click', () => {
+  btnBackup?.addEventListener('click', async () => {
     try {
-      const dumpData = createSystemDump({ backupType: 'MANUAL' });
+      showToast('全データスナップショットを作成中...', 'info');
+      const dumpData = await createSystemDump({ backupType: 'MANUAL' });
       const blob = new Blob([JSON.stringify(dumpData, null, 2)], { type: 'application/json' });
       const nowStr = getLocalDateStr();
       const fileName = `reha_backup_${nowStr}.json`;
@@ -174,14 +156,14 @@ export function setupBackupAndRestoreListeners() {
     }
   });
 
-  // C: 5/31年度確定バックアップ
-  btnFiscalBackup?.addEventListener('click', () => {
+  btnFiscalBackup?.addEventListener('click', async () => {
     try {
       const today = new Date();
       const y = today.getFullYear();
       const m = today.getMonth() + 1;
       const fiscalYear = m <= 5 ? y - 1 : y;
-      const dumpData = createSystemDump({
+      showToast('年度確定スナップショットを作成中...', 'info');
+      const dumpData = await createSystemDump({
         backupType: 'FISCAL_YEAR_FINAL',
         fiscalYear: fiscalYear,
         cycleNote: '5月31日確定_診療報酬改定対応'
@@ -196,12 +178,10 @@ export function setupBackupAndRestoreListeners() {
     }
   });
 
-  // 復元ファイル選択トリガー
   btnTriggerRestore?.addEventListener('click', () => {
     if (fileInput) { fileInput.value = ''; fileInput.click(); }
   });
 
-  // バックアップファイルの読み込み & 完全復元
   fileInput?.addEventListener('change', (e) => {
     const file = e.target.files?.[0];
     if (!file) return;

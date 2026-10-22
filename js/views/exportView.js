@@ -1,8 +1,8 @@
 // js/views/exportView.js
-// VIEW 5: 月末Excel原本出力・全データバックアップ＆復元・PCフォルダ自動保存設定
-// 日次14日ローテーション（IndexedDB + File System Access / Electron）
+// VIEW 5: Excel原本出力・バックアップ＆復元・PCフォルダ自動保存・アーカイブ状態表示
 
 import { aggregateFromAppSchedule } from '../store/scheduleStore.js';
+import { loadMonthOnDemand, loadYearOnDemand, getArchiveStats } from '../store/archiveManager.js';
 import { safeParseInt } from '../core/dataNormalizer.js';
 import { showToast } from '../ui/toast.js';
 import {
@@ -35,14 +35,11 @@ export function initExportView() {
 
   setupBackupAndRestoreListeners();
   setupLocalBackupFolderUi();
+  refreshArchiveStatusUi();
 
-  // グローバル公開: 時間割保存・予約変更などからデバウンス付き自動バックアップ
   window.triggerDailyBackup = triggerDailyAutoBackup;
 }
 
-/**
- * 自動保存先フォルダ UI（ステータスバッジ・選択ボタン・チェックボックス）
- */
 function setupLocalBackupFolderUi() {
   const badge = document.getElementById('backupFolderStatusBadge');
   const btnPick = document.getElementById('btnPickBackupFolder');
@@ -52,7 +49,6 @@ function setupLocalBackupFolderUi() {
   refreshBackupFolderStatusUi();
 
   if (!isFileSystemAccessSupported() && panel) {
-    // Electron は IPC 経路があるためパネルは残す。ブラウザ非対応時のみ注記
     if (!(window.desktopApp && window.desktopApp.isDesktop) && badge) {
       badge.textContent = '📂 自動保存先: このブラウザはフォルダ自動保存未対応（IndexedDBスナップショットは稼働）';
       badge.style.color = '#b45309';
@@ -65,7 +61,6 @@ function setupLocalBackupFolderUi() {
     refreshBackupFolderStatusUi();
     if (result.success) {
       showToast(`🟢 自動保存先を設定しました: ${result.folderName}`, 'success');
-      // 設定直後に1回フラッシュ（サイレント）
       performDailyAutoBackup().catch(() => {});
     } else if (result.message) {
       showToast(result.message, 'warn');
@@ -87,9 +82,6 @@ function setupLocalBackupFolderUi() {
   }
 }
 
-/**
- * バッジ表示を最新状態に同期
- */
 export function refreshBackupFolderStatusUi() {
   const badge = document.getElementById('backupFolderStatusBadge');
   const chkAuto = document.getElementById('chkAutoWriteBackupFolder');
@@ -112,12 +104,34 @@ export function refreshBackupFolderStatusUi() {
   }
 }
 
-function handleExportUketsuke(monthInput) {
+/**
+ * アーカイブ保管状態バッジを更新
+ */
+export function refreshArchiveStatusUi() {
+  const el = document.getElementById('archiveStorageStatusBadge');
+  if (!el) return;
+  try {
+    const stats = getArchiveStats();
+    el.textContent = `📦 データ保管状態: アクティブ ${stats.activeInMemory}件 / アーカイブ退避 ${stats.archivedCount}件`;
+  } catch (_) {
+    el.textContent = '📦 データ保管状態: —';
+  }
+}
+
+async function handleExportUketsuke(monthInput) {
   const [year, month] = parseYearMonth(monthInput?.value);
   if (!year || !month) return showToast('出力対象年月を正しく選択してください', 'warn');
 
+  if (typeof window.XLSX === 'undefined') {
+    return showToast('SheetJS が読み込まれていません。js/vendor/xlsx.bundle.js を確認してください。', 'error');
+  }
+
   showToast(`${year}年${month}月 受付提出用Excelを集計・生成中...`, 'info');
   try {
+    await loadMonthOnDemand(year, month);
+    await loadYearOnDemand(year);
+    refreshArchiveStatusUi();
+
     const aggregated = aggregateFromAppSchedule(year, month);
     const wb = generateUketsukeWorkbook(aggregated, null);
     if (!wb) return showToast('受付提出用Excelの生成に失敗しました', 'error');
@@ -131,9 +145,13 @@ function handleExportUketsuke(monthInput) {
   }
 }
 
-function handleExportDiary(monthInput) {
+async function handleExportDiary(monthInput) {
   const [year, month] = parseYearMonth(monthInput?.value);
   if (!year || !month) return showToast('出力対象年月を正しく選択してください', 'warn');
+
+  if (typeof window.XLSX === 'undefined') {
+    return showToast('SheetJS が読み込まれていません。js/vendor/xlsx.bundle.js を確認してください。', 'error');
+  }
 
   const now = new Date();
   const isCurrentMonth = (now.getFullYear() === year && (now.getMonth() + 1) === month);
@@ -143,6 +161,9 @@ function handleExportDiary(monthInput) {
   showToast(`${year}年${month}月 業務日誌Excelを集計中 (${targetRangeStr})...`, 'info');
 
   try {
+    await loadMonthOnDemand(year, month);
+    refreshArchiveStatusUi();
+
     const aggregated = aggregateFromAppSchedule(year, month);
     const wb = generateDiaryWorkbook(aggregated, targetDay);
     if (!wb) return showToast('業務日誌Excelの生成に失敗しました', 'error');

@@ -1,21 +1,48 @@
 // js/core/storageAdapter.js
 // IndexedDB 透過的ストレージ層（メモリキャッシュ同期読み取り + IDB非同期永続化）
-// View / Store の同期 API は変更せず、容量5MB限界を物理撤廃する。
+// フェーズ3: 過去月スケジュールの選択的ハイドレーション／メモリパージ連携
 
 const DB_NAME = 'reha_work_manager_db';
 const DB_VERSION = 1;
 const STORE_NAME = 'app_key_value_store';
 const KEY_PREFIX = 'reha_';
+const SCHEDULE_PREFIX = 'reha_schedule_';
 const META_MIGRATED = '__reha_storage_migrated_v1';
 
 /** @type {Map<string, string>} */
 const memoryCache = new Map();
+
+/** IndexedDB 上に存在する全キーの索引（値は持たない・アーカイブ件数把握用） */
+const keyIndex = new Set();
 
 /** @type {IDBDatabase|null} */
 let dbInstance = null;
 
 let initPromise = null;
 let isReady = false;
+
+/**
+ * スケジュールキーをメモリに載せるかの判定関数（archiveManager が設定）
+ * @type {((key: string) => boolean)|null}
+ */
+let scheduleHydrationFilter = null;
+
+/**
+ * 起動前にアーカイブ窓フィルタを登録する
+ * @param {(key: string) => boolean} fn
+ */
+export function setScheduleHydrationFilter(fn) {
+  scheduleHydrationFilter = typeof fn === 'function' ? fn : null;
+}
+
+function shouldHydrateIntoMemory(key) {
+  if (!key || key === META_MIGRATED) return false;
+  if (!key.startsWith(SCHEDULE_PREFIX)) return true;
+  if (typeof scheduleHydrationFilter === 'function') {
+    return scheduleHydrationFilter(key);
+  }
+  return true;
+}
 
 /**
  * IndexedDB を開く
@@ -39,11 +66,6 @@ function openDatabase() {
   });
 }
 
-/**
- * IDB オブジェクトストアの全レコードを取得
- * @param {IDBDatabase} db
- * @returns {Promise<Array<{key: string, value: string}>>}
- */
 function idbGetAll(db) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readonly');
@@ -54,13 +76,19 @@ function idbGetAll(db) {
   });
 }
 
-/**
- * IDB に単一キーを put
- * @param {IDBDatabase} db
- * @param {string} key
- * @param {string} value
- * @returns {Promise<void>}
- */
+function idbGet(db, key) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const store = tx.objectStore(STORE_NAME);
+    const request = store.get(key);
+    request.onsuccess = () => {
+      const row = request.result;
+      resolve(row && row.value !== undefined ? String(row.value) : null);
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
 function idbPut(db, key, value) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
@@ -72,12 +100,6 @@ function idbPut(db, key, value) {
   });
 }
 
-/**
- * IDB から単一キーを削除
- * @param {IDBDatabase} db
- * @param {string} key
- * @returns {Promise<void>}
- */
 function idbDelete(db, key) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
@@ -88,12 +110,6 @@ function idbDelete(db, key) {
   });
 }
 
-/**
- * 複数キーを一括 put（マイグレーション用）
- * @param {IDBDatabase} db
- * @param {Array<{key: string, value: string}>} entries
- * @returns {Promise<void>}
- */
 function idbPutMany(db, entries) {
   return new Promise((resolve, reject) => {
     if (!entries.length) {
@@ -110,10 +126,6 @@ function idbPutMany(db, entries) {
   });
 }
 
-/**
- * localStorage 上の reha_* キーをすべて収集
- * @returns {Array<{key: string, value: string}>}
- */
 function collectLocalStorageRehaEntries() {
   const entries = [];
   try {
@@ -130,17 +142,11 @@ function collectLocalStorageRehaEntries() {
   return entries;
 }
 
-/**
- * localStorage ミラー書き込み（容量超過は握りつぶす）
- * @param {string} key
- * @param {string} value
- */
 function tryMirrorLocalStorage(key, value) {
   try {
     if (typeof localStorage === 'undefined') return;
     localStorage.setItem(key, value);
   } catch (e) {
-    // QuotaExceededError 等は無視（IndexedDB が正本）
     if (e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014)) {
       return;
     }
@@ -148,10 +154,6 @@ function tryMirrorLocalStorage(key, value) {
   }
 }
 
-/**
- * localStorage ミラー削除
- * @param {string} key
- */
 function tryRemoveLocalStorage(key) {
   try {
     if (typeof localStorage === 'undefined') return;
@@ -162,26 +164,39 @@ function tryRemoveLocalStorage(key) {
 }
 
 /**
- * メモリへロード（起動時）
+ * レコードを索引登録し、フィルタに合うものだけメモリへ載せる
  * @param {Array<{key: string, value: string}>} records
  */
-function loadIntoMemory(records) {
+function loadIntoMemorySelective(records) {
   memoryCache.clear();
+  keyIndex.clear();
+  let hydrated = 0;
+  let skippedSchedule = 0;
+
   records.forEach((rec) => {
     if (!rec || !rec.key) return;
     if (rec.key === META_MIGRATED) return;
-    memoryCache.set(rec.key, String(rec.value ?? ''));
+    keyIndex.add(rec.key);
+    if (shouldHydrateIntoMemory(rec.key)) {
+      memoryCache.set(rec.key, String(rec.value ?? ''));
+      hydrated += 1;
+    } else if (rec.key.startsWith(SCHEDULE_PREFIX)) {
+      skippedSchedule += 1;
+    }
   });
+
+  console.log(
+    `[storageAdapter] Memory hydrate: ${hydrated} keys (archived schedules kept cold: ${skippedSchedule})`
+  );
 }
 
 /**
- * 起動時初期化: IndexedDB オープン → 初回は localStorage から自動移行 → メモリへ一括ロード
- * 以降の storageGet はメモリから同期即時返却。
- * @returns {Promise<{ migrated: boolean, keyCount: number }>}
+ * 起動時初期化
+ * @returns {Promise<{ migrated: boolean, keyCount: number, memoryCount: number }>}
  */
 export async function initStorage() {
   if (isReady) {
-    return { migrated: false, keyCount: memoryCache.size };
+    return { migrated: false, keyCount: keyIndex.size, memoryCount: memoryCache.size };
   }
   if (initPromise) return initPromise;
 
@@ -193,7 +208,6 @@ export async function initStorage() {
       let records = await idbGetAll(dbInstance);
       const dataRecords = records.filter((r) => r && r.key && r.key !== META_MIGRATED);
 
-      // IDB が空なら localStorage から完全自動マイグレーション
       if (dataRecords.length === 0) {
         const lsEntries = collectLocalStorageRehaEntries();
         if (lsEntries.length > 0) {
@@ -204,7 +218,6 @@ export async function initStorage() {
         }
         records = await idbGetAll(dbInstance);
       } else {
-        // IDB にデータがある場合でも、LS にあって IDB に無いキーを補完マージ
         const existing = new Set(dataRecords.map((r) => r.key));
         const missing = collectLocalStorageRehaEntries().filter((e) => !existing.has(e.key));
         if (missing.length > 0) {
@@ -214,16 +227,16 @@ export async function initStorage() {
         }
       }
 
-      loadIntoMemory(records);
+      loadIntoMemorySelective(records);
     } catch (err) {
       console.warn('[storageAdapter] IndexedDB unavailable — falling back to localStorage memory preload:', err);
       dbInstance = null;
-      loadIntoMemory(collectLocalStorageRehaEntries());
+      loadIntoMemorySelective(collectLocalStorageRehaEntries());
     }
 
     isReady = true;
-    console.log(`[storageAdapter] Ready. memory keys=${memoryCache.size}, migrated=${migrated}`);
-    return { migrated, keyCount: memoryCache.size };
+    console.log(`[storageAdapter] Ready. index=${keyIndex.size}, memory=${memoryCache.size}, migrated=${migrated}`);
+    return { migrated, keyCount: keyIndex.size, memoryCount: memoryCache.size };
   })();
 
   try {
@@ -231,15 +244,15 @@ export async function initStorage() {
   } catch (e) {
     initPromise = null;
     isReady = true;
-    loadIntoMemory(collectLocalStorageRehaEntries());
+    loadIntoMemorySelective(collectLocalStorageRehaEntries());
     console.warn('[storageAdapter] init failed hard, LS-only mode:', e);
-    return { migrated: false, keyCount: memoryCache.size };
+    return { migrated: false, keyCount: keyIndex.size, memoryCount: memoryCache.size };
   }
 }
 
 /**
- * 同期読み取り（メモリキャッシュ優先、なければ localStorage フォールバック）
- * localStorage.getItem と同等に string | null を返す。
+ * 同期読み取り（メモリ → localStorage フォールバック）
+ * アーカイブ済みスケジュールは loadMonthOnDemand 後にメモリへ載る。
  * @param {string} key
  * @param {string|null} fallback
  * @returns {string|null}
@@ -253,6 +266,7 @@ export function storageGet(key, fallback = null) {
     const raw = localStorage.getItem(key);
     if (raw !== null) {
       memoryCache.set(key, raw);
+      keyIndex.add(key);
       return raw;
     }
   } catch (_) { /* ignore */ }
@@ -260,39 +274,37 @@ export function storageGet(key, fallback = null) {
 }
 
 /**
- * 同期書き込み入口: メモリ即時更新 + IndexedDB 非同期永続化 + localStorage ミラー試行
+ * 同期書き込み: メモリ即時 + IDB 非同期 + LS ミラー
  * @param {string} key
  * @param {string} value
- * @returns {boolean} メモリ更新に成功すれば true（UI は即時反映）
+ * @returns {boolean}
  */
 export function storageSet(key, value) {
   if (!key) return false;
   const str = value === undefined || value === null ? '' : String(value);
 
-  // 1) メモリ即時更新（0ms・同期 API 維持の核）
+  keyIndex.add(key);
   memoryCache.set(key, str);
 
-  // 2) IndexedDB 非同期 put（ギガバイト級）
   if (dbInstance) {
     idbPut(dbInstance, key, str).catch((err) => {
       console.error('[storageAdapter] IndexedDB put failed:', key, err);
     });
   }
 
-  // 3) 容量許す限り localStorage へミラー（失敗は握りつぶし）
   tryMirrorLocalStorage(key, str);
-
   return true;
 }
 
 /**
- * キー削除（メモリ + IDB + localStorage）
+ * キー完全削除（メモリ + IDB + LS）
  * @param {string} key
  * @returns {boolean}
  */
 export function storageRemove(key) {
   if (!key) return false;
   memoryCache.delete(key);
+  keyIndex.delete(key);
 
   if (dbInstance) {
     idbDelete(dbInstance, key).catch((err) => {
@@ -305,16 +317,77 @@ export function storageRemove(key) {
 }
 
 /**
- * プレフィックス一致キー一覧（メモリキャッシュ基準・同期）
+ * メモリからのみ外す（IDB・索引は維持＝アーカイブ退避）
+ * @param {string} key
+ */
+export function storagePurgeFromMemory(key) {
+  if (!key) return;
+  memoryCache.delete(key);
+}
+
+/**
+ * @param {string[]} keys
+ * @returns {number} パージ件数
+ */
+export function storagePurgeKeysFromMemory(keys) {
+  let n = 0;
+  (keys || []).forEach((key) => {
+    if (memoryCache.has(key)) {
+      memoryCache.delete(key);
+      n += 1;
+    }
+  });
+  return n;
+}
+
+/**
+ * IndexedDB から指定キーをメモリへオンデマンド復元
+ * @param {string[]} keys
+ * @returns {Promise<number>} 新規ハイドレート件数
+ */
+export async function storageHydrateKeys(keys) {
+  if (!keys || keys.length === 0) return 0;
+  let loaded = 0;
+
+  for (const key of keys) {
+    if (!key || memoryCache.has(key)) continue;
+    keyIndex.add(key);
+
+    if (dbInstance) {
+      try {
+        const val = await idbGet(dbInstance, key);
+        if (val !== null) {
+          memoryCache.set(key, val);
+          loaded += 1;
+          continue;
+        }
+      } catch (e) {
+        console.warn('[storageAdapter] hydrate idb get failed:', key, e);
+      }
+    }
+
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw !== null) {
+        memoryCache.set(key, raw);
+        loaded += 1;
+      }
+    } catch (_) { /* ignore */ }
+  }
+
+  return loaded;
+}
+
+/**
+ * 既知キー一覧（索引ベース・アーカイブ分も含む）
  * @param {string} prefix
  * @returns {string[]}
  */
 export function storageKeys(prefix = '') {
   const keys = [];
-  memoryCache.forEach((_, key) => {
+  keyIndex.forEach((key) => {
     if (!prefix || key.startsWith(prefix)) keys.push(key);
   });
-  // 初期化前や未ロード時のフォールバック
   if (keys.length === 0 && !isReady) {
     try {
       for (let i = 0; i < localStorage.length; i++) {
@@ -327,7 +400,28 @@ export function storageKeys(prefix = '') {
 }
 
 /**
- * プレフィックス一致キーをすべて削除
+ * メモリ上に載っているキーのみ
+ * @param {string} prefix
+ * @returns {string[]}
+ */
+export function storageMemoryKeys(prefix = '') {
+  const keys = [];
+  memoryCache.forEach((_, key) => {
+    if (!prefix || key.startsWith(prefix)) keys.push(key);
+  });
+  return keys.sort();
+}
+
+/**
+ * @param {string} key
+ * @returns {boolean}
+ */
+export function storageMemoryHas(key) {
+  return memoryCache.has(key);
+}
+
+/**
+ * プレフィックス一致キーを完全削除
  * @param {string} prefix
  */
 export function storageRemoveByPrefix(prefix) {
@@ -335,12 +429,13 @@ export function storageRemoveByPrefix(prefix) {
 }
 
 /**
- * バックアップ用: メモリ上の全 reha_* スナップショット
+ * 同期スナップショット（メモリ上のみ — バックアップには storageFullSnapshotAsync を使う）
+ * @param {string} prefix
  * @returns {Record<string, string>}
  */
 export function storageSnapshot(prefix = KEY_PREFIX) {
   const dump = {};
-  storageKeys(prefix).forEach((key) => {
+  storageMemoryKeys(prefix).forEach((key) => {
     if (key === META_MIGRATED) return;
     const val = memoryCache.get(key);
     if (val !== undefined) dump[key] = val;
@@ -349,9 +444,57 @@ export function storageSnapshot(prefix = KEY_PREFIX) {
 }
 
 /**
- * 初期化完了済みか
+ * バックアップ用: IndexedDB 全件（アーカイブ含む）を非同期取得
+ * @param {string} prefix
+ * @returns {Promise<Record<string, string>>}
+ */
+export async function storageFullSnapshotAsync(prefix = KEY_PREFIX) {
+  const dump = {};
+
+  if (dbInstance) {
+    try {
+      const records = await idbGetAll(dbInstance);
+      records.forEach((rec) => {
+        if (!rec || !rec.key || rec.key === META_MIGRATED) return;
+        if (prefix && !rec.key.startsWith(prefix)) return;
+        dump[rec.key] = String(rec.value ?? '');
+        keyIndex.add(rec.key);
+      });
+      return dump;
+    } catch (e) {
+      console.warn('[storageAdapter] full snapshot IDB failed, falling back to memory:', e);
+    }
+  }
+
+  return { ...storageSnapshot(prefix) };
+}
+
+/**
  * @returns {boolean}
  */
 export function isStorageReady() {
   return isReady;
 }
+
+/**
+ * 統計（アーカイブ UI 用）
+ * @returns {{ indexCount: number, memoryCount: number, scheduleIndex: number, scheduleMemory: number }}
+ */
+export function getStorageStats() {
+  let scheduleIndex = 0;
+  let scheduleMemory = 0;
+  keyIndex.forEach((key) => {
+    if (key.startsWith(SCHEDULE_PREFIX)) scheduleIndex += 1;
+  });
+  memoryCache.forEach((_, key) => {
+    if (key.startsWith(SCHEDULE_PREFIX)) scheduleMemory += 1;
+  });
+  return {
+    indexCount: keyIndex.size,
+    memoryCount: memoryCache.size,
+    scheduleIndex,
+    scheduleMemory
+  };
+}
+
+export { SCHEDULE_PREFIX };

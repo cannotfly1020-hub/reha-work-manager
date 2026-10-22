@@ -12,8 +12,14 @@
   <link rel="stylesheet" href="css/toast.css">
   <link rel="stylesheet" href="css/appointment.css">
   <link rel="stylesheet" href="css/style.css">
-  <!-- SheetJS スタイル対応版 (セル装飾・枠固定・カラー出力完全対応) -->
-  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+  <!-- SheetJS: ローカル内包を最優先（完全オフライン保証）。未読込時のみ CDN フォールバック -->
+  <script src="js/vendor/xlsx.bundle.js"></script>
+  <script>
+    (function () {
+      if (typeof XLSX !== 'undefined') return;
+      document.write('<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"><\/script>');
+    })();
+  </script>
 </head>
 <body>
 
@@ -281,6 +287,16 @@
         <p style="font-size:0.78rem; color:#64748b; line-height:1.5; margin-bottom:16px;">
           患者台帳・時間割・スタッフ設定・物品貸出などの全データを1つのファイルとしてPCに保存、または過去のバックアップから完全復元できます。
         </p>
+
+        <!-- 過去月アーカイブ分離ステータス（起動メモリ軽量化・自動稼働） -->
+        <div id="archiveStorageStatusPanel" style="margin-bottom:14px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 14px;">
+          <div id="archiveStorageStatusBadge" style="font-size:0.8rem; font-weight:800; color:#0f172a; margin-bottom:4px;">
+            📦 データ保管状態: アクティブ — 件 / アーカイブ退避 — 件
+          </div>
+          <div style="font-size:0.72rem; color:#64748b; line-height:1.45;">
+            過去データを安全にアーカイブ分離して動作を軽量化（自動稼働中）。当月±3ヶ月は常駐、それ以外は月間画面・Excel出力時にオンデマンド読込します。
+          </div>
+        </div>
 
         <!-- 自動保存先フォルダ（File System Access API・初回のみ選択） -->
         <div id="localBackupFolderPanel" style="margin-bottom:16px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:14px 16px;">
