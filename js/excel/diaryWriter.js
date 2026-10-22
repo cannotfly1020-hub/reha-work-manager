@@ -2,6 +2,7 @@
 // 業務日誌Excel生成層（原本R8.6準拠 / 検印欄 / 動的スタッフ名・リハ助手名完全反映 / 当日までの累積シート生成 / 外来0名・公休スマート自動記録 / 右側テーブル本日収益金額¥完全連携 / A4横用紙完全均整・堂々美麗レイアウト版）
 
 import { REHA_RULES, TIME_SLOTS } from '../config/rules.js';
+import { isAfternoonSlot } from '../core/timeSlotGenerator.js';
 import { evaluateEarlyBonusPhase, getDailyBasePoints } from '../core/deadlineCalc.js';
 import { getDailySchedule } from '../store/scheduleStore.js';
 import { getPatientById } from '../store/patientStore.js';
@@ -61,7 +62,9 @@ export function detectDiaryLeaveType(slots) {
     const isHoliday = item.itemType === 'HOLIDAY' || title.includes('公休');
     const isLeave = item.itemType === 'LEAVE' || title.includes('有休') || title.includes('有給');
     const slotIdx = TIME_SLOTS.findIndex((slot) => slot.id === slotId);
-    const isAfternoon = slotIdx >= 12;
+    const slotMeta = slotIdx >= 0 ? TIME_SLOTS[slotIdx] : null;
+    // 施設設定で午前コマ数が変わっても period で午前／午後を判定（固定 index>=12 は廃止）
+    const isAfternoon = isAfternoonSlot(slotMeta);
     let next = null;
     if (isHoliday) {
       if (count >= 20) next = 'FULL_HOLIDAY';

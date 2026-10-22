@@ -1,9 +1,12 @@
 # reha-work-manager 現況レポート
 
-記録日: 2026-10-13  
+> **運用・操作の正本は [`説明書.md`](./説明書.md) を参照してください**（2026-10-22 更新）。  
+> 本ファイルは 2026-10-13 時点の開発メモです。永続化は以降 **IndexedDB 透過層** に移行済みで、下記の「localStorage のみ」記述は古い箇所があります。
+
+記録日: 2026-10-13（一部記述はアーカイブ用）  
 対象: リポジトリ作業ツリー（`.git` と `node_modules` を除く実在ファイル）
 
-このシステムは、ビルド工程なしのオフライン SPA です。画面は `index.html` の `<section>` をタブで切り替え、データは `localStorage` に保存します。デスクトップ版は Electron 33 が `app://localhost` から同じ HTML を開きます。`file://` で `index.html` を直接開くと、ブラウザが `type="module"` の `js/app.js` を拒否します（`Origin null`）。
+このシステムは、ビルド工程なしのオフライン SPA です。画面は `index.html` の `<section>` をタブで切り替え、データは **IndexedDB（正本）＋メモリキャッシュ**（localStorage はミラー）に保存します。デスクトップ版は Electron 33 が `app://localhost` から同じ HTML を開きます。`file://` で `index.html` を直接開くと、ブラウザが `type="module"` の `js/app.js` を拒否します（`Origin null`）。
 
 起動の流れ:
 
@@ -40,10 +43,10 @@
 
 `appointmentSync.js` は反映時に `reha_outpatient_appointments` を先に読み、空なら `reha_appointments` を見る。`exportView.js` の初期化で `window.triggerDailyBackup` に日次バックアップを載せる。保存系の画面はこれを呼ぶ。
 
-時間枠は 2 種類ある。混ぜないこと。
+時間枠は `js/core/timeSlotGenerator.js` が単一情報源（デフォルト 09:00〜13:00 / 14:00〜18:00＝24コマ）。
 
-- 当日時間割: `js/config/rules.js` の `TIME_SLOTS`。`{ id, period, label, start, end, order }`。ID は `am_1` や `pm_1`。
-- 外来予約カレンダー: `js/config/appointmentSlots.js` の `TIME_SLOTS`。`'08:40'` から始まる時刻文字列。
+- 当日時間割: `rules.js` の `TIME_SLOTS`（生成結果）。`{ id, period, label, start, end, order }`。
+- 外来予約カレンダー: `appointmentSlots.js` の `TIME_SLOTS` ＝ `APPOINTMENT_TIME_STRINGS`（各コマの開始時刻文字列）。
 
 セルカードの高さは `js/views/schedule/timetable.js` の `buildSlotCardHtml` にある `(52 * u) - 5` px。
 
