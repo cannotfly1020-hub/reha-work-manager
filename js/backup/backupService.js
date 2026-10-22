@@ -1,5 +1,8 @@
 // js/backup/backupService.js
-// 手動バックアップ・年度確定バックアップ・復元・日次自動保存
+// 手動バックアップ・年度確定・復元・日次自動セーフティネット統括
+// 方式A: File System Access / Electron PCフォルダ
+// 方式B: IndexedDB 14日スナップショット（常時）
+// 方式C: ワンクリック手動ダウンロード（従来維持）
 // ★データ収集は透過ストレージ層（メモリ/IndexedDB）スナップショットを正本とする
 
 import { getLocalDateStr } from '../core/dateUtils.js';
@@ -8,10 +11,21 @@ import {
 } from '../core/storageAdapter.js';
 import { writeStorageItem } from '../store/storageWrite.js';
 import { showToast } from '../ui/toast.js';
+import {
+  autoWriteDailyBackupToFile,
+  saveIdbDailySnapshot,
+  isAutoWriteEnabled
+} from './localFileBackup.js';
 
 let autoBackupDebounceTimer = null;
+let lastFolderWarnAt = 0;
 
-function createSystemDump(meta = {}) {
+/**
+ * 全ストアの最新スナップショット JSON オブジェクトを生成
+ * @param {Object} meta
+ * @returns {Object}
+ */
+export function createSystemDump(meta = {}) {
   const dump = {
     app: 'reha-work-manager',
     version: '1.0.0',
@@ -20,14 +34,13 @@ function createSystemDump(meta = {}) {
     storage: {}
   };
 
-  // メモリキャッシュ上の reha_* を正本として収集（IndexedDB 由来データも含む）
   const snapshot = storageSnapshot('reha_');
   Object.entries(snapshot).forEach(([key, value]) => {
     if (key.startsWith('reha_autobackup_')) return;
+    if (key.startsWith('reha_backup_folder_')) return;
     dump.storage[key] = value;
   });
 
-  // 初期化前フォールバック: スナップショットが空なら localStorage も走査
   if (Object.keys(dump.storage).length === 0) {
     try {
       for (let i = 0; i < localStorage.length; i++) {
@@ -55,14 +68,16 @@ function downloadJsonBlob(blob, filename) {
 
 
 /**
- * 日中の操作時（時間割の変更・登録等）に当日ファイルを最新状態で自動上書きするトリガー
- * 操作直後の短時間の連続書き込みを防ぐため、2.5秒のデバウンス制御を実施
+ * データ変更時のデバウンス付き自動バックアップ（3秒・UI非ブロッキング）
  */
 export function triggerDailyAutoBackup() {
   if (autoBackupDebounceTimer) clearTimeout(autoBackupDebounceTimer);
   autoBackupDebounceTimer = setTimeout(() => {
-    performDailyAutoBackup();
-  }, 2500);
+    // fire-and-forget（await しない → UI フリーズ防止）
+    performDailyAutoBackup().catch((e) => {
+      console.warn('[backup] debounced auto backup error:', e);
+    });
+  }, 3000);
 }
 
 
@@ -70,32 +85,68 @@ function removeLegacyAutoBackupCopies() {
   storageKeys('reha_autobackup_').forEach((key) => storageRemove(key));
 }
 
+function maybeWarnFolder(reason) {
+  const now = Date.now();
+  if (now - lastFolderWarnAt < 60000) return;
+  lastFolderWarnAt = now;
+
+  if (reason === 'no_folder' || reason === 'permission_denied' || reason === 'permission_prompt') {
+    showToast(
+      '📂 PCフォルダ自動保存の権限が無効です。Excel出力画面で「自動保存先フォルダ」を再選択してください（IndexedDB内スナップショットは保存済み）',
+      'warn'
+    );
+  }
+}
+
+/**
+ * 日次セーフティネット実行（非ブロッキング前提の async）
+ * 1) IndexedDB 14日スナップショット（常時）
+ * 2) Electron desktopApp（あれば）
+ * 3) File System Access ユーザー指定フォルダ（設定ON時）
+ */
 export async function performDailyAutoBackup() {
   try {
     const todayStr = getLocalDateStr();
     removeLegacyAutoBackupCopies();
     const dump = createSystemDump({ backupType: 'DAILY_AUTO', targetDate: todayStr });
 
-    if (!(window.desktopApp && typeof window.desktopApp.saveDailyBackup === 'function')) {
-      return;
+    // ── 方式 B: IndexedDB 内スナップショット（常時・サイレント）──
+    try {
+      await saveIdbDailySnapshot(dump, todayStr);
+    } catch (snapErr) {
+      console.warn('[backup] IDB snapshot layer failed:', snapErr);
     }
 
-    try {
-      const payload = { targetDate: todayStr, data: dump, ...dump };
-      const res = await window.desktopApp.saveDailyBackup(payload);
-      if (res?.success) {
-        console.log(`[自動バックアップ] PCフォルダへ当日最新上書き保存完了: ${res.filePath}`);
-        return;
+    // ── 方式 A-1: Electron 専用フォルダ（既存 IPC・互換維持）──
+    if (window.desktopApp && typeof window.desktopApp.saveDailyBackup === 'function') {
+      try {
+        const payload = { targetDate: todayStr, data: dump, ...dump };
+        const res = await window.desktopApp.saveDailyBackup(payload);
+        if (res?.success) {
+          console.log(`[自動バックアップ] Electron PCフォルダへ保存: ${res.filePath}`);
+        } else if (res) {
+          console.warn('Desktop file auto-backup soft-fail:', res);
+        }
+      } catch (ipcErr) {
+        console.warn('Desktop file auto-backup IPC error:', ipcErr);
       }
-      console.warn('Desktop file auto-backup failed:', res);
-      showToast(res?.message || '当日バックアップをPCフォルダへ保存できませんでした', 'error');
-    } catch (ipcErr) {
-      console.warn('Desktop file auto-backup IPC error:', ipcErr);
-      showToast('当日バックアップをPCフォルダへ保存できませんでした', 'error');
+    }
+
+    // ── 方式 A-2: File System Access ユーザー指定フォルダ──
+    if (isAutoWriteEnabled()) {
+      try {
+        const fileRes = await autoWriteDailyBackupToFile(dump, todayStr);
+        if (fileRes.success) {
+          console.log(`[自動バックアップ] 指定フォルダへ保存: ${fileRes.fileName}`);
+        } else if (fileRes.reason && fileRes.reason !== 'disabled' && fileRes.reason !== 'unsupported') {
+          maybeWarnFolder(fileRes.reason);
+        }
+      } catch (fsErr) {
+        console.warn('[backup] File System Access write failed:', fsErr);
+      }
     }
   } catch (e) {
     console.warn('Daily auto backup error:', e);
-    showToast('当日バックアップの作成に失敗しました', 'error');
   }
 }
 
@@ -108,7 +159,7 @@ export function setupBackupAndRestoreListeners() {
   const btnTriggerRestore = document.getElementById('btnTriggerRestore');
   const fileInput = document.getElementById('backupFileInput');
 
-  // A: 通常の手動全データバックアップ (随時)
+  // C: 通常の手動全データバックアップ (随時)
   btnBackup?.addEventListener('click', () => {
     try {
       const dumpData = createSystemDump({ backupType: 'MANUAL' });
@@ -123,7 +174,7 @@ export function setupBackupAndRestoreListeners() {
     }
   });
 
-  // ★B: 【第2層：年次】5月31日 年度確定バックアップ（改定サイクル準拠）
+  // C: 5/31年度確定バックアップ
   btnFiscalBackup?.addEventListener('click', () => {
     try {
       const today = new Date();
@@ -145,12 +196,12 @@ export function setupBackupAndRestoreListeners() {
     }
   });
 
-  // C: 復元ファイル選択トリガー
+  // 復元ファイル選択トリガー
   btnTriggerRestore?.addEventListener('click', () => {
     if (fileInput) { fileInput.value = ''; fileInput.click(); }
   });
 
-  // D: バックアップファイルの読み込み & 完全復元
+  // バックアップファイルの読み込み & 完全復元
   fileInput?.addEventListener('change', (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -165,14 +216,11 @@ export function setupBackupAndRestoreListeners() {
           return showToast('無効なファイルです。正しいバックアップJSONを選択してください。', 'error');
         }
 
-        // 既存 reha_* をメモリ・IDB・LS から一掃
         storageRemoveByPrefix('reha_');
 
         for (const [k, v] of Object.entries(parsed.storage)) {
           if (typeof v !== 'string') continue;
-          // writeStorageItem → storageSet（メモリ + IDB + LS ミラー）
           if (!writeStorageItem(k, v)) {
-            // write 失敗時も storageSet 直叩きでメモリ/IDB は残す
             storageSet(k, v);
           }
         }

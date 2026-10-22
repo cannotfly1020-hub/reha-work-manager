@@ -1,14 +1,16 @@
 // js/app.js
-// 全体初期化・タブ切替自動再同期・ヘッダー＆時間割更新ボタン連動・全体再描画司令塔（外来予約カレンダー＆モーダル完全連携版）
-// ★起動最優先: IndexedDB 透過ストレージ層のプリロード＆マイグレーション完了後に各画面を初期化
+// 全体初期化・タブ切替自動再同期・ヘッダー＆時間割更新ボタン連動・全体再描画司令塔
+// ★起動最優先: IndexedDB 透過ストレージ → ローカルバックアップセーフティネット → 各画面
 
 import { initStorage } from './core/storageAdapter.js';
+import { initLocalFileBackup, logBackupNetStatus } from './backup/localFileBackup.js';
+import { performDailyAutoBackup, triggerDailyAutoBackup } from './backup/backupService.js';
 import { initScheduleView, renderScheduleView } from './views/scheduleView.js';
 import { initAppointmentCalendarView, renderAppointmentCalendarView } from './views/appointmentCalendarView.js';
 import { initMonthlyView, renderMonthlyView } from './views/monthlyView.js';
 import { initPatientView, renderPatientView } from './views/patientView.js';
 import { initLoanView, renderLoanView } from './views/loanView.js';
-import { initExportView } from './views/exportView.js';
+import { initExportView, refreshBackupFolderStatusUi } from './views/exportView.js';
 import { showToast } from './ui/toast.js';
 import { setupAppointmentModalListeners } from './views/modals/appointmentModal.js';
 
@@ -21,6 +23,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   } catch (err) {
     console.error('[app] initStorage failed — continuing with fallback cache:', err);
+  }
+
+  // 1.5 ローカルフォルダ／IDBスナップショット セーフティネット初期化
+  try {
+    const backupInit = await initLocalFileBackup();
+    logBackupNetStatus();
+    console.log('[app] Local file backup init:', backupInit);
+  } catch (err) {
+    console.warn('[app] initLocalFileBackup soft-fail:', err);
   }
 
   // 2. 既存の各画面初期化（これまでと全く同一順序）
@@ -38,8 +49,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderAllViews();
   });
 
+  // フォルダバッジをハンドル復元後の状態で再同期
+  try {
+    refreshBackupFolderStatusUi();
+  } catch (_) { /* ignore */ }
+
   // 3. 画面描画
   renderAllViews();
+
+  // 4. 起動時スナップショット（非ブロッキング）
+  performDailyAutoBackup().catch((e) => {
+    console.warn('[app] startup auto backup soft-fail:', e);
+  });
+
+  // グローバル公開（exportView でも設定するが起動順の保険）
+  window.triggerDailyBackup = triggerDailyAutoBackup;
+});
+
+// ウィンドウ終了前に最終状態をフラッシュ（ブロッキングしない）
+window.addEventListener('beforeunload', () => {
+  try {
+    performDailyAutoBackup();
+  } catch (_) { /* ignore */ }
 });
 
 export function renderAllViews() {
@@ -62,7 +93,6 @@ function initNavigationTabs() {
       const targetPanel = document.getElementById(tab.dataset.target);
       if (targetPanel) {
         targetPanel.classList.add('active');
-        // ★タブ切り替え時に全ビューを自動再同期・最新化（他画面の変更が即座に反映されます）
         renderAllViews();
       }
     });

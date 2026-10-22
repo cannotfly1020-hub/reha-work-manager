@@ -282,6 +282,26 @@
           患者台帳・時間割・スタッフ設定・物品貸出などの全データを1つのファイルとしてPCに保存、または過去のバックアップから完全復元できます。
         </p>
 
+        <!-- 自動保存先フォルダ（File System Access API・初回のみ選択） -->
+        <div id="localBackupFolderPanel" style="margin-bottom:16px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:14px 16px;">
+          <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px;">
+            <div>
+              <div style="font-weight:800; font-size:0.85rem; color:#1e40af; margin-bottom:4px;">📂 PCフォルダへ完全自動バックアップ</div>
+              <div id="backupFolderStatusBadge" style="font-size:0.75rem; color:#64748b; font-weight:600;">📂 自動保存先: 未設定</div>
+            </div>
+            <button id="btnPickBackupFolder" type="button" style="padding:8px 14px; background:#2563eb; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer; white-space:nowrap;">
+              📂 自動保存先フォルダを選択
+            </button>
+          </div>
+          <label style="display:flex; align-items:flex-start; gap:8px; font-size:0.78rem; color:#334155; cursor:pointer; line-height:1.45;">
+            <input type="checkbox" id="chkAutoWriteBackupFolder" checked style="margin-top:2px; width:15px; height:15px; accent-color:#2563eb;">
+            <span>データ変更時にPCフォルダへ自動書き出しを行う（IndexedDB内14日スナップショットは常時保存）</span>
+          </label>
+          <p style="font-size:0.68rem; color:#64748b; margin:8px 0 0; line-height:1.4;">
+            初回のみフォルダを選ぶと、以降は <code style="background:#dbeafe; padding:0 3px; border-radius:3px;">reha_backup_YYYY-MM-DD.json</code> を自動上書きします（14日超は自動削除）。キャッシュ消去事故へのセーフティネットです。
+          </p>
+        </div>
+
         <div style="display:grid; grid-template-columns: 1.1fr 0.9fr; gap:16px; background:#f8fafc; padding:16px; border-radius:8px; border:1px solid #e2e8f0;">
           <!-- バックアップ保存エリア（日常随時 ＆ 5/31年度確定） -->
           <div style="display:flex; flex-direction:column; gap:12px;">

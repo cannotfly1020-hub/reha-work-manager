@@ -1,5 +1,6 @@
 // js/views/exportView.js
-// VIEW 5: 月末Excel原本出力・全データバックアップ＆復元・日次14日ローテーション自動保存(PCフォルダ直接書き出し・当日リアルタイム上書き・終了時保存対応)・5/31年度確定バックアップ対応層（200行制限準拠）
+// VIEW 5: 月末Excel原本出力・全データバックアップ＆復元・PCフォルダ自動保存設定
+// 日次14日ローテーション（IndexedDB + File System Access / Electron）
 
 import { aggregateFromAppSchedule } from '../store/scheduleStore.js';
 import { safeParseInt } from '../core/dataNormalizer.js';
@@ -7,6 +8,13 @@ import { showToast } from '../ui/toast.js';
 import {
   setupBackupAndRestoreListeners, performDailyAutoBackup, triggerDailyAutoBackup
 } from '../backup/backupService.js';
+import {
+  pickBackupDirectory,
+  setAutoWriteEnabled,
+  isAutoWriteEnabled,
+  getLocalBackupUiState,
+  isFileSystemAccessSupported
+} from '../backup/localFileBackup.js';
 import { generateUketsukeWorkbook } from '../excel/uketsukeWriter.js';
 import { generateDiaryWorkbook } from '../excel/diaryWriter.js';
 
@@ -26,17 +34,82 @@ export function initExportView() {
   btnDiary?.addEventListener('click', () => handleExportDiary(monthInput));
 
   setupBackupAndRestoreListeners();
+  setupLocalBackupFolderUi();
 
-  // ★【第1層：起動時】当日の最新ファイルを作成・上書き保存（前日のファイルはそのまま確定保持）
-  performDailyAutoBackup();
+  // グローバル公開: 時間割保存・予約変更などからデバウンス付き自動バックアップ
+  window.triggerDailyBackup = triggerDailyAutoBackup;
+}
 
-  // ★【第1層：終了時】アプリ終了（画面を閉じる）直前に、当日の最終確定データを当日ファイルへ上書き保存
-  window.addEventListener('beforeunload', () => {
-    performDailyAutoBackup();
+/**
+ * 自動保存先フォルダ UI（ステータスバッジ・選択ボタン・チェックボックス）
+ */
+function setupLocalBackupFolderUi() {
+  const badge = document.getElementById('backupFolderStatusBadge');
+  const btnPick = document.getElementById('btnPickBackupFolder');
+  const chkAuto = document.getElementById('chkAutoWriteBackupFolder');
+  const panel = document.getElementById('localBackupFolderPanel');
+
+  refreshBackupFolderStatusUi();
+
+  if (!isFileSystemAccessSupported() && panel) {
+    // Electron は IPC 経路があるためパネルは残す。ブラウザ非対応時のみ注記
+    if (!(window.desktopApp && window.desktopApp.isDesktop) && badge) {
+      badge.textContent = '📂 自動保存先: このブラウザはフォルダ自動保存未対応（IndexedDBスナップショットは稼働）';
+      badge.style.color = '#b45309';
+      if (btnPick) btnPick.disabled = true;
+    }
+  }
+
+  btnPick?.addEventListener('click', async () => {
+    const result = await pickBackupDirectory();
+    refreshBackupFolderStatusUi();
+    if (result.success) {
+      showToast(`🟢 自動保存先を設定しました: ${result.folderName}`, 'success');
+      // 設定直後に1回フラッシュ（サイレント）
+      performDailyAutoBackup().catch(() => {});
+    } else if (result.message) {
+      showToast(result.message, 'warn');
+    }
   });
 
-  // グローバルに関数を公開し、時間割保存時などから安全に即時/遅延上書きを呼べるように設定
-  window.triggerDailyBackup = triggerDailyAutoBackup;
+  if (chkAuto) {
+    chkAuto.checked = isAutoWriteEnabled();
+    chkAuto.addEventListener('change', () => {
+      setAutoWriteEnabled(Boolean(chkAuto.checked));
+      showToast(
+        chkAuto.checked
+          ? 'PCフォルダへの自動書き出しをONにしました'
+          : 'PCフォルダへの自動書き出しをOFFにしました（IndexedDBスナップショットは継続）',
+        'info'
+      );
+      refreshBackupFolderStatusUi();
+    });
+  }
+}
+
+/**
+ * バッジ表示を最新状態に同期
+ */
+export function refreshBackupFolderStatusUi() {
+  const badge = document.getElementById('backupFolderStatusBadge');
+  const chkAuto = document.getElementById('chkAutoWriteBackupFolder');
+  if (!badge) return;
+
+  const state = getLocalBackupUiState();
+  if (chkAuto) chkAuto.checked = state.autoEnabled;
+
+  if (state.hasHandle && state.folderName) {
+    badge.textContent = state.autoEnabled
+      ? `🟢 自動保存先: ${state.folderName}`
+      : `📂 自動保存先: ${state.folderName}（自動書き出しOFF）`;
+    badge.style.color = state.autoEnabled ? '#15803d' : '#64748b';
+  } else if (window.desktopApp && window.desktopApp.isDesktop) {
+    badge.textContent = '🟢 Electron専用フォルダへ自動保存（ドキュメント/リハ業務管理_自動バックアップ）';
+    badge.style.color = '#15803d';
+  } else {
+    badge.textContent = '📂 自動保存先: 未設定';
+    badge.style.color = '#64748b';
+  }
 }
 
 function handleExportUketsuke(monthInput) {
@@ -88,4 +161,3 @@ function parseYearMonth(val) {
   const parts = val.split('-');
   return [safeParseInt(parts[0]), safeParseInt(parts[1])];
 }
-
