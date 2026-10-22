@@ -454,8 +454,8 @@
               <option value="3">3コマ (60分)</option>
               <option value="4">4コマ (80分)</option>
               <option value="6">6コマ (2時間)</option>
-              <option value="12">12コマ (半日ブロック・4時間)</option>
-              <option value="24">24コマ (終日ブロック・全日)</option>
+              <option value="12" data-role="half-day">12コマ (半日ブロック・4時間)</option>
+              <option value="24" data-role="full-day">24コマ (終日ブロック・全日)</option>
             </select>
           </div>
         </div>
@@ -713,13 +713,13 @@
 
   <!-- モーダル 6: セラピストマスター設定（名称変更・動的登録・ステータス管理・リアルタイム検索・退職者折りたたみ ＋ ★リハビリ助手設定） -->
   <div id="modalStaffSettings" class="modal-overlay">
-    <div class="modal-card" style="max-width:560px; max-height:85vh; display:flex; flex-direction:column;">
+    <div class="modal-card" style="max-width:600px; max-height:85vh; display:flex; flex-direction:column;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-        <h3 style="font-size:1.05rem; font-weight:800; color:#0f172a; margin:0;">⚙ セラピスト・助手設定</h3>
+        <h3 style="font-size:1.05rem; font-weight:800; color:#0f172a; margin:0;">⚙ スタッフ設定</h3>
         <button type="button" id="btnCloseStaffModalX" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:#64748b;">✕</button>
       </div>
       <p style="font-size:0.75rem; color:#64748b; margin-bottom:12px;">
-        時間割には「稼働中」のセラピストのみが表示されます。リハビリ助手の氏名は業務日誌の出勤確認欄に自動反映されます。
+        時間割には「稼働中」のセラピストのみが表示されます。リハビリ助手の氏名は業務日誌の出勤確認欄に自動反映されます。施設の午前・休憩・午後の提供時間もここで変更できます。
       </p>
 
       <!-- リアルタイム検索 & 新規セラピスト追加バー -->
@@ -757,6 +757,43 @@
                      style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
             </div>
           </div>
+        </div>
+
+        <!-- ★施設リハビリ提供時間設定（午前・休憩・午後 → 20分コマ自動生成） -->
+        <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:6px; padding:10px; margin-top:4px;">
+          <div style="font-size:0.8rem; font-weight:800; color:#0c4a6e; margin-bottom:6px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            <span>🏥 施設リハビリ提供時間設定</span>
+            <span style="font-size:0.68rem; color:#0369a1; font-weight:normal;">(保存すると時間割・外来予約・印刷が即時連動)</span>
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+            <div>
+              <label for="settingAmStartInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午前開始</label>
+              <input type="time" id="settingAmStartInput" value="09:00" step="300"
+                     style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
+            </div>
+            <div>
+              <label for="settingAmEndInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午前終了（昼休憩開始）</label>
+              <input type="time" id="settingAmEndInput" value="13:00" step="300"
+                     style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
+            </div>
+            <div>
+              <label for="settingPmStartInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午後開始（昼休憩終了）</label>
+              <input type="time" id="settingPmStartInput" value="14:00" step="300"
+                     style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
+            </div>
+            <div>
+              <label for="settingPmEndInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">業務終了</label>
+              <input type="time" id="settingPmEndInput" value="18:00" step="300"
+                     style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
+            </div>
+          </div>
+          <div id="facilityHoursSlotSummaryBadge"
+               style="margin-top:8px; display:inline-block; padding:4px 10px; border-radius:999px; border:1px solid #a7f3d0; background:#ecfdf5; color:#065f46; font-size:0.72rem; font-weight:700;">
+            午前 12コマ ／ 午後 12コマ ＝ 計 24コマ（昼休憩 60分）
+          </div>
+          <p style="font-size:0.68rem; color:#64748b; margin:6px 0 0;">
+            条件: 午前開始 &lt; 午前終了 ≦ 午後開始 &lt; 業務終了。20分刻みでコマを自動生成します。
+          </p>
         </div>
 
         <!-- 過去・退職者（非表示スタッフ）折りたたみアコーディオン（トップを汚さず一番下に配置） -->

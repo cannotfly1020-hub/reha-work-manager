@@ -1,11 +1,15 @@
 // js/core/timeSlotGenerator.js
 // 施設診療時間から20分刻みスロットを動的生成する単一情報源（Single Source of Truth）
 // デフォルト: 午前 09:00〜13:00（12コマ）／昼休憩／午後 14:00〜18:00（12コマ）＝計24コマ
+// 画面設定の永続化キー: localStorage 'reha_facility_hours'
 
 /**
- * 施設の診療時間設定（将来の施設設定UIからも同じ形で渡す）
+ * 施設の診療時間設定（スタッフ設定モーダル／定数初期値で同じ形）
  * @typedef {{ amStart: string, amEnd: string, pmStart: string, pmEnd: string }} FacilityHours
  */
+
+/** localStorage キー（施設リハビリ提供時間） */
+export const FACILITY_HOURS_STORAGE_KEY = 'reha_facility_hours';
 
 /** @type {FacilityHours} */
 export const DEFAULT_FACILITY_HOURS = {
@@ -16,13 +20,27 @@ export const DEFAULT_FACILITY_HOURS = {
 };
 
 /**
+ * HH:MM または HH:MM:SS を HH:MM に正規化
+ * @param {string} timeStr
+ * @returns {string}
+ */
+export function normalizeTimeString(timeStr) {
+  if (!timeStr || !String(timeStr).includes(':')) return '';
+  const parts = String(timeStr).trim().split(':');
+  const h = Math.min(23, Math.max(0, Number(parts[0]) || 0));
+  const m = Math.min(59, Math.max(0, Number(parts[1]) || 0));
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/**
  * HH:MM 文字列を通算分（0〜1440）に変換
  * @param {string} timeStr
  * @returns {number}
  */
 export function timeToMinutes(timeStr) {
-  if (!timeStr || !String(timeStr).includes(':')) return 0;
-  const [h, m] = String(timeStr).split(':').map(Number);
+  const normalized = normalizeTimeString(timeStr);
+  if (!normalized) return 0;
+  const [h, m] = normalized.split(':').map(Number);
   return ((Number(h) || 0) * 60) + (Number(m) || 0);
 }
 
@@ -39,17 +57,108 @@ export function minutesToTime(minutes) {
 }
 
 /**
- * 施設設定を正規化（欠落キーはデフォルトで補完）
+ * 施設設定を正規化（欠落キーはデフォルトで補完・時刻を HH:MM 化）
  * @param {Partial<FacilityHours>|null|undefined} hours
  * @returns {FacilityHours}
  */
 export function normalizeFacilityHours(hours) {
   return {
-    amStart: hours?.amStart || DEFAULT_FACILITY_HOURS.amStart,
-    amEnd: hours?.amEnd || DEFAULT_FACILITY_HOURS.amEnd,
-    pmStart: hours?.pmStart || DEFAULT_FACILITY_HOURS.pmStart,
-    pmEnd: hours?.pmEnd || DEFAULT_FACILITY_HOURS.pmEnd
+    amStart: normalizeTimeString(hours?.amStart) || DEFAULT_FACILITY_HOURS.amStart,
+    amEnd: normalizeTimeString(hours?.amEnd) || DEFAULT_FACILITY_HOURS.amEnd,
+    pmStart: normalizeTimeString(hours?.pmStart) || DEFAULT_FACILITY_HOURS.pmStart,
+    pmEnd: normalizeTimeString(hours?.pmEnd) || DEFAULT_FACILITY_HOURS.pmEnd
   };
+}
+
+/**
+ * 時刻逆転・コマ不足を検証
+ * 条件: 午前開始 < 午前終了 <= 午後開始 < 業務終了、かつ午前・午後それぞれ最低1コマ（20分以上）
+ * @param {Partial<FacilityHours>|null|undefined} hours
+ * @returns {{ ok: boolean, message: string, hours: FacilityHours }}
+ */
+export function validateFacilityHours(hours) {
+  const h = normalizeFacilityHours(hours);
+  const amStart = timeToMinutes(h.amStart);
+  const amEnd = timeToMinutes(h.amEnd);
+  const pmStart = timeToMinutes(h.pmStart);
+  const pmEnd = timeToMinutes(h.pmEnd);
+
+  if (!(amStart < amEnd)) {
+    return { ok: false, message: '午前開始は午前終了より前である必要があります', hours: h };
+  }
+  if (!(amEnd <= pmStart)) {
+    return { ok: false, message: '午前終了は午後開始以前である必要があります（昼休憩の逆転を禁止）', hours: h };
+  }
+  if (!(pmStart < pmEnd)) {
+    return { ok: false, message: '午後開始は業務終了より前である必要があります', hours: h };
+  }
+  if (amEnd - amStart < 20) {
+    return { ok: false, message: '午前帯は最低20分（1コマ）以上必要です', hours: h };
+  }
+  if (pmEnd - pmStart < 20) {
+    return { ok: false, message: '午後帯は最低20分（1コマ）以上必要です', hours: h };
+  }
+
+  return { ok: true, message: '', hours: h };
+}
+
+/**
+ * バッジ表示用サマリー文字列を生成
+ * @param {Partial<FacilityHours>|null|undefined} hours
+ * @returns {string}
+ */
+export function formatFacilityHoursSummary(hours) {
+  const check = validateFacilityHours(hours);
+  const h = check.hours;
+  if (!check.ok) {
+    return `⚠ ${check.message}`;
+  }
+  const am = getAmSlotCount(h);
+  const pm = getPmSlotCount(h);
+  const total = am + pm;
+  const breakMin = timeToMinutes(h.pmStart) - timeToMinutes(h.amEnd);
+  const breakLabel = breakMin > 0 ? `昼休憩 ${breakMin}分` : '昼休憩なし（連続）';
+  return `午前 ${am}コマ ／ 午後 ${pm}コマ ＝ 計 ${total}コマ（${breakLabel}）`;
+}
+
+/**
+ * 保存済み施設時間を取得（未保存・破損時はデフォルト）
+ * @returns {FacilityHours}
+ */
+export function getSavedFacilityHours() {
+  try {
+    if (typeof localStorage === 'undefined') {
+      return { ...DEFAULT_FACILITY_HOURS };
+    }
+    const raw = localStorage.getItem(FACILITY_HOURS_STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_FACILITY_HOURS };
+    const parsed = JSON.parse(raw);
+    const check = validateFacilityHours(parsed);
+    if (!check.ok) return { ...DEFAULT_FACILITY_HOURS };
+    return check.hours;
+  } catch (_) {
+    return { ...DEFAULT_FACILITY_HOURS };
+  }
+}
+
+/**
+ * 施設時間を検証して localStorage に保存
+ * @param {Partial<FacilityHours>} hours
+ * @returns {{ success: boolean, message: string, hours: FacilityHours }}
+ */
+export function saveFacilityHours(hours) {
+  const check = validateFacilityHours(hours);
+  if (!check.ok) {
+    return { success: false, message: check.message, hours: check.hours };
+  }
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(FACILITY_HOURS_STORAGE_KEY, JSON.stringify(check.hours));
+    }
+    return { success: true, message: '施設リハビリ提供時間を保存しました', hours: check.hours };
+  } catch (_) {
+    return { success: false, message: '施設時間の保存に失敗しました（ストレージ書き込み不可）', hours: check.hours };
+  }
 }
 
 /**

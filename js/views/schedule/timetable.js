@@ -1,7 +1,7 @@
 // js/views/schedule/timetable.js
 // 当日時間割グリッドとドラッグ＆ドロップ
 
-import { TIME_SLOTS, REHA_RULES } from '../../config/rules.js';
+import { TIME_SLOTS, REHA_RULES, AM_SLOT_COUNT, TOTAL_SLOT_COUNT } from '../../config/rules.js';
 import { sanitizeHtml, safeParseInt } from '../../core/dataNormalizer.js';
 import { getActiveTherapists } from '../../store/therapistStore.js';
 import { getPatientById } from '../../store/patientStore.js';
@@ -33,7 +33,9 @@ function buildTaskCardHtml(cellData, tId, slotId) {
     badgeClass = 'badge-holiday';
     badgeText = '公休';
   }
-  const durationLabel = u >= 24 ? '終日' : (u >= 12 ? '半日' : `${u * 20}分`);
+  const halfSlots = AM_SLOT_COUNT || 12;
+  const fullSlots = TOTAL_SLOT_COUNT || 24;
+  const durationLabel = u >= fullSlots ? '終日' : (u >= halfSlots ? '半日' : `${u * 20}分`);
   return `
     <div class="cell-slot">
       <div class="reha-slot-card ${cardClass} card-unit-${u}" draggable="true" data-therapist="${tId}" data-slot="${slotId}"

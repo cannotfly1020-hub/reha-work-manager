@@ -1,5 +1,6 @@
 // js/views/modals/staffModal.js
-// セラピストマスター設定モーダル制御層（スタッフ検索・追加・名称変更・休職退職管理・初期復帰 ＋ ★リハビリ助手1・2設定・自動保存）
+// セラピストマスター設定モーダル制御層
+// （スタッフ検索・追加・名称変更・休職退職管理・初期復帰 ＋ リハビリ助手1・2設定 ＋ 施設リハビリ提供時間設定・自動保存）
 
 import { sanitizeHtml } from '../../core/dataNormalizer.js';
 import {
@@ -8,10 +9,112 @@ import {
 } from '../../store/therapistStore.js';
 import { showToast } from '../../ui/toast.js';
 import { getAssistantSettings, saveAssistantSettings } from '../../store/assistantStore.js';
-
-
+import {
+  getSavedFacilityHours,
+  saveFacilityHours,
+  validateFacilityHours,
+  formatFacilityHoursSummary,
+  getAmSlotCount,
+  getTotalSlotCount,
+  DEFAULT_FACILITY_HOURS
+} from '../../core/timeSlotGenerator.js';
+import { reloadFacilityTimeSlots, AM_SLOT_COUNT, TOTAL_SLOT_COUNT } from '../../config/rules.js';
+import { renderAppointmentCalendarView } from '../appointmentCalendarView.js';
 
 let onStaffUpdatedCallback = null;
+
+/**
+ * フォームから施設時間オブジェクトを読み取る
+ * @returns {{ amStart: string, amEnd: string, pmStart: string, pmEnd: string }}
+ */
+function readFacilityHoursFromForm() {
+  return {
+    amStart: document.getElementById('settingAmStartInput')?.value || '',
+    amEnd: document.getElementById('settingAmEndInput')?.value || '',
+    pmStart: document.getElementById('settingPmStartInput')?.value || '',
+    pmEnd: document.getElementById('settingPmEndInput')?.value || ''
+  };
+}
+
+/**
+ * 保存済み（または引数）の施設時間をフォームへセット
+ * @param {{ amStart?: string, amEnd?: string, pmStart?: string, pmEnd?: string }|null|undefined} [hours]
+ */
+function fillFacilityHoursForm(hours) {
+  const h = hours || getSavedFacilityHours();
+  const amStart = document.getElementById('settingAmStartInput');
+  const amEnd = document.getElementById('settingAmEndInput');
+  const pmStart = document.getElementById('settingPmStartInput');
+  const pmEnd = document.getElementById('settingPmEndInput');
+  if (amStart) amStart.value = h.amStart || DEFAULT_FACILITY_HOURS.amStart;
+  if (amEnd) amEnd.value = h.amEnd || DEFAULT_FACILITY_HOURS.amEnd;
+  if (pmStart) pmStart.value = h.pmStart || DEFAULT_FACILITY_HOURS.pmStart;
+  if (pmEnd) pmEnd.value = h.pmEnd || DEFAULT_FACILITY_HOURS.pmEnd;
+  updateFacilityHoursSlotSummaryBadge();
+}
+
+/**
+ * リアルタイムバッジ更新（時刻入力の都度）
+ */
+function updateFacilityHoursSlotSummaryBadge() {
+  const badge = document.getElementById('facilityHoursSlotSummaryBadge');
+  if (!badge) return;
+  const hours = readFacilityHoursFromForm();
+  const summary = formatFacilityHoursSummary(hours);
+  const check = validateFacilityHours(hours);
+  badge.textContent = summary;
+  badge.style.background = check.ok ? '#ecfdf5' : '#fef2f2';
+  badge.style.color = check.ok ? '#065f46' : '#b91c1c';
+  badge.style.borderColor = check.ok ? '#a7f3d0' : '#fecaca';
+}
+
+/**
+ * 半日／終日プリセットの data-duration と option を現行コマ数に同期
+ * （施設時間変更後もワンタッチ休暇が破綻しないようにする）
+ * @param {{ amStart?: string, amEnd?: string, pmStart?: string, pmEnd?: string }|null|undefined} [hours]
+ */
+function syncLeavePresetDurations(hours) {
+  const h = hours || getSavedFacilityHours();
+  const half = getAmSlotCount(h) || AM_SLOT_COUNT || 12;
+  const full = getTotalSlotCount(h) || TOTAL_SLOT_COUNT || 24;
+
+  document.querySelectorAll('.btn-task-preset').forEach((btn) => {
+    const title = btn.getAttribute('data-title') || '';
+    if (title.includes('終日')) {
+      btn.setAttribute('data-duration', String(full));
+    } else if (title.includes('半日')) {
+      btn.setAttribute('data-duration', String(half));
+    }
+  });
+
+  const durationSelect = document.getElementById('slotTaskDurationSelect');
+  if (durationSelect) {
+    const halfOpt = durationSelect.querySelector('option[data-role="half-day"]');
+    const fullOpt = durationSelect.querySelector('option[data-role="full-day"]');
+    if (halfOpt) {
+      halfOpt.value = String(half);
+      halfOpt.textContent = `${half}コマ (半日ブロック・約${half * 20}分)`;
+    }
+    if (fullOpt) {
+      fullOpt.value = String(full);
+      fullOpt.textContent = `${full}コマ (終日ブロック・全日)`;
+    }
+  }
+}
+
+/**
+ * 施設時間変更後に時間割・外来予約をリロードなしで再描画
+ */
+function refreshViewsAfterFacilityHoursChange() {
+  if (typeof onStaffUpdatedCallback === 'function') {
+    onStaffUpdatedCallback();
+  }
+  try {
+    renderAppointmentCalendarView();
+  } catch (e) {
+    console.warn('[staffModal] renderAppointmentCalendarView soft-fail:', e);
+  }
+}
 
 export function setupStaffSettingsModalListeners(onUpdate) {
   onStaffUpdatedCallback = onUpdate;
@@ -28,6 +131,20 @@ export function setupStaffSettingsModalListeners(onUpdate) {
   const assistant1Input = document.getElementById('assistant1NameInput');
   const assistant2Input = document.getElementById('assistant2NameInput');
 
+  const facilityTimeInputs = [
+    document.getElementById('settingAmStartInput'),
+    document.getElementById('settingAmEndInput'),
+    document.getElementById('settingPmStartInput'),
+    document.getElementById('settingPmEndInput')
+  ];
+  facilityTimeInputs.forEach((el) => {
+    el?.addEventListener('input', updateFacilityHoursSlotSummaryBadge);
+    el?.addEventListener('change', updateFacilityHoursSlotSummaryBadge);
+  });
+
+  // 起動時にも休暇プリセットを現行コマ数へ同期
+  syncLeavePresetDurations(getSavedFacilityHours());
+
   btnOpen?.addEventListener('click', () => {
     if (searchInput) searchInput.value = '';
     renderStaffSettingsFields();
@@ -36,6 +153,9 @@ export function setupStaffSettingsModalListeners(onUpdate) {
     const assistants = getAssistantSettings();
     if (assistant1Input) assistant1Input.value = assistants.assistant1;
     if (assistant2Input) assistant2Input.value = assistants.assistant2;
+
+    // ★保存済み施設リハビリ提供時間をフォームに反映
+    fillFacilityHoursForm(getSavedFacilityHours());
 
     modal?.classList.add('active');
   });
@@ -87,9 +207,17 @@ export function setupStaffSettingsModalListeners(onUpdate) {
     if (assistant1Input) assistant1Input.value = '';
     if (assistant2Input) assistant2Input.value = '';
 
+    // 施設時間も初期デフォルトへ戻す
+    const hoursSave = saveFacilityHours({ ...DEFAULT_FACILITY_HOURS });
+    if (hoursSave.success) {
+      reloadFacilityTimeSlots(hoursSave.hours);
+      fillFacilityHoursForm(hoursSave.hours);
+      syncLeavePresetDurations(hoursSave.hours);
+    }
+
     renderStaffSettingsFields();
-    showToast('セラピスト・助手設定を初期デフォルトに戻しました', 'info');
-    if (typeof onStaffUpdatedCallback === 'function') onStaffUpdatedCallback();
+    showToast('セラピスト・助手・施設時間を初期デフォルトに戻しました', 'info');
+    refreshViewsAfterFacilityHoursChange();
   });
 
   form?.addEventListener('submit', (e) => {
@@ -108,6 +236,26 @@ export function setupStaffSettingsModalListeners(onUpdate) {
       }
     });
 
+    // ★施設時間: バリデーション → 保存 → メモリ即時更新（失敗時はスタッフ保存も中断）
+    const facilityHours = readFacilityHoursFromForm();
+    const hoursCheck = validateFacilityHours(facilityHours);
+    if (!hoursCheck.ok) {
+      showToast(hoursCheck.message, 'error');
+      updateFacilityHoursSlotSummaryBadge();
+      return;
+    }
+    const hoursSave = saveFacilityHours(hoursCheck.hours);
+    if (!hoursSave.success) {
+      showToast(hoursSave.message || '施設時間の保存に失敗しました', 'error');
+      return;
+    }
+    const reloaded = reloadFacilityTimeSlots(hoursSave.hours);
+    if (!reloaded.success) {
+      showToast(reloaded.message || '施設時間の反映に失敗しました', 'error');
+      return;
+    }
+    syncLeavePresetDurations(hoursSave.hours);
+
     const staffSaved = updateTherapistSettings(updateMap);
 
     const a1Val = assistant1Input ? assistant1Input.value.trim() : '';
@@ -116,8 +264,11 @@ export function setupStaffSettingsModalListeners(onUpdate) {
     if (!staffSaved || !assistantSaved) return;
 
     closeModal();
-    showToast('スタッフ設定（セラピスト・助手）を更新・保存しました', 'success');
-    if (typeof onStaffUpdatedCallback === 'function') onStaffUpdatedCallback();
+    showToast(
+      `スタッフ設定を保存しました（施設時間: 午前${reloaded.am}／午後${reloaded.pm}＝計${reloaded.total}コマ）`,
+      'success'
+    );
+    refreshViewsAfterFacilityHoursChange();
   });
 }
 
