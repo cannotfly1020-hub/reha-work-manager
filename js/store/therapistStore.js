@@ -2,6 +2,7 @@
 // セラピストマスター管理・LocalStorage永続化・ステータス管理（稼働中/休職/退職）・新規追加・増員対応（200行制限準拠）
 
 import { normalizeString } from '../core/dataNormalizer.js';
+import { storageGet } from '../core/storageAdapter.js';
 import { writeStorageItem } from './storageWrite.js';
 
 const STORAGE_KEY = 'reha_therapists_master';
@@ -36,7 +37,7 @@ const DEFAULT_THERAPISTS = [
  */
 export function getAllTherapists() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = storageGet(STORAGE_KEY);
     if (!raw) {
       saveAllTherapists(DEFAULT_THERAPISTS);
       return JSON.parse(JSON.stringify(DEFAULT_THERAPISTS));

@@ -1,6 +1,8 @@
 // js/app.js
 // 全体初期化・タブ切替自動再同期・ヘッダー＆時間割更新ボタン連動・全体再描画司令塔（外来予約カレンダー＆モーダル完全連携版）
+// ★起動最優先: IndexedDB 透過ストレージ層のプリロード＆マイグレーション完了後に各画面を初期化
 
+import { initStorage } from './core/storageAdapter.js';
 import { initScheduleView, renderScheduleView } from './views/scheduleView.js';
 import { initAppointmentCalendarView, renderAppointmentCalendarView } from './views/appointmentCalendarView.js';
 import { initMonthlyView, renderMonthlyView } from './views/monthlyView.js';
@@ -10,7 +12,18 @@ import { initExportView } from './views/exportView.js';
 import { showToast } from './ui/toast.js';
 import { setupAppointmentModalListeners } from './views/modals/appointmentModal.js';
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  // 1. 最優先: ストレージ層（IndexedDB）のプリロード＆マイグレーション完了を待機
+  try {
+    const result = await initStorage();
+    if (result?.migrated) {
+      console.log(`[app] Storage migration complete (${result.keyCount} keys)`);
+    }
+  } catch (err) {
+    console.error('[app] initStorage failed — continuing with fallback cache:', err);
+  }
+
+  // 2. 既存の各画面初期化（これまでと全く同一順序）
   initScheduleView();
   initAppointmentCalendarView();
   initMonthlyView();
@@ -25,6 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderAllViews();
   });
 
+  // 3. 画面描画
   renderAllViews();
 });
 

@@ -2,6 +2,7 @@
 // 患者マスターCRUD・LocalStorage永続化・ステータス管理(継続/終了・退院)・計画書ステータス同期・消炎鎮痛制御層（200行制限準拠）
 
 import { normalizeString, normalizePatientId, normalizeDateString } from '../core/dataNormalizer.js';
+import { storageGet } from '../core/storageAdapter.js';
 import { writeStorageItem } from './storageWrite.js';
 
 const STORAGE_KEY = 'reha_patients_master';
@@ -97,7 +98,7 @@ const DEFAULT_PATIENTS = [
 
 export function getAllPatients(includeDiscontinued = true) {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = storageGet(STORAGE_KEY);
     if (!raw) {
       saveAllPatients(DEFAULT_PATIENTS);
       return [...DEFAULT_PATIENTS];

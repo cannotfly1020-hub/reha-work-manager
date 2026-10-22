@@ -1,6 +1,7 @@
 // js/store/assistantStore.js
 // リハビリ助手1・2の氏名
 
+import { storageGet } from '../core/storageAdapter.js';
 import { writeStorageItem } from './storageWrite.js';
 
 const ASSISTANT_STORAGE_KEY = 'reha_assistant_settings';
@@ -11,7 +12,7 @@ const ASSISTANT_STORAGE_KEY = 'reha_assistant_settings';
  */
 export function getAssistantSettings() {
   try {
-    const raw = localStorage.getItem(ASSISTANT_STORAGE_KEY);
+    const raw = storageGet(ASSISTANT_STORAGE_KEY);
     if (!raw) return { assistant1: '', assistant2: '' };
     const parsed = JSON.parse(raw);
     return {

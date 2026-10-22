@@ -2,6 +2,7 @@
 // リハビリ物品・装具貸出CRUD・返却管理・LocalStorage永続化層
 
 import { normalizeString, normalizePatientId, normalizeDateString } from '../core/dataNormalizer.js';
+import { storageGet } from '../core/storageAdapter.js';
 import { writeStorageItem } from './storageWrite.js';
 
 const STORAGE_KEY = 'reha_loans_master';
@@ -57,7 +58,7 @@ const DEFAULT_LOANS = [
  */
 export function getAllLoans() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = storageGet(STORAGE_KEY);
     if (!raw) {
       saveAllLoans(DEFAULT_LOANS);
       return [...DEFAULT_LOANS];

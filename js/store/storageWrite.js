@@ -1,16 +1,28 @@
 // js/store/storageWrite.js
-// localStorage への書き込み。失敗したときは画面に出す。
+// 透過的ストレージ書き込み（メモリ + IndexedDB + localStorage ミラー）
+// 失敗時のみトースト通知。Store API の同期戻り値契約は維持。
 
+import { storageSet } from '../core/storageAdapter.js';
 import { showToast } from '../ui/toast.js';
 
 let lastFailureToastAt = 0;
 
+/**
+ * キー・値を永続化する（同期的にメモリ反映し、裏で IndexedDB へ保存）
+ * @param {string} key
+ * @param {string} value
+ * @returns {boolean}
+ */
 export function writeStorageItem(key, value) {
   try {
-    localStorage.setItem(key, value);
+    const ok = storageSet(key, value);
+    if (!ok) {
+      notifyStorageWriteFailure(new Error('storageSet returned false'));
+      return false;
+    }
     return true;
   } catch (error) {
-    console.error('localStorage write error:', key, error);
+    console.error('storage write error:', key, error);
     notifyStorageWriteFailure(error);
     return false;
   }

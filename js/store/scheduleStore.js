@@ -3,6 +3,7 @@
 
 import { TIME_SLOTS } from '../config/rules.js';
 import { normalizeDateString, safeParseInt } from '../core/dataNormalizer.js';
+import { storageGet, storageKeys } from '../core/storageAdapter.js';
 import { writeStorageItem } from './storageWrite.js';
 import { getPatientById } from './patientStore.js';
 import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
@@ -59,7 +60,7 @@ export function getDailySchedule(dateStr) {
   if (!cleanDate) return { ...defaultSchedule };
 
   try {
-    const raw = localStorage.getItem(getStorageKey(cleanDate));
+    const raw = storageGet(getStorageKey(cleanDate));
     if (!raw) return { ...defaultSchedule };
     const parsed = JSON.parse(raw);
     // A/B/C 以外（D以降の増員枠）も永続化データを欠落させない
@@ -244,13 +245,12 @@ export function hasPatientPastPlan(patientId, beforeDateStr) {
   }
 
   try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key || !key.startsWith(STORAGE_PREFIX)) continue;
+    const scheduleKeys = storageKeys(STORAGE_PREFIX);
+    for (const key of scheduleKeys) {
       const datePart = key.replace(STORAGE_PREFIX, '');
       if (datePart >= beforeDateStr) continue;
 
-      const raw = localStorage.getItem(key);
+      const raw = storageGet(key);
       if (!raw || !raw.includes(patientId)) continue;
 
       const sched = JSON.parse(raw);

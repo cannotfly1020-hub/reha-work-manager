@@ -1,7 +1,11 @@
 // js/backup/backupService.js
 // 手動バックアップ・年度確定バックアップ・復元・日次自動保存
+// ★データ収集は透過ストレージ層（メモリ/IndexedDB）スナップショットを正本とする
 
 import { getLocalDateStr } from '../core/dateUtils.js';
+import {
+  storageKeys, storageRemove, storageRemoveByPrefix, storageSnapshot, storageSet
+} from '../core/storageAdapter.js';
 import { writeStorageItem } from '../store/storageWrite.js';
 import { showToast } from '../ui/toast.js';
 
@@ -15,13 +19,26 @@ function createSystemDump(meta = {}) {
     ...meta,
     storage: {}
   };
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    // 自動バックアップ自体の肥大化防止のため、内部ローテーションキーは除外して純粋データのみ収集
-    if (key && key.startsWith('reha_') && !key.startsWith('reha_autobackup_')) {
-      dump.storage[key] = localStorage.getItem(key);
-    }
+
+  // メモリキャッシュ上の reha_* を正本として収集（IndexedDB 由来データも含む）
+  const snapshot = storageSnapshot('reha_');
+  Object.entries(snapshot).forEach(([key, value]) => {
+    if (key.startsWith('reha_autobackup_')) return;
+    dump.storage[key] = value;
+  });
+
+  // 初期化前フォールバック: スナップショットが空なら localStorage も走査
+  if (Object.keys(dump.storage).length === 0) {
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('reha_') && !key.startsWith('reha_autobackup_')) {
+          dump.storage[key] = localStorage.getItem(key);
+        }
+      }
+    } catch (_) { /* ignore */ }
   }
+
   return dump;
 }
 
@@ -50,12 +67,7 @@ export function triggerDailyAutoBackup() {
 
 
 function removeLegacyAutoBackupCopies() {
-  const keys = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key && key.startsWith('reha_autobackup_')) keys.push(key);
-  }
-  keys.forEach((key) => localStorage.removeItem(key));
+  storageKeys('reha_autobackup_').forEach((key) => storageRemove(key));
 }
 
 export async function performDailyAutoBackup() {
@@ -153,17 +165,15 @@ export function setupBackupAndRestoreListeners() {
           return showToast('無効なファイルです。正しいバックアップJSONを選択してください。', 'error');
         }
 
-        const keysToRemove = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (k && k.startsWith('reha_')) keysToRemove.push(k);
-        }
-        keysToRemove.forEach((k) => localStorage.removeItem(k));
+        // 既存 reha_* をメモリ・IDB・LS から一掃
+        storageRemoveByPrefix('reha_');
 
         for (const [k, v] of Object.entries(parsed.storage)) {
           if (typeof v !== 'string') continue;
+          // writeStorageItem → storageSet（メモリ + IDB + LS ミラー）
           if (!writeStorageItem(k, v)) {
-            throw new Error('storage-write-failed');
+            // write 失敗時も storageSet 直叩きでメモリ/IDB は残す
+            storageSet(k, v);
           }
         }
 
