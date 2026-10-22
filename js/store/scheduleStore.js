@@ -48,24 +48,35 @@ function getStorageKey(dateStr) {
   return `${STORAGE_PREFIX}${normalizeDateString(dateStr)}`;
 }
 
+/** スケジュールオブジェクトからセラピスト列ID一覧を取得（analgesia を除外） */
+export function listTherapistIdsFromSchedule(schedule) {
+  return Object.keys(schedule || {}).filter((key) => key !== 'analgesia');
+}
+
 export function getDailySchedule(dateStr) {
   const defaultSchedule = { A: {}, B: {}, C: {}, analgesia: {} };
   const cleanDate = normalizeDateString(dateStr);
-  if (!cleanDate) return defaultSchedule;
+  if (!cleanDate) return { ...defaultSchedule };
 
   try {
     const raw = localStorage.getItem(getStorageKey(cleanDate));
-    if (!raw) return defaultSchedule;
+    if (!raw) return { ...defaultSchedule };
     const parsed = JSON.parse(raw);
-    return {
-      A: parsed.A || {},
-      B: parsed.B || {},
-      C: parsed.C || {},
-      analgesia: parsed.analgesia || {}
-    };
+    // A/B/C 以外（D以降の増員枠）も永続化データを欠落させない
+    const result = { analgesia: parsed.analgesia || {} };
+    Object.keys(parsed).forEach((key) => {
+      if (key === 'analgesia') return;
+      if (parsed[key] && typeof parsed[key] === 'object' && !Array.isArray(parsed[key])) {
+        result[key] = parsed[key];
+      }
+    });
+    ['A', 'B', 'C'].forEach((id) => {
+      if (!result[id]) result[id] = {};
+    });
+    return result;
   } catch (error) {
     console.error('getDailySchedule parse error:', error);
-    return defaultSchedule;
+    return { ...defaultSchedule };
   }
 }
 
@@ -165,14 +176,15 @@ export function getDailyStats(dateStr) {
   const schedule = getDailySchedule(dateStr);
   const stats = {
     totalUnits: 0, totalPatients: 0, planCount: 0,
-    therapists: { A: { units: 0, patients: 0 }, B: { units: 0, patients: 0 }, C: { units: 0, patients: 0 } },
+    therapists: {},
     analgesia: { total: 0, inpatients: 0, outpatients: 0 }
   };
   const uniquePatients = new Set();
 
-  ['A', 'B', 'C'].forEach((tId) => {
+  listTherapistIdsFromSchedule(schedule).forEach((tId) => {
     const tSlots = schedule[tId] || {};
     const tSet = new Set();
+    if (!stats.therapists[tId]) stats.therapists[tId] = { units: 0, patients: 0 };
     Object.values(tSlots).forEach((item) => {
       if (isNonPatientBlock(item)) return;
       if (item?.patientId) {
@@ -209,7 +221,7 @@ export function findPatientMonthlyPlanDate(patientId, year, month, excludeDate =
   for (let d = 1; d <= daysInMonth; d++) {
     const dStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     const schedule = getDailySchedule(dStr);
-    for (const tId of ['A', 'B', 'C']) {
+    for (const tId of listTherapistIdsFromSchedule(schedule)) {
       const slots = schedule[tId] || {};
       for (const [sId, item] of Object.entries(slots)) {
         if (!item || item.patientId !== patientId || !item.billingPlan) continue;
@@ -242,7 +254,7 @@ export function hasPatientPastPlan(patientId, beforeDateStr) {
       if (!raw || !raw.includes(patientId)) continue;
 
       const sched = JSON.parse(raw);
-      for (const tId of ['A', 'B', 'C']) {
+      for (const tId of listTherapistIdsFromSchedule(sched)) {
         const slots = sched[tId] || {};
         for (const item of Object.values(slots)) {
           if (item?.patientId === patientId && item?.billingPlan) return true;
@@ -296,8 +308,8 @@ export function aggregateFromAppSchedule(year, month) {
       analgesiaTotal: 0, analgesiaInpatients: 0, analgesiaOutpatients: 0
     };
 
-    // 1. セラピスト個別枠の走査（疾患別リハビリテーション）
-    ['A', 'B', 'C'].forEach((tId) => {
+    // 1. セラピスト個別枠の走査（疾患別リハビリテーション・増員枠 D 以降も対象）
+    listTherapistIdsFromSchedule(schedule).forEach((tId) => {
       const tSlots = schedule[tId] || {};
       Object.entries(tSlots).forEach(([slotId, item]) => {
         if (!item?.patientId || isNonPatientBlock(item)) return;

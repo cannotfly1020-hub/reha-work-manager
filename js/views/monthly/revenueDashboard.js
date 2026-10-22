@@ -11,8 +11,8 @@ function getPlanPoints(planKey) {
   if (typeof planKey === 'string' && REHA_RULES.PLAN_POINTS[planKey]) {
     return REHA_RULES.PLAN_POINTS[planKey];
   }
-  // 過去データの互換フォールバック
-  return REHA_RULES.PLAN_POINTS.PLAN_1_FIRST || 300;
+  // 未知キーは過大計上を避け 0（旧データで true 等の残骸があった場合の防御）
+  return 0;
 }
 
 export function renderRevenueDashboard(aggregated) {

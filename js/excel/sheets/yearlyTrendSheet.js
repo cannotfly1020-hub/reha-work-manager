@@ -2,12 +2,12 @@
 // 年間推移
 
 import { REHA_RULES } from '../../config/rules.js';
-import { evaluateEarlyBonusPhase } from '../../core/deadlineCalc.js';
+import { evaluateEarlyBonusPhase, getDailyBasePoints } from '../../core/deadlineCalc.js';
 import { aggregateFromAppSchedule } from '../../store/scheduleStore.js';
 import {
-  STYLES, thinBorder, getDiseaseInitial, getEarlyBaseDate,
+  STYLES, getEarlyBaseDate,
   setStyledCell, setSheetCols, updateSheetRange, appendOrReplaceSheet,
-  applyA4LandscapePrintSetup, SUMMARY_SHEET, YEARLY_TREND_SHEET
+  applyA4LandscapePrintSetup, YEARLY_TREND_SHEET
 } from '../sheetUtils.js';
 
 export function writeYearlyTrendSheet(wb, targetYear) {
@@ -38,7 +38,6 @@ export function writeYearlyTrendSheet(wb, targetYear) {
       const isInput = p.category === 'INPATIENT';
       const baseEarlyDate = getEarlyBaseDate(p);
 
-      const earlyDatesCounted = new Set();
       item.slots.forEach((s) => {
         if (s.isAnalgesia) {
           if (!isInput) {
@@ -46,45 +45,47 @@ export function writeYearlyTrendSheet(wb, targetYear) {
             st.outAmount += 35 * 10;
             st.totalAmount += 35 * 10;
           }
+          return;
+        }
+
+        const u = s.units || 1;
+        const dType = (p.diseaseType && p.diseaseType !== 'ANALGESIA') ? p.diseaseType : 'LOCOMOTIVE';
+        const unitPts = getDailyBasePoints(p, s.date).points
+          || REHA_RULES.LIMIT_DAYS[dType]?.defaultPoints
+          || 170;
+        const yen = u * unitPts * 10;
+
+        if (isInput) {
+          st.inUnits += u;
+          st.inAmount += yen;
+          if (dType === 'LOCOMOTIVE') st.inLoco += u;
+          else if (dType === 'CEREBROVASCULAR') st.inCerebro += u;
+          else if (dType === 'DISUSE') st.inDisuse += u;
         } else {
-          const u = s.units || 1;
-          const dType = (p.diseaseType && p.diseaseType !== 'ANALGESIA') ? p.diseaseType : 'LOCOMOTIVE';
-          const unitPts = REHA_RULES.LIMIT_DAYS[dType]?.defaultPoints || 170;
-          const yen = u * unitPts * 10;
+          st.outUnits += u;
+          st.outAmount += yen;
+          if (dType === 'LOCOMOTIVE') st.outLoco += u;
+          else if (dType === 'CEREBROVASCULAR') st.outCerebro += u;
+          else if (dType === 'DISUSE') st.outDisuse += u;
+        }
 
-          if (isInput) {
-            st.inUnits += u;
-            st.inAmount += yen;
-            if (dType === 'LOCOMOTIVE') st.inLoco += u;
-            else if (dType === 'CEREBROVASCULAR') st.inCerebro += u;
-            else if (dType === 'DISUSE') st.inDisuse += u;
-          } else {
-            st.outUnits += u;
-            st.outAmount += yen;
-            if (dType === 'LOCOMOTIVE') st.outLoco += u;
-            else if (dType === 'CEREBROVASCULAR') st.outCerebro += u;
-            else if (dType === 'DISUSE') st.outDisuse += u;
-          }
+        st.totalUnits += u;
+        st.totalAmount += yen;
 
-          st.totalUnits += u;
-          st.totalAmount += yen;
+        if (s.billingPlan && REHA_RULES.PLAN_POINTS[s.billingPlan]) {
+          const pPts = REHA_RULES.PLAN_POINTS[s.billingPlan];
+          const pYen = pPts * 10;
+          if (isInput) st.inAmount += pYen;
+          else st.outAmount += pYen;
+          st.totalAmount += pYen;
+        }
 
-          if (s.billingPlan && REHA_RULES.PLAN_POINTS[s.billingPlan]) {
-            const pPts = REHA_RULES.PLAN_POINTS[s.billingPlan];
-            const pYen = pPts * 10;
-            if (isInput) st.inAmount += pYen;
-            else st.outAmount += pYen;
-            st.totalAmount += pYen;
-          }
-
-          if (isInput && baseEarlyDate && s.date && !earlyDatesCounted.has(s.date)) {
-            earlyDatesCounted.add(s.date);
-            const ph = evaluateEarlyBonusPhase(baseEarlyDate, s.date, 'INPATIENT');
-            if (ph.points > 0) {
-              const eYen = ph.points * 10;
-              st.inAmount += eYen;
-              st.totalAmount += eYen;
-            }
+        if (isInput && baseEarlyDate && s.date) {
+          const ph = evaluateEarlyBonusPhase(baseEarlyDate, s.date, 'INPATIENT');
+          if (ph.points > 0) {
+            const eYen = ph.points * u * 10;
+            st.inAmount += eYen;
+            st.totalAmount += eYen;
           }
         }
       });

@@ -2,12 +2,11 @@
 // レセプト収益サマリー
 
 import { REHA_RULES } from '../../config/rules.js';
-import { evaluateEarlyBonusPhase } from '../../core/deadlineCalc.js';
-import { aggregateFromAppSchedule } from '../../store/scheduleStore.js';
+import { evaluateEarlyBonusPhase, getDailyBasePoints } from '../../core/deadlineCalc.js';
 import {
-  STYLES, thinBorder, getDiseaseInitial, getEarlyBaseDate,
+  STYLES, thinBorder, getEarlyBaseDate,
   setStyledCell, setSheetCols, updateSheetRange, appendOrReplaceSheet,
-  applyA4LandscapePrintSetup, SUMMARY_SHEET, YEARLY_TREND_SHEET
+  applyA4LandscapePrintSetup, SUMMARY_SHEET
 } from '../sheetUtils.js';
 
 export function writeExecutiveSummarySheet(wb, aggregated) {
@@ -15,13 +14,16 @@ export function writeExecutiveSummarySheet(wb, aggregated) {
   const ws = {};
   const rowHeights = [];
 
+  // units = 実施単位, pts = 実施日別単価で積算した総点数（維持期日割り対応）
   const inStats = {
     LOCOMOTIVE: 0, CEREBROVASCULAR: 0, DISUSE: 0,
+    LOCOMOTIVE_PTS: 0, CEREBROVASCULAR_PTS: 0, DISUSE_PTS: 0,
     early1: 0, early2: 0,
     planPts: 0, planCount: 0
   };
   const outStats = {
     LOCOMOTIVE: 0, CEREBROVASCULAR: 0, DISUSE: 0,
+    LOCOMOTIVE_PTS: 0, CEREBROVASCULAR_PTS: 0, DISUSE_PTS: 0,
     analgesia: 0,
     planPts: 0, planCount: 0
   };
@@ -32,29 +34,32 @@ export function writeExecutiveSummarySheet(wb, aggregated) {
     const target = isInput ? inStats : outStats;
     const baseEarlyDate = getEarlyBaseDate(p);
 
-    const earlyDatesCounted = new Set();
     item.slots.forEach((s) => {
       if (s.isAnalgesia) {
         if (!isInput) target.analgesia++;
-      } else {
-        if (s.billingPlan && REHA_RULES.PLAN_POINTS[s.billingPlan]) {
-          target.planPts += REHA_RULES.PLAN_POINTS[s.billingPlan];
-          target.planCount++;
-        }
-        if (isInput && baseEarlyDate && s.date && !earlyDatesCounted.has(s.date)) {
-          earlyDatesCounted.add(s.date);
-          const ph = evaluateEarlyBonusPhase(baseEarlyDate, s.date, 'INPATIENT');
-          if (ph.phase === 'PHASE_1') inStats.early1++;
-          else if (ph.phase === 'PHASE_2') inStats.early2++;
-        }
+        return;
+      }
+
+      const u = Number(s.units) || 1;
+      const dType = (p.diseaseType && p.diseaseType !== 'ANALGESIA') ? p.diseaseType : 'LOCOMOTIVE';
+      if (target[dType] !== undefined) {
+        const rate = getDailyBasePoints(p, s.date);
+        target[dType] += u;
+        target[`${dType}_PTS`] += rate.points * u;
+      }
+
+      if (s.billingPlan && REHA_RULES.PLAN_POINTS[s.billingPlan]) {
+        target.planPts += REHA_RULES.PLAN_POINTS[s.billingPlan];
+        target.planCount++;
+      }
+
+      // 早期加算は単位ごとに計上（収益ダッシュボードと一致）
+      if (isInput && baseEarlyDate && s.date) {
+        const ph = evaluateEarlyBonusPhase(baseEarlyDate, s.date, 'INPATIENT');
+        if (ph.phase === 'PHASE_1') inStats.early1 += u;
+        else if (ph.phase === 'PHASE_2') inStats.early2 += u;
       }
     });
-
-    const rehaUnits = item.rehaTotalUnits !== undefined ? item.rehaTotalUnits : (p.diseaseType !== 'ANALGESIA' ? item.totalUnits : 0);
-    if (rehaUnits > 0) {
-      const dType = (p.diseaseType && p.diseaseType !== 'ANALGESIA') ? p.diseaseType : 'LOCOMOTIVE';
-      if (target[dType] !== undefined) target[dType] += rehaUnits;
-    }
   });
 
   // タイトル（A列から開始、ゆったり36pt）
@@ -121,11 +126,11 @@ export function writeExecutiveSummarySheet(wb, aggregated) {
   let inTotalPts = 0;
   let inTotalYen = 0;
 
-  const r1 = renderDataRow('運動器リハビリテーション(Ⅱ)', inStats.LOCOMOTIVE, REHA_RULES.LIMIT_DAYS.LOCOMOTIVE.defaultPoints, null, '単位 (170点)');
-  const r2 = renderDataRow('脳血管疾患等リハビリテーション(Ⅲ)', inStats.CEREBROVASCULAR, REHA_RULES.LIMIT_DAYS.CEREBROVASCULAR.defaultPoints, null, '単位 (100点)');
-  const r3 = renderDataRow('廃用症候群リハビリテーション(Ⅲ)', inStats.DISUSE, REHA_RULES.LIMIT_DAYS.DISUSE.defaultPoints, null, '単位 (77点)');
-  const r4 = renderDataRow('早期加算(Ⅰ) 1〜3日目', inStats.early1, REHA_RULES.EARLY_BONUS.PHASE_1.points, null, '件数 (入院のみ 60点)');
-  const r5 = renderDataRow('早期加算(Ⅱ) 4〜14日目', inStats.early2, REHA_RULES.EARLY_BONUS.PHASE_2.points, null, '件数 (入院のみ 25点)');
+  const r1 = renderDataRow('運動器リハビリテーション(Ⅱ)', inStats.LOCOMOTIVE, REHA_RULES.LIMIT_DAYS.LOCOMOTIVE.defaultPoints, inStats.LOCOMOTIVE_PTS, '単位 (日別単価積算・維持期対応)');
+  const r2 = renderDataRow('脳血管疾患等リハビリテーション(Ⅲ)', inStats.CEREBROVASCULAR, REHA_RULES.LIMIT_DAYS.CEREBROVASCULAR.defaultPoints, inStats.CEREBROVASCULAR_PTS, '単位 (日別単価積算・維持期対応)');
+  const r3 = renderDataRow('廃用症候群リハビリテーション(Ⅲ)', inStats.DISUSE, REHA_RULES.LIMIT_DAYS.DISUSE.defaultPoints, inStats.DISUSE_PTS, '単位 (日別単価積算・維持期対応)');
+  const r4 = renderDataRow('早期加算(Ⅰ) 1〜3日目', inStats.early1, REHA_RULES.EARLY_BONUS.PHASE_1.points, null, '単位 (入院のみ 60点)');
+  const r5 = renderDataRow('早期加算(Ⅱ) 4〜14日目', inStats.early2, REHA_RULES.EARLY_BONUS.PHASE_2.points, null, '単位 (入院のみ 25点)');
   const r6 = renderDataRow('総合実施計画書 (入院計)', inStats.planCount, 0, inStats.planPts, '件数 (初回300点/継続240点/固定196点)');
 
   inTotalPts = r1.pts + r2.pts + r3.pts + r4.pts + r5.pts + r6.pts;
@@ -141,9 +146,9 @@ export function writeExecutiveSummarySheet(wb, aggregated) {
   let outTotalPts = 0;
   let outTotalYen = 0;
 
-  const ro1 = renderDataRow('運動器リハビリテーション(Ⅱ)', outStats.LOCOMOTIVE, REHA_RULES.LIMIT_DAYS.LOCOMOTIVE.defaultPoints, null, '単位 (170点)');
-  const ro2 = renderDataRow('脳血管疾患等リハビリテーション(Ⅲ)', outStats.CEREBROVASCULAR, REHA_RULES.LIMIT_DAYS.CEREBROVASCULAR.defaultPoints, null, '単位 (100点)');
-  const ro3 = renderDataRow('廃用症候群リハビリテーション(Ⅲ)', outStats.DISUSE, REHA_RULES.LIMIT_DAYS.DISUSE.defaultPoints, null, '単位 (77点)');
+  const ro1 = renderDataRow('運動器リハビリテーション(Ⅱ)', outStats.LOCOMOTIVE, REHA_RULES.LIMIT_DAYS.LOCOMOTIVE.defaultPoints, outStats.LOCOMOTIVE_PTS, '単位 (日別単価積算・維持期対応)');
+  const ro2 = renderDataRow('脳血管疾患等リハビリテーション(Ⅲ)', outStats.CEREBROVASCULAR, REHA_RULES.LIMIT_DAYS.CEREBROVASCULAR.defaultPoints, outStats.CEREBROVASCULAR_PTS, '単位 (日別単価積算・維持期対応)');
+  const ro3 = renderDataRow('廃用症候群リハビリテーション(Ⅲ)', outStats.DISUSE, REHA_RULES.LIMIT_DAYS.DISUSE.defaultPoints, outStats.DISUSE_PTS, '単位 (日別単価積算・維持期対応)');
   const ro4 = renderDataRow('消炎鎮痛等処置 (物療)', outStats.analgesia, 35, null, '件数 (1日1回35点)');
   const ro5 = renderDataRow('総合実施計画書 (外来計)', outStats.planCount, 0, outStats.planPts, '件数 (初回300点/継続240点/固定196点)');
 

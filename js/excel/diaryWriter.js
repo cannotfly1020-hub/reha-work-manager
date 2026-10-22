@@ -197,7 +197,8 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
             if (baseEarlyDate) {
               const ph = evaluateEarlyBonusPhase(baseEarlyDate, dateStr, 'INPATIENT');
               if (ph.points > 0) {
-                breakdown.IN.earlyYen += ph.points * 10;
+                // 早期加算は単位ごとに加算（画面KPI・収益ダッシュボードと一致）
+                breakdown.IN.earlyYen += ph.points * u * 10;
               }
             }
           }
