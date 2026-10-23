@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>リハビリ業務管理システム | reha-work-manager</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/schedule.css">
+  <link rel="stylesheet" href="css/tables.css">
+  <link rel="stylesheet" href="css/modals.css">
+  <link rel="stylesheet" href="css/toast.css">
+  <link rel="stylesheet" href="css/appointment.css">
+  <link rel="stylesheet" href="css/style.css">
+  <!-- SheetJS: ローカル内包を最優先（完全オフライン保証）。未読込時のみ CDN フォールバック -->
+  <script src="js/vendor/xlsx.bundle.js"></script>
+  <script>
+    (function () {
+      if (typeof XLSX !== 'undefined') return;
+      document.write('<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"><\/script>');
+    })();
+  </script>
+</head>
+<body>
+
+  <!-- アプリヘッダー & ナビゲーションタブ -->
+  <header class="app-header">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <h1 style="font-size:1.15rem; font-weight:800; color:#0f172a; margin:0;">reha-work-manager</h1>
+      <span style="font-size:0.75rem; background:#e0f2fe; color:#0369a1; padding:2px 8px; border-radius:9999px; font-weight:700;">令和8年度改定準拠</span>
+    </div>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <nav class="nav-tab-group">
+        <button class="nav-tab active" data-target="viewSchedule">本日時間割</button>
+        <button class="nav-tab" data-target="viewAppointmentCalendar">外来予約カレンダー</button>
+        <button class="nav-tab" data-target="viewMonthly">月間単位・収益</button>
+        <button class="nav-tab" data-target="viewPatient">患者台帳</button>
+        <button class="nav-tab" data-target="viewLoan">物品貸出</button>
+        <button class="nav-tab" data-target="viewExport">Excel出力</button>
+      </nav>
+      <!-- ヘッダー更新ボタン -->
+      <button id="btnRefreshHeader" type="button" style="display:flex; align-items:center; gap:5px; padding:6px 12px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; font-size:0.82rem; font-weight:700; color:#0369a1; cursor:pointer;">
+        <span>🔄</span>
+        <span>最新に更新</span>
+      </button>
+      <!-- スタッフ設定ボタン -->
+      <button id="btnOpenStaffSettings" type="button" style="display:flex; align-items:center; gap:5px; padding:6px 12px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; font-size:0.82rem; font-weight:700; color:#334155; cursor:pointer;">
+        <span>⚙</span>
+        <span>スタッフ設定</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- VIEW 1: 本日時間割 -->
+  <section id="viewSchedule" class="view-panel active">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <input type="date" id="scheduleDateInput" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.9rem;">
+        <button id="btnTodaySchedule" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; cursor:pointer;">今日</button>
+        <!-- 時間割専用更新ボタン -->
+        <button id="btnRefreshSchedule" type="button" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; font-weight:600; color:#0369a1; cursor:pointer;">🔄 更新</button>
+        <!-- ★新設: 本日の外来予約一括反映ボタン ＆ 件数バッジ -->
+        <button id="btnSyncAppointmentsToSchedule" type="button" style="display:flex; align-items:center; gap:6px; padding:6px 12px; background:#eff6ff; border:1px solid #3b82f6; border-radius:6px; font-size:0.85rem; font-weight:700; color:#1d4ed8; cursor:pointer;" title="外来予約カレンダーの本日予約データを時間割へ安全に自動配置します">
+          <span>📥</span>
+          <span>本日の予約を一括反映</span>
+          <span id="syncAppointmentCountBadge" style="font-size:0.75rem; background:#3b82f6; color:#ffffff; padding:1px 6px; border-radius:9999px; font-weight:700;">0件</span>
+        </button>
+      </div>
+      <div id="dailyKpiStrip" style="display:flex; gap:16px; font-size:0.88rem; font-weight:600; background:#fff; padding:6px 16px; border-radius:6px; border:1px solid #e2e8f0;"></div>
+    </div>
+    <div style="display:grid; grid-template-columns: 240px 1fr; gap:16px;">
+      <aside style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:8px; max-height:80vh; overflow-y:auto;">
+        <input type="text" id="paletteSearch" placeholder="患者名・ID検索..." style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem;">
+        <!-- 患者パレット並び替えドロップダウン -->
+        <select id="paletteSortSelect" style="width:100%; padding:5px 6px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.75rem; background:#fff; font-weight:600; color:#334155; cursor:pointer;">
+          <option value="KANA" selected>並べ替え: 五十音順 (あいうえお)</option>
+          <option value="DISEASE">並べ替え: 疾患別 (運動器 → 脳血管 → 廃用)</option>
+          <option value="ID">並べ替え: 患者ID (カルテ番号) 順</option>
+        </select>
+        <div style="display:flex; gap:4px;">
+          <button class="palette-cat-btn active" data-cat="ALL" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">全て</button>
+          <button class="palette-cat-btn" data-cat="INPATIENT" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">入院</button>
+          <button class="palette-cat-btn" data-cat="OUTPATIENT" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">外来</button>
+          <button class="palette-cat-btn" data-cat="ANALGESIA" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">消炎</button>
+        </div>
+        <div id="palettePatientList" style="display:flex; flex-direction:column; gap:6px; margin-top:4px;"></div>
+      </aside>
+      <main class="timetable-container" id="timetableGrid"></main>
+    </div>
+  </section>
+
+  <!-- VIEW: 外来予約カレンダー (週間タイムテーブル ＆ ドラッグ＆ドロップ ＆ 2大A4印刷対応) -->
+  <section id="viewAppointmentCalendar" class="view-panel">
+    <!-- 上部操作バー -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <button id="btnAptCalPrevWeek" style="padding:6px 12px; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer; font-size:0.85rem; font-weight:600;">◀ 前週</button>
+        <input type="date" id="aptCalendarWeekDateInput" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.9rem; font-weight:700; background:#fff;">
+        <button id="btnAptCalNextWeek" style="padding:6px 12px; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer; font-size:0.85rem; font-weight:600;">次週 ▶</button>
+        <button id="btnAptCalThisWeek" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; cursor:pointer; font-weight:600;">今週</button>
+        <span id="aptCalendarWeekRangeLabel" style="font-size:0.88rem; font-weight:800; color:#0f172a; margin-left:6px;"></span>
+      </div>
+
+      <div style="display:flex; align-items:center; gap:8px;">
+        <!-- 表示モード切替（週間タイムテーブル優先 / 月間マンスリー） -->
+        <div style="display:flex; border:1px solid #cbd5e1; border-radius:6px; overflow:hidden; background:#fff;">
+          <button id="btnAptViewModeWeek" type="button" class="apt-view-mode-btn active" style="padding:6px 12px; border:none; background:#0284c7; color:#fff; font-size:0.8rem; font-weight:700; cursor:pointer;">週間 (時間割)</button>
+          <button id="btnAptViewModeMonth" type="button" class="apt-view-mode-btn" style="padding:6px 12px; border:none; background:#fff; color:#475569; font-size:0.8rem; font-weight:700; cursor:pointer;">月間 (マス目)</button>
+        </div>
+        <span id="aptCalendarWeekCountBadge" style="font-size:0.82rem; font-weight:700; color:#0369a1; background:#e0f2fe; padding:6px 12px; border-radius:6px; border:1px solid #bae6fd;">週間予約: 計 0 件</span>
+
+        <!-- ★印刷ボタン 1: 週間タイムテーブル (A4横1枚完結・Excel完全同一レイアウト) -->
+        <button id="btnAptPrintWeekly" type="button" style="display:flex; align-items:center; gap:4px; padding:6px 12px; background:#fff; border:1px solid #0284c7; border-radius:6px; font-size:0.82rem; font-weight:700; color:#0369a1; cursor:pointer;" title="今週1週間の予約をA4横1枚のタイムテーブルで印刷します">
+          <span>🖨</span>
+          <span>週間表 (A4横)</span>
+        </button>
+
+        <!-- ★印刷ボタン 2: 本日デイリー予約チェックリスト (A4縦1枚・30名以上対応) -->
+        <button id="btnAptPrintDaily" type="button" style="display:flex; align-items:center; gap:4px; padding:6px 12px; background:#fff; border:1px solid #16a34a; border-radius:6px; font-size:0.82rem; font-weight:700; color:#15803d; cursor:pointer;" title="選択中の日付（または本日）の予約患者をA4縦1枚のバインダー用チェック表で印刷します">
+          <span>📋</span>
+          <span>本日デイリー (A4縦)</span>
+        </button>
+
+        <button id="btnAptCalNew" type="button" style="padding:6px 14px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.82rem; cursor:pointer;">＋ 新規予約</button>
+      </div>
+    </div>
+
+    <!-- 週間ビュー本体：左側患者パレット ＋ 右側週間タイムテーブルグリッド -->
+    <div id="aptWeeklyViewContainer" style="display:grid; grid-template-columns: 240px 1fr; gap:16px;">
+      <!-- 左側：外来予約用 患者パレット -->
+      <aside style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:8px; max-height:80vh; overflow-y:auto;">
+        <div style="font-size:0.8rem; font-weight:800; color:#0f172a; display:flex; justify-content:space-between; align-items:center;">
+          <span>👤 患者パレット (予約用)</span>
+          <span style="font-size:0.68rem; color:#64748b;">ドラッグで配置</span>
+        </div>
+        <input type="text" id="aptPaletteSearch" placeholder="患者名・ID検索..." style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem;">
+        <select id="aptPaletteSortSelect" style="width:100%; padding:5px 6px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.75rem; background:#fff; font-weight:600; color:#334155; cursor:pointer;">
+          <option value="KANA" selected>並べ替え: 五十音順 (あいうえお)</option>
+          <option value="DISEASE">並べ替え: 疾患別 (運動器 → 脳血管 → 廃用)</option>
+          <option value="ID">並べ替え: 患者ID (カルテ番号) 順</option>
+        </select>
+        <div style="display:flex; gap:4px;">
+          <button class="apt-palette-cat-btn" data-cat="ALL" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">全て</button>
+          <button class="apt-palette-cat-btn active" data-cat="OUTPATIENT" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">外来</button>
+          <button class="apt-palette-cat-btn" data-cat="ANALGESIA" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">消炎</button>
+          <button class="apt-palette-cat-btn" data-cat="INPATIENT" style="flex:1; padding:3px; font-size:0.75rem; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; background:#fff;">入院</button>
+        </div>
+        <div id="aptPalettePatientList" style="display:flex; flex-direction:column; gap:6px; margin-top:4px;"></div>
+      </aside>
+
+      <!-- 右側：週間タイムテーブル（月〜土 × 時間枠） -->
+      <main class="apt-weekly-grid-container" id="aptWeeklyGrid"></main>
+    </div>
+
+    <!-- 月間ビュー本体（切替時のみ表示、普段は非表示） -->
+    <div id="aptMonthlyViewContainer" style="display:none;">
+      <div id="aptCalendarGridContainer" class="calendar-container"></div>
+    </div>
+  </section>
+
+  <!-- VIEW 2: 月間単位・収益ダッシュボード -->
+  <section id="viewMonthly" class="view-panel">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <button id="btnPrevMonth" style="padding:6px 12px; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer;">◀ 前月</button>
+        <input type="month" id="monthlyMonthInput" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.95rem; font-weight:700;">
+        <button id="btnNextMonth" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; cursor:pointer;">次月 ▶</button>
+        <select id="monthlySortSelect" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; background:#fff; font-weight:600; color:#334155; cursor:pointer; margin-left:8px;">
+          <option value="CATEGORY" selected>並べ替え: 区分順 (入院→外来→消炎)</option>
+          <option value="KANA">並べ替え: 五十音順 (あいうえお)</option>
+          <option value="ID">並べ替え: 患者ID順</option>
+        </select>
+      </div>
+      <div style="display:flex; gap:16px;">
+        <div id="kpiTodayRevenueCard" style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:8px 16px; text-align:center; cursor:pointer;" title="クリックで本日の収益内訳明細を表示">
+          <div style="font-size:0.75rem; color:#64748b; display:flex; align-items:center; justify-content:center; gap:4px;">
+            <span>本日収益見込 (単位)</span>
+            <span style="font-size:0.68rem; background:#e0f2fe; color:#0369a1; padding:1px 4px; border-radius:3px; font-weight:700;">内訳🔍</span>
+          </div>
+          <div style="font-size:1.1rem; font-weight:800; color:#0369a1;"><span id="kpiTodayRevenue">¥0</span> <span id="kpiTodayUnits" style="font-size:0.8rem; font-weight:600; color:#64748b;">(0単位)</span></div>
+        </div>
+        <div style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:8px 16px; text-align:center;">
+          <div style="font-size:0.75rem; color:#64748b;">当月累計収益 (総単位)</div>
+          <div style="font-size:1.1rem; font-weight:800; color:#059669;"><span id="kpiMonthRevenue">¥0</span> <span id="kpiMonthUnits" style="font-size:0.8rem; font-weight:600; color:#64748b;">(0単位)</span></div>
+        </div>
+      </div>
+    </div>
+    <div id="dailyDiaryPreviewContainer" style="margin-bottom:16px;"></div>
+    <div class="table-container" id="monthlyTableContainer"></div>
+  </section>
+
+  <!-- VIEW 3: 患者台帳（ステータス絞り込み対応） -->
+  <section id="viewPatient" class="view-panel">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; gap:8px; flex-wrap:wrap;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <input type="text" id="patientSearchInput" placeholder="氏名・ID・疾患名で検索..." style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; width:240px;">
+        <select id="patientCategoryFilter" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem;">
+          <option value="ALL">全患者区分</option>
+          <option value="INPATIENT">入院患者</option>
+          <option value="OUTPATIENT">外来患者</option>
+        </select>
+        <!-- ステータス絞り込み（通院中 / 終了・退院 / 全体） -->
+        <select id="patientStatusFilter" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; font-weight:600; background:#fff; cursor:pointer;">
+          <option value="ACTIVE" selected>● 継続（通院・入院中）</option>
+          <option value="DISCONTINUED">■ 終了・退院（中止）</option>
+          <option value="ALL">全ステータス（全件表示）</option>
+        </select>
+        <select id="patientSortSelect" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; font-weight:600; background:#fff; color:#334155; cursor:pointer;">
+          <option value="ID_ASC" selected>並べ替え: 患者ID順 (昇順)</option>
+          <option value="DEADLINE_URGENT">並べ替え: 算定期限 残日数が少ない順 (要点検⚠️)</option>
+          <option value="KANA_ASC">並べ替え: 五十音順 (あいうえお)</option>
+          <option value="ONSET_DESC">並べ替え: 起算日 (新しい順)</option>
+          <option value="ADMISSION_DESC">並べ替え: 入院日 (新しい順)</option>
+        </select>
+      </div>
+      <button id="btnNewPatient" style="padding:8px 16px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.85rem; cursor:pointer;">＋ 新規患者登録</button>
+    </div>
+    <div class="table-container" id="patientTableContainer"></div>
+  </section>
+
+  <!-- VIEW 4: 物品貸出 -->
+  <section id="viewLoan" class="view-panel">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="loanSearchInput" placeholder="物品名・患者名で絞り込み..." style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; width:240px;">
+        <select id="loanStatusFilter" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem;">
+          <option value="ALL">全ステータス</option>
+          <option value="ACTIVE" selected>貸出中</option>
+          <option value="RETURNED">返却済</option>
+        </select>
+        <select id="loanOwnerFilter" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem;">
+          <option value="ALL">全所有区分</option>
+          <option value="HOSPITAL">院内備品</option>
+          <option value="VENDOR">業者借用</option>
+        </select>
+      </div>
+      <button id="btnNewLoan" style="padding:8px 16px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.85rem; cursor:pointer;">＋ 貸出登録</button>
+    </div>
+    <div class="table-container" id="loanTableContainer"></div>
+  </section>
+
+  <!-- VIEW 5: Excel出力 & バックアップ復元 -->
+  <section id="viewExport" class="view-panel">
+    <div style="max-width:720px; margin:0 auto; background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:32px; box-shadow:var(--shadow-sm);">
+      <h2 style="font-size:1.15rem; font-weight:800; margin-bottom:8px; color:#0f172a;">提出用Excel原本 自動生成</h2>
+      <p style="font-size:0.8rem; color:#64748b; margin-bottom:24px;">対象年月を選択し、ボタンを押すだけでデザイン・罫線・計算済みのExcel帳票を瞬時にダウンロードできます。</p>
+      
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom:28px; background:#f8fafc; padding:12px 16px; border-radius:8px; border:1px solid #e2e8f0;">
+        <label for="exportMonthInput" style="font-weight:700; font-size:0.9rem; color:#334155;">出力対象年月:</label>
+        <input type="month" id="exportMonthInput" style="padding:8px 14px; border:1px solid #cbd5e1; border-radius:6px; font-size:1rem; font-weight:700; background:#fff;">
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:20px; display:flex; flex-direction:column; justify-content:space-between;">
+          <div>
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+              <span style="font-size:1.1rem;">📋</span>
+              <h3 style="font-size:0.95rem; font-weight:800; color:#0f172a; margin:0;">1. 受付提出用Excel</h3>
+            </div>
+            <p style="font-size:0.8rem; color:#64748b; line-height:1.6; margin-bottom:16px;">
+              実施リスト（入院・外来・消炎鎮痛）およびレセプト収益サマリーをA4横サイズで完全生成します。
+            </p>
+          </div>
+          <button id="btnExportUketsuke" style="padding:12px; background:#059669; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.9rem; cursor:pointer;">受付提出用Excelを出力</button>
+        </div>
+
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:20px; display:flex; flex-direction:column; justify-content:space-between;">
+          <div>
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+              <span style="font-size:1.1rem;">📅</span>
+              <h3 style="font-size:0.95rem; font-weight:800; color:#0f172a; margin:0;">2. 業務日誌Excel</h3>
+            </div>
+            <p style="font-size:0.8rem; color:#64748b; line-height:1.6; margin-bottom:16px;">
+              1日〜31日の日別シートへセラピスト別の時間割実施単位を自動集計して出力します。
+            </p>
+          </div>
+          <button id="btnExportDiary" style="padding:12px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.9rem; cursor:pointer;">業務日誌Excelを出力</button>
+        </div>
+      </div>
+
+      <!-- 3. システム全データ バックアップ & 復元 (セーフティネット) -->
+      <div style="margin-top:28px; border-top:1px dashed #cbd5e1; padding-top:24px;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+          <span style="font-size:1.1rem;">📦</span>
+          <h3 style="font-size:0.95rem; font-weight:800; color:#0f172a; margin:0;">3. システム全データ バックアップ & 復元 (JSON)</h3>
+        </div>
+        <p style="font-size:0.78rem; color:#64748b; line-height:1.5; margin-bottom:16px;">
+          患者台帳・時間割・スタッフ設定・物品貸出などの全データを1つのファイルとしてPCに保存、または過去のバックアップから完全復元できます。
+        </p>
+
+        <!-- 過去月アーカイブ分離ステータス（起動メモリ軽量化・自動稼働） -->
+        <div id="archiveStorageStatusPanel" style="margin-bottom:14px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 14px;">
+          <div id="archiveStorageStatusBadge" style="font-size:0.8rem; font-weight:800; color:#0f172a; margin-bottom:4px;">
+            📦 データ保管状態: アクティブ — 件 / アーカイブ退避 — 件
+          </div>
+          <div style="font-size:0.72rem; color:#64748b; line-height:1.45;">
+            過去データを安全にアーカイブ分離して動作を軽量化（自動稼働中）。当月±3ヶ月は常駐、それ以外は月間画面・Excel出力時にオンデマンド読込します。
+          </div>
+        </div>
+
+        <!-- PC自動バックアップ（Electronネイティブ1本化・フォルダ選択UIなし） -->
+        <div id="localBackupFolderPanel" style="margin-bottom:16px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:14px 16px;">
+          <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
+            <div>
+              <div style="font-weight:800; font-size:0.85rem; color:#1e40af; margin-bottom:4px;">📂 PC完全自動バックアップ</div>
+              <div id="backupFolderStatusBadge" style="font-size:0.75rem; color:#15803d; font-weight:600;">🟢 PC自動保存: 有効 (ドキュメント\リハ業務管理_自動バックアップ)</div>
+            </div>
+            <button id="btnOpenBackupFolder" type="button" style="padding:8px 14px; background:#2563eb; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer; white-space:nowrap;">
+              📂 バックアップフォルダを開く
+            </button>
+          </div>
+          <p style="font-size:0.68rem; color:#64748b; margin:0; line-height:1.4;">
+            デスクトップアプリ起動時、データ変更に応じて <code style="background:#dbeafe; padding:0 3px; border-radius:3px;">ドキュメント\リハ業務管理_自動バックアップ</code> へ日次JSONを自動上書きします（14日超は自動削除）。フォルダ選択は不要です。手動の「📦 保存」「🏛 確定保存」も従来どおり利用できます。
+          </p>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1.1fr 0.9fr; gap:16px; background:#f8fafc; padding:16px; border-radius:8px; border:1px solid #e2e8f0;">
+          <!-- バックアップ保存エリア（日常随時 ＆ 5/31年度確定） -->
+          <div style="display:flex; flex-direction:column; gap:12px;">
+            <!-- 通常バックアップ -->
+            <div style="background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div style="font-weight:700; font-size:0.82rem; color:#334155;">全データをPCへ保存 (随時)</div>
+                <div style="font-size:0.7rem; color:#64748b;">PC移行や大型点検時にいつでも保存できます。</div>
+              </div>
+              <button id="btnBackupDownload" type="button" style="padding:7px 12px; background:#334155; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer; white-space:nowrap;">
+                📦 保存
+              </button>
+            </div>
+
+            <!-- 5/31年度確定バックアップ -->
+            <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div style="font-weight:700; font-size:0.82rem; color:#166534; display:flex; align-items:center; gap:4px;">
+                  <span>🏛 5/31 年度確定バックアップ</span>
+                  <span style="font-size:0.65rem; background:#dcfce7; color:#15803d; padding:1px 4px; border-radius:3px; border:1px solid #86efac;">年1回</span>
+                </div>
+                <div style="font-size:0.7rem; color:#15803d;">診療報酬改定(6/1)前の旧点数データを冷凍保存します。</div>
+              </div>
+              <button id="btnFiscalYearBackup" type="button" style="padding:7px 12px; background:#16a34a; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer; white-space:nowrap;">
+                🏛 確定保存
+              </button>
+            </div>
+          </div>
+
+          <!-- バックアップ復元 -->
+          <div style="display:flex; flex-direction:column; justify-content:space-between; border-left:1px solid #e2e8f0; padding-left:16px;">
+            <div>
+              <div style="font-weight:700; font-size:0.82rem; color:#334155; margin-bottom:4px;">ファイルから復元</div>
+              <div style="font-size:0.72rem; color:#64748b; margin-bottom:10px;">保存したJSONファイル（通常バックアップまたは年度確定ファイル）を選択し、データを復元します（上書き）。</div>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <input type="file" id="backupFileInput" accept=".json" style="display:none;">
+              <button id="btnTriggerRestore" type="button" style="flex:1; padding:9px 12px; background:#fff; border:1px solid #cbd5e1; color:#0f172a; border-radius:6px; font-weight:700; font-size:0.82rem; cursor:pointer;">
+                📥 ファイルを選択して復元
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- モーダル 1: 時間割コマ編集（患者リアルタイム検索・直接選択対応） -->
+  <div id="modalSlotEdit" class="modal-overlay">
+    <div class="modal-card">
+      <h3 id="slotModalTitle" style="font-size:1rem; font-weight:700; margin-bottom:12px;">コマ配置</h3>
+      
+      <form id="slotEditForm" style="display:flex; flex-direction:column; gap:12px;">
+        <input type="hidden" id="slotTherapistId">
+        <input type="hidden" id="slotId">
+        <input type="hidden" id="slotPatientId">
+        <input type="hidden" id="slotUnitsInput" value="1">
+
+        <div style="display:flex; border:1px solid #cbd5e1; border-radius:6px; overflow:hidden; margin-bottom:12px;">
+          <button type="button" id="btnSlotTypePatient" class="slot-type-tab active">👤 患者リハビリ</button>
+          <button type="button" id="btnSlotTypeTask" class="slot-type-tab">📋 業務・会議・有休</button>
+        </div>
+
+        <div id="slotPatientSection" style="display:flex; flex-direction:column; gap:12px;">
+        <!-- 患者選択・リアルタイム検索エリア -->
+        <div style="background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; padding:10px;">
+          <label for="slotPatientSearchInput" style="font-size:0.8rem; font-weight:800; color:#0f172a; display:block; margin-bottom:6px;">
+            👤 対象患者の選択 <span style="font-size:0.7rem; color:#64748b; font-weight:normal;">(検索または一覧から選択)</span>
+          </label>
+          <div style="display:flex; gap:6px; margin-bottom:6px;">
+            <input type="text" id="slotPatientSearchInput" placeholder="氏名またはIDで即座に絞り込み..." style="flex:1; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff;">
+          </div>
+          <select id="slotPatientSelect" size="4" style="width:100%; padding:4px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff; cursor:pointer;">
+            <!-- JSで動的に患者候補を流し込み -->
+          </select>
+        </div>
+
+        <!-- 選択中患者サマリー & 計画書レコメンド案内 -->
+        <div id="slotPatientInfo" style="font-size:0.82rem; color:#475569; background:#f8fafc; padding:8px; border-radius:4px; border:1px solid #e2e8f0;"></div>
+
+        <div>
+          <label style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">単位数選択</label>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="btn-unit-select" data-unit="1" style="flex:1; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:700;">1単位</button>
+            <button type="button" class="btn-unit-select" data-unit="2" style="flex:1; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:700;">2単位</button>
+            <button type="button" class="btn-unit-select" data-unit="3" style="flex:1; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:700;">3単位</button>
+            <button type="button" class="btn-unit-select" data-unit="4" style="flex:1; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:700;">4単位</button>
+          </div>
+        </div>
+
+        <!-- 総合計画評価料 算定セクション（チェックボックス連動仕様） -->
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+            <label style="font-size:0.8rem; font-weight:700; display:flex; align-items:center; gap:6px; cursor:pointer; color:#0f172a; margin:0;">
+              <input type="checkbox" id="slotBillingPlanCheck" style="width:16px; height:16px; cursor:pointer;">
+              <span>📝 総合計画評価料を算定する</span>
+            </label>
+            <span style="font-size:0.7rem; color:#64748b;">(月1回)</span>
+          </div>
+          <select id="slotBillingPlanSelect" disabled style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#f1f5f9; color:#64748b;">
+            <option value="">なし (算定しない)</option>
+            <option value="PLAN_1_FIRST">総合実施計画書1 (初回: 300点 / ¥3,000)</option>
+            <option value="PLAN_1_FOLLOW">総合実施計画書1 (2回目以降: 240点 / ¥2,400)</option>
+            <option value="PLAN_2_FIRST">総合実施計画書2 (初回: 240点 / ¥2,400)</option>
+            <option value="PLAN_2_FOLLOW">総合実施計画書2 (2回目以降: 196点 / ¥1,960)</option>
+          </select>
+          <div id="slotPlanRecommendGuide" style="display:none; font-size:0.72rem; margin-top:6px; background:#eff6ff; border:1px solid #bfdbfe; color:#1d4ed8; padding:4px 8px; border-radius:4px;"></div>
+        </div>
+        </div>
+
+        <div id="slotTaskSection" style="display:none; flex-direction:column; gap:10px;">
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; color:#334155;">業務・休暇種別（クイック選択）</label>
+            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:6px; margin-top:4px;">
+              <button type="button" class="btn-task-preset" data-type="LEAVE" data-duration="24" data-title="終日有休" style="background:#fffbeb; border-color:#fde68a; color:#b45309; font-weight:700;">🏖 終日有休</button>
+              <button type="button" class="btn-task-preset" data-type="LEAVE" data-duration="12" data-title="半日有休" style="background:#fffbeb; border-color:#fde68a; color:#b45309; font-weight:700;">🏖 半日有休</button>
+              <button type="button" class="btn-task-preset" data-type="HOLIDAY" data-duration="24" data-title="終日公休" style="background:#fdf2f8; border-color:#fbcfe8; color:#be185d; font-weight:700;">🎌 終日公休</button>
+              <button type="button" class="btn-task-preset" data-type="HOLIDAY" data-duration="12" data-title="半日公休" style="background:#fdf2f8; border-color:#fbcfe8; color:#be185d; font-weight:700;">🎌 半日公休</button>
+              <button type="button" class="btn-task-preset" data-type="TASK" data-duration="2" data-title="カンファレンス">👥 会議・カンファ</button>
+              <button type="button" class="btn-task-preset" data-type="TASK" data-duration="2" data-title="計画書・書類作成">📝 計画書作成</button>
+              <button type="button" class="btn-task-preset" data-type="TASK" data-duration="2" data-title="実習・指導">🎓 実習指導</button>
+              <button type="button" class="btn-task-preset" data-type="TASK" data-duration="2" data-title="業務">💼 その他業務</button>
+            </div>
+          </div>
+          <div>
+            <label for="slotTaskTitleInput" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">表示名</label>
+            <input type="text" id="slotTaskTitleInput" placeholder="例: 退院時カンファレンス（3F病棟）" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem;">
+          </div>
+          <div>
+            <label for="slotTaskDurationSelect" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">所要コマ数</label>
+            <select id="slotTaskDurationSelect" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; background:#fff;">
+              <option value="1">1コマ (20分)</option>
+              <option value="2" selected>2コマ (40分)</option>
+              <option value="3">3コマ (60分)</option>
+              <option value="4">4コマ (80分)</option>
+              <option value="6">6コマ (2時間)</option>
+              <option value="12" data-role="half-day">12コマ (半日ブロック・4時間)</option>
+              <option value="24" data-role="full-day">24コマ (終日ブロック・全日)</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1fr 1.6fr; gap:8px;">
+          <div>
+            <label for="slotModalTherapistSelect" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">担当セラピスト</label>
+            <select id="slotModalTherapistSelect" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff; font-weight:600;">
+              <option value="A">PT A</option>
+              <option value="B">PT B</option>
+              <option value="C">PT C</option>
+            </select>
+          </div>
+          <div>
+            <label for="slotModalSlotSelect" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">時間帯</label>
+            <select id="slotModalSlotSelect" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff; font-weight:600;"></select>
+          </div>
+        </div>
+
+        <div>
+          <label for="slotNoteInput" style="font-size:0.8rem; font-weight:700; display:block; margin-bottom:4px;">備考・メモ</label>
+          <input type="text" id="slotNoteInput" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem;">
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-top:12px;">
+          <button type="button" id="btnDeleteSlot" style="padding:6px 12px; background:#fff; border:1px solid #ef4444; color:#ef4444; border-radius:4px; cursor:pointer; font-size:0.85rem;">解除</button>
+          <div style="display:flex; gap:8px;">
+            <button type="button" id="btnCloseSlotModal" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; font-size:0.85rem;">閉じる</button>
+            <button type="submit" style="padding:6px 16px; background:#0284c7; color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:700; font-size:0.85rem;">保存</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- モーダル 2: 患者登録・編集（ステータス管理対応） -->
+  <div id="modalPatientEdit" class="modal-overlay">
+    <div class="modal-card">
+      <h3 id="patientModalTitle" style="font-size:1rem; font-weight:700; margin-bottom:12px;">患者台帳</h3>
+      <div id="patientPlan2Guide" style="display:none; font-size:0.75rem; color:#0369a1; background:#e0f2fe; padding:8px; border-radius:4px; margin-bottom:10px;"></div>
+      <form id="patientEditForm" style="display:flex; flex-direction:column; gap:10px; font-size:0.85rem;">
+        <!-- 患者ID・患者区分・ステータスの3列構成 -->
+        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px;">
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">患者ID (記号) *</label>
+            <input type="text" id="patientFormId" required style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </div>
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">患者区分 *</label>
+            <select id="patientFormCategory" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+              <option value="INPATIENT">入院</option>
+              <option value="OUTPATIENT">外来</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">ステータス *</label>
+            <select id="patientFormStatus" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:700; background:#f0fdf4; color:#15803d; cursor:pointer;">
+              <option value="ACTIVE" selected>● 継続</option>
+              <option value="DISCONTINUED">■ 終了・退院</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">患者氏名 *</label>
+            <input type="text" id="patientFormName" required style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </div>
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">氏名カナ</label>
+            <input type="text" id="patientFormKana" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </div>
+        </div>
+        <div>
+          <label style="font-size:0.75rem; font-weight:700; display:block;">疾患名 (病名自由記述)</label>
+          <input type="text" id="patientFormDiseaseName" placeholder="右大腿骨頸部骨折 術後 等" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">疾患区分 *</label>
+            <select id="patientFormDiseaseType" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+              <option value="LOCOMOTIVE">運動器リハ(Ⅱ)</option>
+              <option value="CEREBROVASCULAR">脳血管等リハ(Ⅲ)</option>
+              <option value="DISUSE">廃用症候群リハ(Ⅲ)</option>
+              <option value="ANALGESIA">消炎鎮痛等処置</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">介護保険認定区分 *</label>
+            <select id="patientFormCareType" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+              <option value="NONE">なし (医療保険のみ)</option>
+              <option value="SUPPORT">要支援</option>
+              <option value="CARE">要介護</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 総合計画評価料 算定フェーズ（初回 / 計画書1継続中 / 計画書2継続中固定） -->
+        <div>
+          <label style="font-size:0.75rem; font-weight:700; display:block;">📝 総合計画評価料 算定フェーズ</label>
+          <select id="patientFormPlanStatus" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:600; background:#f0f9ff; color:#0369a1;">
+            <option value="NOT_YET">未算定 (初回算定 対象)</option>
+            <option value="PLAN_1_FOLLOW">計画書1 算定中 (2回目以降: 240点)</option>
+            <option value="PLAN_2_FOLLOW">計画書2 算定中 (2回目以降: 196点 固定)</option>
+          </select>
+        </div>
+
+        <!-- 起算日 & 当院入院日 -->
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">起算日 (発症/手術日)</label>
+            <input type="date" id="patientFormOnsetDate" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </div>
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">当院入院日</label>
+            <input type="date" id="patientFormAdmissionDate" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </div>
+        </div>
+
+        <!-- 早期加算起算日 & 月13単位制限チェック & ドロップ即配置の既定単位 -->
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">早期加算起算日 (前医含)</label>
+            <input type="date" id="patientFormEarlyStartDate" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </div>
+          <div>
+            <label for="patientFormDefaultUnits" style="font-size:0.75rem; font-weight:700; display:block;">ドロップ即配置の既定単位</label>
+            <select id="patientFormDefaultUnits" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:700;">
+              <option value="1">1単位 (20分)</option>
+              <option value="2">2単位 (40分)</option>
+              <option value="3" selected>3単位 (60分) ※標準</option>
+              <option value="4">4単位 (80分)</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center;">
+          <label style="display:flex; align-items:center; gap:6px; font-size:0.75rem; cursor:pointer;">
+            <input type="checkbox" id="patientFormForce13">
+            <span>個別で月13単位制限を適用</span>
+          </label>
+        </div>
+        <div>
+          <label style="font-size:0.75rem; font-weight:700; display:block;">特記事項・備考</label>
+          <input type="text" id="patientFormNotes" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-top:8px;">
+          <button type="button" id="btnDeletePatient" style="padding:6px 12px; background:#fff; border:1px solid #ef4444; color:#ef4444; border-radius:4px; cursor:pointer;">削除</button>
+          <div style="display:flex; gap:8px;">
+            <button type="button" id="btnClosePatientModal" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer;">閉じる</button>
+            <button type="submit" style="padding:6px 16px; background:#0284c7; color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:700;">保存</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- モーダル 3: 物品貸出登録 -->
+  <div id="modalLoanRegister" class="modal-overlay">
+    <div class="modal-card">
+      <h3 style="font-size:1rem; font-weight:700; margin-bottom:12px;">新規物品・装具貸出</h3>
+      <form id="loanRegisterForm" style="display:flex; flex-direction:column; gap:10px; font-size:0.85rem;">
+        <div>
+          <label style="font-size:0.75rem; font-weight:700; display:block;">対象患者 *</label>
+          <select id="loanPatientSelect" required style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.75rem; font-weight:700; display:block;">品名・装具名 *</label>
+          <input type="text" id="loanItemName" required placeholder="短下肢装具、車椅子等" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">所有区分</label>
+            <select id="loanOwnerType" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+              <option value="HOSPITAL">院内備品</option>
+              <option value="VENDOR">業者借用</option>
+            </select>
+          </div>
+          <div id="loanVendorGroup" style="display:none;">
+            <label style="font-size:0.75rem; font-weight:700; display:block;">業者名</label>
+            <input type="text" id="loanVendorName" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">貸出日 *</label>
+            <input type="date" id="loanDate" required style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </div>
+          <div>
+            <label style="font-size:0.75rem; font-weight:700; display:block;">返却予定日</label>
+            <input type="date" id="loanDueDate" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+          </div>
+        </div>
+        <div>
+          <label style="font-size:0.75rem; font-weight:700; display:block;">備考</label>
+          <input type="text" id="loanNotes" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+          <button type="button" id="btnCloseLoanModal" style="padding:6px 12px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer;">閉じる</button>
+          <button type="submit" style="padding:6px 16px; background:#0284c7; color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:700;">登録</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- モーダル 4: 消炎鎮痛（物療）患者一覧・追加 -->
+  <div id="modalAnalgesiaSlot" class="modal-overlay">
+    <div class="modal-card">
+      <h3 id="analgesiaModalTitle" style="font-size:1rem; font-weight:700; margin-bottom:8px;">消炎鎮痛（物療）来院一覧</h3>
+      <p style="font-size:0.75rem; color:#64748b; margin-bottom:12px;">当コマに登録されている患者一覧です。患者の追加や取り消しができます。</p>
+      
+      <div id="analgesiaPatientList" style="max-height:220px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; margin-bottom:16px; border:1px solid #e2e8f0; border-radius:6px; padding:8px; background:#f8fafc;"></div>
+
+      <div style="background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:10px; margin-bottom:12px;">
+        <label style="font-size:0.78rem; font-weight:700; display:block; margin-bottom:6px;">＋ 患者を追加</label>
+        <div style="display:flex; gap:6px;">
+          <select id="analgesiaAddPatientSelect" style="flex:1; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem;"></select>
+          <button type="button" id="btnConfirmAddAnalgesia" style="padding:6px 12px; background:#0284c7; color:#fff; border:none; border-radius:4px; font-size:0.8rem; font-weight:700; cursor:pointer;">追加</button>
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:flex-end;">
+        <button type="button" id="btnCloseAnalgesiaModal" style="padding:6px 16px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; cursor:pointer;">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- モーダル 5: 本日収益内訳明細 -->
+  <div id="modalRevenueBreakdown" class="modal-overlay">
+    <div class="modal-card" style="max-width:620px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 id="revenueBreakdownTitle" style="font-size:1.05rem; font-weight:800; color:#0f172a; margin:0;">📊 本日リハビリ収益 内訳明細</h3>
+        <button type="button" id="btnCloseRevenueModalX" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:#64748b;">✕</button>
+      </div>
+      <p style="font-size:0.75rem; color:#64748b; margin-bottom:14px;">本日のスケジュールに配置されている全コマ（基本料・減算・早期加算・計画書4区分・消炎鎮痛）の積算明細です。</p>
+
+      <div style="border:1px solid #e2e8f0; border-radius:6px; overflow:hidden; margin-bottom:16px;">
+        <table class="modern-table" style="width:100%; font-size:0.8rem;">
+          <thead>
+            <tr>
+              <th style="padding:6px 10px; text-align:left;">項目名</th>
+              <th style="padding:6px 8px; text-align:center; width:80px;">単位 / 件数</th>
+              <th style="padding:6px 8px; text-align:right; width:70px;">単価点数</th>
+              <th style="padding:6px 10px; text-align:right; width:90px;">小計金額</th>
+            </tr>
+          </thead>
+          <tbody id="revenueBreakdownTbody">
+            <!-- JSで動的に内訳行を生成 -->
+          </tbody>
+          <tfoot>
+            <tr style="background:#f8fafc; font-weight:800; border-top:2px solid #cbd5e1;">
+              <td style="padding:8px 10px; text-align:left; color:#0f172a;">本日 合計見込</td>
+              <td id="breakdownTotalUnitsCell" style="padding:8px 8px; text-align:center; color:#0369a1;">0 単位</td>
+              <td style="padding:8px 8px; text-align:right; color:#64748b;">-</td>
+              <td id="breakdownTotalAmountCell" style="padding:8px 10px; text-align:right; color:#059669; font-size:0.95rem;">¥0</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div style="display:flex; justify-content:flex-end;">
+        <button type="button" id="btnCloseRevenueModal" style="padding:6px 18px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; cursor:pointer; font-weight:600;">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- モーダル 6: セラピストマスター設定（名称変更・動的登録・ステータス管理・リアルタイム検索・退職者折りたたみ ＋ ★リハビリ助手設定） -->
+  <div id="modalStaffSettings" class="modal-overlay">
+    <div class="modal-card" style="max-width:600px; max-height:85vh; display:flex; flex-direction:column;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <h3 style="font-size:1.05rem; font-weight:800; color:#0f172a; margin:0;">⚙ スタッフ設定</h3>
+        <button type="button" id="btnCloseStaffModalX" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:#64748b;">✕</button>
+      </div>
+      <p style="font-size:0.75rem; color:#64748b; margin-bottom:12px;">
+        時間割には「稼働中」のセラピストのみが表示されます。リハビリ助手の氏名は業務日誌の出勤確認欄に自動反映されます。施設の午前・休憩・午後の提供時間もここで変更できます。
+      </p>
+
+      <!-- リアルタイム検索 & 新規セラピスト追加バー -->
+      <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px; background:#f8fafc; padding:10px; border-radius:6px; border:1px solid #e2e8f0;">
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="staffSearchInput" placeholder="セラピスト名・枠IDで絞り込み..." style="flex:1; padding:6px 10px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff;">
+        </div>
+        <div style="display:flex; gap:8px pocket; align-items:center;">
+          <input type="text" id="newStaffNameInput" placeholder="新規セラピスト氏名（例: 山田 太郎）" style="flex:1; padding:6px 10px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff;">
+          <button type="button" id="btnAddNewStaff" style="padding:6px 14px; background:#0284c7; color:#fff; border:none; border-radius:4px; font-size:0.82rem; font-weight:700; cursor:pointer; white-space:nowrap;">＋ 追加</button>
+        </div>
+      </div>
+
+      <form id="staffSettingsForm" style="display:flex; flex-direction:column; gap:10px; overflow-y:auto; flex:1; padding-right:4px;">
+        <!-- 現役（稼働中・休職中）セラピストリスト -->
+        <div id="staffSettingsListContainer" style="display:flex; flex-direction:column; gap:8px;">
+          <!-- JSで動的にセラピストIDごとの入力欄およびステータス切替を展開 -->
+        </div>
+
+        <!-- ★リハビリ助手設定（業務日誌の出勤欄へ自動反映） -->
+        <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:10px; margin-top:4px;">
+          <div style="font-size:0.8rem; font-weight:800; color:#0f172a; margin-bottom:4px; display:flex; align-items:center; gap:6px;">
+            <span>🤝 リハビリ助手設定</span>
+            <span style="font-size:0.68rem; color:#64748b; font-weight:normal;">(業務日誌の出勤欄に氏名が自動反映されます)</span>
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+            <div>
+              <label for="assistant1NameInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">助手 1 氏名</label>
+              <input type="text" id="assistant1NameInput" placeholder="例: 佐々木 花子 (空欄時: リハビリ助手 1)"
+                     style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
+            </div>
+            <div>
+              <label for="assistant2NameInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">助手 2 氏名</label>
+              <input type="text" id="assistant2NameInput" placeholder="例: 高橋 恵美 (空欄時: リハビリ助手 2)"
+                     style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
+            </div>
+          </div>
+        </div>
+
+        <!-- ★施設リハビリ提供時間設定（午前・休憩・午後 → 20分コマ自動生成） -->
+        <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:6px; padding:10px; margin-top:4px;">
+          <div style="font-size:0.8rem; font-weight:800; color:#0c4a6e; margin-bottom:6px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            <span>🏥 施設リハビリ提供時間設定</span>
+            <span style="font-size:0.68rem; color:#0369a1; font-weight:normal;">(保存すると時間割・外来予約・印刷が即時連動)</span>
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+            <div>
+              <label for="settingAmStartInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午前開始</label>
+              <input type="time" id="settingAmStartInput" value="09:00" step="300"
+                     style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
+            </div>
+            <div>
+              <label for="settingAmEndInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午前終了</label>
+              <input type="time" id="settingAmEndInput" value="13:00" step="300"
+                     style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
+            </div>
+            <div>
+              <label for="settingPmStartInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午後開始（既定は午前終了と同時刻＝連続）</label>
+              <input type="time" id="settingPmStartInput" value="13:00" step="300"
+                     style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
+            </div>
+            <div>
+              <label for="settingPmEndInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">業務終了</label>
+              <input type="time" id="settingPmEndInput" value="18:00" step="300"
+                     style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
+            </div>
+          </div>
+          <div id="facilityHoursSlotSummaryBadge"
+               style="margin-top:8px; display:inline-block; padding:4px 10px; border-radius:999px; border:1px solid #a7f3d0; background:#ecfdf5; color:#065f46; font-size:0.72rem; font-weight:700;">
+            午前 12コマ ／ 午後 12コマ ＝ 計 24コマ（昼休憩 60分）
+          </div>
+          <p style="font-size:0.68rem; color:#64748b; margin:6px 0 0;">
+            条件: 午前開始 &lt; 午前終了 ≦ 午後開始 &lt; 業務終了。20分刻みでコマを自動生成します。
+          </p>
+        </div>
+
+        <!-- 過去・退職者（非表示スタッフ）折りたたみアコーディオン（トップを汚さず一番下に配置） -->
+        <details id="retiredStaffAccordion" style="margin-top:6px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; padding:8px 10px;">
+          <summary style="font-size:0.78rem; font-weight:700; color:#64748b; cursor:pointer; user-select:none;">
+            ▶ 過去・退職者（非表示スタッフ）を表示する
+          </summary>
+          <div id="retiredStaffListContainer" style="display:flex; flex-direction:column; gap:6px; margin-top:8px;">
+            <!-- JSで動的に退職者枠を展開 -->
+          </div>
+        </details>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px; padding-top:8px; border-top:1px solid #e2e8f0;">
+          <button type="button" id="btnResetStaffDefault" style="padding:6px 12px; background:#fff; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; color:#64748b; cursor:pointer;">デフォルトに戻す</button>
+          <div style="display:flex; gap:8px;">
+            <button type="button" id="btnCloseStaffModal" style="padding:6px 14px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; cursor:pointer;">閉じる</button>
+            <button type="submit" style="padding:6px 18px; background:#0284c7; color:#fff; border:none; border-radius:4px; font-size:0.85rem; font-weight:700; cursor:pointer;">保存する</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- モーダル 7: 外来予約 登録・編集（自由実時間・所要枠・重複対応・予約票即時印刷連動） -->
+  <div id="modalAppointmentEdit" class="modal-overlay">
+    <div class="modal-card" style="max-width: 580px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 id="aptModalTitle" style="font-size:1.05rem; font-weight:800; color:#0f172a; margin:0;">外来予約の登録・編集</h3>
+        <button type="button" id="btnCloseAppointmentModalX" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:#64748b;">✕</button>
+      </div>
+      <p style="font-size:0.75rem; color:#64748b; margin-bottom:14px;">
+        20分縛りのない自由実時間・所要時間を設定できます。同一時間帯に複数名が重なっても安全に登録できます。
+      </p>
+
+      <form id="appointmentEditForm" style="display:flex; flex-direction:column; gap:12px;">
+        <input type="hidden" id="aptPatientId">
+
+        <!-- 対象患者検索 & 選択 -->
+        <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:10px;">
+          <label for="aptPatientSearchInput" style="font-size:0.78rem; font-weight:800; color:#0f172a; display:block; margin-bottom:6px;">
+            👤 対象患者の選択
+          </label>
+          <input type="text" id="aptPatientSearchInput" placeholder="氏名またはIDで絞り込み..." style="width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; margin-bottom:6px; background:#fff;">
+          <select id="aptPatientSelect" size="3" style="width:100%; padding:4px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff; cursor:pointer;"></select>
+          <div id="aptPatientPreviewInfo" style="font-size:0.75rem; color:#0369a1; margin-top:6px; font-weight:600;"></div>
+        </div>
+
+        <!-- 予約日 & 時間帯（自由時間） -->
+        <div style="display:grid; grid-template-columns: 1.1fr 1fr 1fr; gap:8px;">
+          <div>
+            <label for="aptDateInput" style="font-size:0.75rem; font-weight:700; color:#334155; display:block; margin-bottom:4px;">予約日 *</label>
+            <input type="date" id="aptDateInput" required style="width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem;">
+          </div>
+          <div>
+            <label for="aptStartTimeInput" style="font-size:0.75rem; font-weight:700; color:#334155; display:block; margin-bottom:4px;">開始時刻 *</label>
+            <input type="time" id="aptStartTimeInput" required style="width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem;">
+          </div>
+          <div>
+            <label for="aptDurationSelect" style="font-size:0.75rem; font-weight:700; color:#334155; display:block; margin-bottom:4px;">所要枠 (分)</label>
+            <select id="aptDurationSelect" style="width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; font-weight:700;">
+              <option value="15">15分枠</option>
+              <option value="20">20分枠 (1単位)</option>
+              <option value="30" selected>30分枠</option>
+              <option value="40">40分枠 (2単位)</option>
+              <option value="45">45分枠</option>
+              <option value="60">60分枠 (3単位)</option>
+            </select>
+          </div>
+        </div>
+        <div id="aptEndTimeDisplay" style="font-size:0.75rem; color:#64748b; font-weight:700; text-align:right; margin-top:-4px;"></div>
+
+        <!-- 担当者 & 治療種別 -->
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+          <div>
+            <label for="aptTherapistSelect" style="font-size:0.75rem; font-weight:700; color:#334155; display:block; margin-bottom:4px;">担当セラピスト</label>
+            <select id="aptTherapistSelect" style="width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; font-weight:600;"></select>
+          </div>
+          <div>
+            <label for="aptTreatmentTypeSelect" style="font-size:0.75rem; font-weight:700; color:#334155; display:block; margin-bottom:4px;">治療・来院種別</label>
+            <select id="aptTreatmentTypeSelect" style="width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; font-weight:600;">
+              <option value="INDIVIDUAL" selected>個別リハビリ</option>
+              <option value="ANALGESIA">消炎鎮痛等処置 (物療)</option>
+              <option value="EVALUATION">評価・装具診合わせ</option>
+              <option value="OTHER">その他・自主トレ指導</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 特記メモ -->
+        <div>
+          <label for="aptNotesInput" style="font-size:0.75rem; font-weight:700; color:#334155; display:block; margin-bottom:4px;">特記メモ (送迎・診察順など)</label>
+          <input type="text" id="aptNotesInput" placeholder="例: 送迎バス1便利用、診察後リハビリ等" style="width:100%; box-sizing:border-box; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem;">
+        </div>
+
+        <!-- 登録と同時に患者用予約票を印刷するチェックボックス -->
+        <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:8px 12px; display:flex; align-items:center; justify-content:space-between;">
+          <label style="font-size:0.8rem; font-weight:700; color:#166534; display:flex; align-items:center; gap:6px; cursor:pointer; margin:0;">
+            <input type="checkbox" id="aptPrintTicketCheck" style="width:16px; height:16px; cursor:pointer;">
+            <span>🎫 保存と同時に患者さん用予約票を印刷する</span>
+          </label>
+          <span style="font-size:0.7rem; color:#15803d;">A5/A4即時印刷</span>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+          <button type="button" id="btnDeleteAppointment" style="padding:6px 12px; background:#fff; border:1px solid #ef4444; color:#ef4444; border-radius:4px; cursor:pointer; font-size:0.85rem;">削除</button>
+          <div style="display:flex; gap:8px;">
+            <button type="button" id="btnCloseAppointmentModal" style="padding:6px 14px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; font-size:0.85rem;">閉じる</button>
+            <button type="submit" style="padding:6px 18px; background:#0284c7; color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:700; font-size:0.85rem;">保存する</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toastContainer" class="toast-container"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
