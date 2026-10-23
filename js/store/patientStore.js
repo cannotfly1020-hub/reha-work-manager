@@ -35,6 +35,7 @@ const DEFAULT_PATIENTS = [
     admissionDate: '2026-09-01',
     earlyBonusStartDate: '2026-09-01',
     onsetDate: '2026-08-28',
+    defaultUnits: 3,
     notes: '歩行訓練中心。疼痛注意。'
   },
   {
@@ -50,6 +51,7 @@ const DEFAULT_PATIENTS = [
     admissionDate: '2026-09-15',
     earlyBonusStartDate: '2026-09-15',
     onsetDate: '2026-09-10',
+    defaultUnits: 3,
     notes: '上肢機能訓練およびADL練習'
   },
   {
@@ -65,6 +67,7 @@ const DEFAULT_PATIENTS = [
     admissionDate: '',
     earlyBonusStartDate: '',
     onsetDate: '2026-06-01',
+    defaultUnits: 3,
     notes: '維持期・外来リハビリ'
   },
   {
@@ -80,6 +83,7 @@ const DEFAULT_PATIENTS = [
     admissionDate: '',
     earlyBonusStartDate: '',
     onsetDate: '2026-09-01',
+    defaultUnits: 3,
     notes: '外来・消炎鎮痛処置（温熱・低周波）'
   },
   {
@@ -95,6 +99,7 @@ const DEFAULT_PATIENTS = [
     admissionDate: '2026-09-20',
     earlyBonusStartDate: '2026-09-20',
     onsetDate: '2026-09-15',
+    defaultUnits: 3,
     notes: '病棟牽引・消炎鎮痛処置'
   }
 ];
@@ -109,11 +114,18 @@ export function getAllPatients(includeDiscontinued = true) {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
 
-    // 既存データに status がない場合は自動で ACTIVE（継続）を補完
-    const normalized = parsed.map((p) => ({
-      ...p,
-      status: p.status || PATIENT_STATUS.ACTIVE
-    }));
+    // 既存データに status / defaultUnits がない場合は補完
+    const normalized = parsed.map((p) => {
+      const rawUnits = Number(p.defaultUnits);
+      const defaultUnits = Number.isFinite(rawUnits)
+        ? Math.min(4, Math.max(1, Math.round(rawUnits)))
+        : 3;
+      return {
+        ...p,
+        status: p.status || PATIENT_STATUS.ACTIVE,
+        defaultUnits
+      };
+    });
 
     if (includeDiscontinued) return normalized;
     return normalized.filter((p) => p.status !== PATIENT_STATUS.DISCONTINUED);
@@ -165,6 +177,11 @@ export function upsertPatient(rawData) {
     earlyBonusStartDate: normalizeDateString(rawData.earlyBonusStartDate || rawData.admissionDate),
     onsetDate: normalizeDateString(rawData.onsetDate),
     force13Limit: Boolean(rawData.force13Limit),
+    defaultUnits: (() => {
+      const rawUnits = Number(rawData.defaultUnits);
+      if (!Number.isFinite(rawUnits)) return 3;
+      return Math.min(4, Math.max(1, Math.round(rawUnits)));
+    })(),
     notes: normalizeString(rawData.notes || '')
   };
 

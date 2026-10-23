@@ -8,9 +8,10 @@ import { getAllTherapists, getActiveTherapists } from '../../store/therapistStor
 import { getPatientById, searchPatients, updatePatientPlanStatus } from '../../store/patientStore.js';
 import {
   getDailySchedule, setScheduleSlot, clearScheduleSlot,
-  findPatientMonthlyPlanDate, hasPatientPastPlan, isNonPatientBlock, slotRangeOverlaps
+  findPatientMonthlyPlanDate, hasPatientPastPlan, isNonPatientBlock, slotRangeOverlaps,
+  getPatientMonthDailyRehaUnitsMap
 } from '../../store/scheduleStore.js';
-import { evaluateRecommendedPlan } from '../../core/deadlineCalc.js';
+import { evaluateRecommendedPlan, getSuggestedPlacementUnits } from '../../core/deadlineCalc.js';
 import {
   validateTimeConflict, validateDailyLimit, validateTherapistWorkload, validateMonthlyPlanLimit
 } from '../../core/validator.js';
@@ -169,12 +170,31 @@ export function setupSlotModalListeners(onUpdate) {
 }
 
 /**
- * セレクトの選択値を #slotPatientId と計画書レコメンドへ反映
+ * セレクトの選択値を #slotPatientId と計画書レコメンドへ反映。
+ * 新規配置（既存コマなし）時は患者既定単位＋月13ブレーキを単位ボタンへ反映する。
  * @param {string} selectedId
  */
 function applySelectedPatientId(selectedId) {
   const targetInput = document.getElementById('slotPatientId');
   if (targetInput) targetInput.value = selectedId || '';
+
+  const isNewPlacement = !activeModalSlot?.currentItem?.patientId;
+  if (isNewPlacement && selectedId) {
+    const patient = getPatientById(selectedId);
+    if (patient) {
+      const dateStr = getCurrentDateContext();
+      const [year, month] = dateStr.split('-').map(Number);
+      const dailyMap = getPatientMonthDailyRehaUnitsMap(selectedId, year, month);
+      const suggestion = getSuggestedPlacementUnits(patient, dateStr, dailyMap);
+      const units = suggestion.blocked ? 1 : Math.max(1, suggestion.units);
+      const unitsInput = document.getElementById('slotUnitsInput');
+      if (unitsInput) unitsInput.value = String(units);
+      document.querySelectorAll('.btn-unit-select').forEach((b) => {
+        b.style.background = String(b.dataset.unit) === String(units) ? '#e0f2fe' : '#fff';
+      });
+    }
+  }
+
   updateModalPatientPlanRecommendation(selectedId || '');
 }
 

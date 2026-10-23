@@ -246,6 +246,7 @@ function setupPatientModalListeners() {
       earlyBonusStartDate: document.getElementById('patientFormEarlyStartDate').value,
       onsetDate: document.getElementById('patientFormOnsetDate').value,
       force13Limit: document.getElementById('patientFormForce13').checked,
+      defaultUnits: document.getElementById('patientFormDefaultUnits')?.value || 3,
       notes: document.getElementById('patientFormNotes').value
     };
 
@@ -308,6 +309,13 @@ function openPatientModal(patientId) {
   document.getElementById('patientFormEarlyStartDate').value = p ? (p.earlyBonusStartDate || '') : '';
   document.getElementById('patientFormOnsetDate').value = p ? (p.onsetDate || '') : '';
   document.getElementById('patientFormForce13').checked = Boolean(p?.force13Limit);
+  const defaultUnitsSelect = document.getElementById('patientFormDefaultUnits');
+  if (defaultUnitsSelect) {
+    const du = Number(p?.defaultUnits);
+    defaultUnitsSelect.value = String(
+      Number.isFinite(du) ? Math.min(4, Math.max(1, Math.round(du))) : 3
+    );
+  }
   document.getElementById('patientFormNotes').value = p ? (p.notes || '') : '';
 
   updatePlan2GuidePreview();

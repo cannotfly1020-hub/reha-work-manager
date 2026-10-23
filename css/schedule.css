@@ -127,6 +127,51 @@ transform: translateY(-1px);
 box-shadow: var(--shadow-md);
 z-index: 20;
 }
+
+/* カード右端のクイック単位 [1][2][3]（クリックはカード本体モーダルと分離） */
+.slot-quick-units {
+display: flex;
+align-items: center;
+gap: 2px;
+flex-shrink: 0;
+z-index: 16;
+}
+.btn-quick-unit {
+width: 18px;
+height: 18px;
+padding: 0;
+margin: 0;
+border: 1px solid #94a3b8;
+border-radius: 3px;
+background: #fff;
+color: #334155;
+font-size: 0.62rem;
+font-weight: 800;
+line-height: 1;
+cursor: pointer;
+display: inline-flex;
+align-items: center;
+justify-content: center;
+box-shadow: 0 1px 1px rgba(15, 23, 42, 0.08);
+}
+.btn-quick-unit:hover {
+background: #e0f2fe;
+border-color: #0284c7;
+color: #0369a1;
+}
+.btn-quick-unit.is-active {
+background: #0284c7;
+border-color: #0284c7;
+color: #fff;
+}
+.card-unit-1 .slot-quick-units {
+opacity: 0.92;
+}
+.card-unit-1 .btn-quick-unit {
+width: 16px;
+height: 16px;
+font-size: 0.58rem;
+}
 .card-inpatient {
 border-left: 6px solid var(--color-inpatient);
 }

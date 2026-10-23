@@ -380,3 +380,35 @@ export function aggregateFromAppSchedule(year, month) {
 
   return { year: y, month: m, daysInMonth, patientMap, dailyBreakdown };
 }
+
+/**
+ * 指定患者の当月・日別個別リハ単位マップ（キーは日 1〜31）
+ * 月13単位ブレーキ・ドロップ即配置の判定用。消炎鎮痛は含めない。
+ * @param {string} patientId
+ * @param {number} year
+ * @param {number} month 1〜12
+ * @returns {Record<number, number>}
+ */
+export function getPatientMonthDailyRehaUnitsMap(patientId, year, month) {
+  const map = {};
+  if (!patientId) return map;
+  const y = safeParseInt(year);
+  const m = safeParseInt(month);
+  if (!y || !m) return map;
+
+  const daysInMonth = new Date(y, m, 0).getDate();
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const dayStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const schedule = getDailySchedule(dayStr);
+    let dayUnits = 0;
+    listTherapistIdsFromSchedule(schedule).forEach((tId) => {
+      const slots = schedule[tId] || {};
+      Object.values(slots).forEach((item) => {
+        if (!item?.patientId || item.patientId !== patientId || isNonPatientBlock(item)) return;
+        dayUnits += safeParseInt(item.units, 1);
+      });
+    });
+    if (dayUnits > 0) map[day] = dayUnits;
+  }
+  return map;
+}

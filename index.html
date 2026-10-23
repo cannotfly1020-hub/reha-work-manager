@@ -569,18 +569,27 @@
           </div>
         </div>
 
-        <!-- 早期加算起算日 & 月13単位制限チェック -->
+        <!-- 早期加算起算日 & 月13単位制限チェック & ドロップ即配置の既定単位 -->
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
           <div>
             <label style="font-size:0.75rem; font-weight:700; display:block;">早期加算起算日 (前医含)</label>
             <input type="date" id="patientFormEarlyStartDate" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
           </div>
-          <div style="display:flex; align-items:center; padding-top:14px;">
-            <label style="display:flex; align-items:center; gap:6px; font-size:0.75rem; cursor:pointer;">
-              <input type="checkbox" id="patientFormForce13">
-              <span>個別で月13単位制限を適用</span>
-            </label>
+          <div>
+            <label for="patientFormDefaultUnits" style="font-size:0.75rem; font-weight:700; display:block;">ドロップ即配置の既定単位</label>
+            <select id="patientFormDefaultUnits" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:700;">
+              <option value="1">1単位 (20分)</option>
+              <option value="2">2単位 (40分)</option>
+              <option value="3" selected>3単位 (60分) ※標準</option>
+              <option value="4">4単位 (80分)</option>
+            </select>
           </div>
+        </div>
+        <div style="display:flex; align-items:center;">
+          <label style="display:flex; align-items:center; gap:6px; font-size:0.75rem; cursor:pointer;">
+            <input type="checkbox" id="patientFormForce13">
+            <span>個別で月13単位制限を適用</span>
+          </label>
         </div>
         <div>
           <label style="font-size:0.75rem; font-weight:700; display:block;">特記事項・備考</label>

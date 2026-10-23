@@ -437,3 +437,106 @@ export function checkMonth13UnitsViolation(patient, year, month, dailyUnitsMap =
 
   return { isOver13: false, applicableUnits: 0, reason: 'WITHIN_LIMIT' };
 }
+
+/**
+ * 患者の既定配置単位（未設定時は 3）を 1〜4 に正規化する
+ * @param {Object|null|undefined} patient
+ * @returns {number}
+ */
+export function getPatientDefaultUnits(patient) {
+  const raw = Number(patient?.defaultUnits);
+  if (!Number.isFinite(raw)) return 3;
+  return Math.min(4, Math.max(1, Math.round(raw)));
+}
+
+/**
+ * 実施日時点で月13単位制限の対象か（個別指定、または標準算定日数超過後）
+ * @param {Object} patient
+ * @param {string|Date} sessionDateStr
+ * @returns {boolean}
+ */
+export function isMonth13LimitActiveOnDate(patient, sessionDateStr) {
+  if (!patient || patient.diseaseType === 'ANALGESIA') return false;
+  if (patient.force13Limit === true || patient.force13UnitsLimit === true) return true;
+  const dl = calculatePatientDeadlines(patient, sessionDateStr);
+  return Boolean(dl.isLimitExceeded);
+}
+
+/**
+ * パレット→グリッド「ドロップ即配置」用の推奨単位数。
+ * 既定は患者 defaultUnits（初期3）。月13単位制限対象で残り枠が足りない場合は自動縮小
+ * （例: 適用累計12単位済み → 残り1のため1単位配置＝いわゆる5回目ブレーキ）。
+ *
+ * @param {Object} patient
+ * @param {string} sessionDateStr YYYY-MM-DD
+ * @param {Object|number[]} dailyUnitsMap 当月の日別個別リハ単位（配置前の状態）
+ * @returns {{
+ *   units: number,
+ *   preferred: number,
+ *   capped: boolean,
+ *   blocked: boolean,
+ *   applicableUnits: number,
+ *   remaining: number,
+ *   message: string
+ * }}
+ */
+export function getSuggestedPlacementUnits(patient, sessionDateStr, dailyUnitsMap = {}) {
+  const preferred = getPatientDefaultUnits(patient);
+  const dateStr = normalizeDateString(sessionDateStr);
+  if (!patient || !dateStr) {
+    return {
+      units: preferred,
+      preferred,
+      capped: false,
+      blocked: false,
+      applicableUnits: 0,
+      remaining: 13,
+      message: ''
+    };
+  }
+
+  if (!isMonth13LimitActiveOnDate(patient, dateStr)) {
+    return {
+      units: preferred,
+      preferred,
+      capped: false,
+      blocked: false,
+      applicableUnits: 0,
+      remaining: 13,
+      message: ''
+    };
+  }
+
+  const y = Number(dateStr.slice(0, 4));
+  const m = Number(dateStr.slice(5, 7));
+  const check = checkMonth13UnitsViolation(patient, y, m, dailyUnitsMap);
+  const applicableUnits = Number(check.applicableUnits) || 0;
+  const maxMonthly = REHA_RULES.LIMITS.MONTHLY_MAINTENANCE_MAX;
+  const remaining = maxMonthly - applicableUnits;
+
+  if (remaining <= 0) {
+    return {
+      units: 0,
+      preferred,
+      capped: true,
+      blocked: true,
+      applicableUnits,
+      remaining: 0,
+      message: `月13単位制限の上限に達しています（適用累計: ${applicableUnits}単位）。これ以上配置できません。`
+    };
+  }
+
+  const units = Math.min(preferred, remaining);
+  const capped = units < preferred;
+  return {
+    units,
+    preferred,
+    capped,
+    blocked: false,
+    applicableUnits,
+    remaining,
+    message: capped
+      ? `月13単位制限のため ${units}単位で自動配置しました（適用累計 ${applicableUnits}→${applicableUnits + units}）`
+      : ''
+  };
+}
