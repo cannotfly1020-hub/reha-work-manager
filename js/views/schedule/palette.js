@@ -1,16 +1,30 @@
 // js/views/schedule/palette.js
 // 当日時間割の患者パレット
+// ★検索入力は軽量デバウンス（患者数増加時のカクつき防止）。実検索は patientStore.searchPatients（かな・全半角相互一致）
 
 import { REHA_RULES } from '../../config/rules.js';
 import { sanitizeHtml, normalizeToKatakana } from '../../core/dataNormalizer.js';
 import { searchPatients } from '../../store/patientStore.js';
 import { scheduleState } from './scheduleState.js';
 
+const PALETTE_SEARCH_DEBOUNCE_MS = 120;
+
+/** @type {ReturnType<typeof setTimeout>|null} */
+let paletteSearchDebounceTimer = null;
+
 export function setupSchedulePaletteEvents() {
   const searchInput = document.getElementById('paletteSearch');
   const sortSelect = document.getElementById('paletteSortSelect');
 
-  if (searchInput) searchInput.addEventListener('input', () => renderPatientPalette());
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      if (paletteSearchDebounceTimer) clearTimeout(paletteSearchDebounceTimer);
+      paletteSearchDebounceTimer = setTimeout(() => {
+        paletteSearchDebounceTimer = null;
+        renderPatientPalette();
+      }, PALETTE_SEARCH_DEBOUNCE_MS);
+    });
+  }
 
   if (sortSelect) {
     sortSelect.addEventListener('change', (e) => {

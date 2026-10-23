@@ -1,7 +1,10 @@
 // js/store/patientStore.js
-// 患者マスターCRUD・LocalStorage永続化・ステータス管理(継続/終了・退院)・計画書ステータス同期・消炎鎮痛制御層（200行制限準拠）
+// 患者マスターCRUD・LocalStorage永続化・ステータス管理(継続/終了・退院)・計画書ステータス同期・消炎鎮痛制御層
+// ★検索: ひらがな⇄カタカナ・全角⇄半角英数の相互一致対応
 
-import { normalizeString, normalizePatientId, normalizeDateString } from '../core/dataNormalizer.js';
+import {
+  normalizeString, normalizePatientId, normalizeDateString, normalizeToKatakana
+} from '../core/dataNormalizer.js';
 import { storageGet } from '../core/storageAdapter.js';
 import { writeStorageItem } from './storageWrite.js';
 
@@ -210,6 +213,27 @@ export function deletePatient(id) {
   return saveAllPatients(filtered);
 }
 
+/**
+ * 検索クエリを正規化（全角英数→半角・空白整理・小文字化）
+ * @param {string} keyword
+ * @returns {string}
+ */
+function normalizeSearchQuery(keyword) {
+  // normalizeString 内で [！-～] 全角英数記号 → 半角へ変換済み
+  return normalizeString(keyword).toLowerCase();
+}
+
+/**
+ * 患者検索（ひらがな・カタカナ・全角半角の相互一致）
+ * - ID: 全角「１２」「Ｐ００１」→ 半角比較
+ * - 氏名・疾患名: 小文字＋半角正規化比較
+ * - フリガナ: ひらがな入力「たなか」→ カタカナ「タナカ」へ変換して照合
+ *
+ * @param {string} keyword
+ * @param {string} category 'ALL' | 'INPATIENT' | 'OUTPATIENT' | 'ANALGESIA'
+ * @param {boolean} includeDiscontinued
+ * @returns {Array}
+ */
 export function searchPatients(keyword = '', category = 'ALL', includeDiscontinued = false) {
   let list = getAllPatients(includeDiscontinued);
 
@@ -223,12 +247,20 @@ export function searchPatients(keyword = '', category = 'ALL', includeDiscontinu
     list = list.filter((p) => p.category === category);
   }
 
-  if (!keyword || !keyword.trim()) return list;
-  const q = normalizeString(keyword).toLowerCase();
+  if (!keyword || !String(keyword).trim()) return list;
+
+  const q = normalizeSearchQuery(keyword);
+  const queryKana = normalizeToKatakana(keyword).toLowerCase();
+
   return list.filter((p) => {
-    return p.id.toLowerCase().includes(q) ||
-      p.name.toLowerCase().includes(q) ||
-      (p.nameKana || '').toLowerCase().includes(q) ||
-      (p.diseaseName || '').toLowerCase().includes(q);
+    const idNorm = normalizeSearchQuery(p.id || '');
+    const nameNorm = normalizeSearchQuery(p.name || '');
+    const diseaseNorm = normalizeSearchQuery(p.diseaseName || '');
+    const kanaNorm = normalizeToKatakana(p.nameKana || '').toLowerCase();
+
+    return idNorm.includes(q)
+      || nameNorm.includes(q)
+      || diseaseNorm.includes(q)
+      || (queryKana.length > 0 && kanaNorm.includes(queryKana));
   });
 }

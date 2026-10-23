@@ -1,5 +1,6 @@
 // js/views/modals/slotModal.js
 // コマ配置モーダル制御層（患者リアルタイム検索・単位数選択・計画書チェックボックス連動・各種制約バリデーション・保存解除・日次自動バックアップ連携）
+// ★検索デバウンス・先頭候補自動選択・Enterキー即確定対応
 
 import { TIME_SLOTS } from '../../config/rules.js';
 import { sanitizeHtml, safeParseInt } from '../../core/dataNormalizer.js';
@@ -16,8 +17,12 @@ import {
 import { getLocalDateStr } from '../../core/dateUtils.js';
 import { showToast } from '../../ui/toast.js';
 
+const PATIENT_SEARCH_DEBOUNCE_MS = 120;
+
 let activeModalSlot = null;
 let onScheduleUpdatedCallback = null;
+/** @type {ReturnType<typeof setTimeout>|null} */
+let patientSearchDebounceTimer = null;
 
 export function setupSlotModalListeners(onUpdate) {
   onScheduleUpdatedCallback = onUpdate;
@@ -52,17 +57,37 @@ export function setupSlotModalListeners(onUpdate) {
     if (typeof onScheduleUpdatedCallback === 'function') onScheduleUpdatedCallback();
   });
 
-  // モーダル内リアルタイム患者検索
+  // モーダル内リアルタイム患者検索（軽量デバウンス）
   searchInput?.addEventListener('input', () => {
-    populateModalPatientSelect(searchInput.value, document.getElementById('slotPatientId')?.value || '');
+    if (patientSearchDebounceTimer) clearTimeout(patientSearchDebounceTimer);
+    patientSearchDebounceTimer = setTimeout(() => {
+      patientSearchDebounceTimer = null;
+      const preferId = document.getElementById('slotPatientId')?.value || '';
+      populateModalPatientSelect(searchInput.value, preferId);
+    }, PATIENT_SEARCH_DEBOUNCE_MS);
+  });
+
+  // Enter: 先頭（または選択中）候補を即確定し、単位選択へフォーカス移動（フォーム送信は防止）
+  searchInput?.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (patientSearchDebounceTimer) {
+      clearTimeout(patientSearchDebounceTimer);
+      patientSearchDebounceTimer = null;
+      populateModalPatientSelect(searchInput.value, document.getElementById('slotPatientId')?.value || '');
+    }
+
+    const confirmed = confirmModalPatientFromSelect();
+    if (confirmed) {
+      focusUnitSelectButtons();
+    }
   });
 
   // モーダル内セレクトボックスから患者選択時のイベント連動
   patientSelect?.addEventListener('change', () => {
-    const selectedId = patientSelect.value;
-    const targetInput = document.getElementById('slotPatientId');
-    if (targetInput) targetInput.value = selectedId;
-    updateModalPatientPlanRecommendation(selectedId);
+    applySelectedPatientId(patientSelect.value);
   });
 
   // 計画書チェックボックスの切り替えイベント（チェックONでのみセレクトボックス有効化）
@@ -141,6 +166,51 @@ export function setupSlotModalListeners(onUpdate) {
     e.preventDefault();
     handleSlotFormSubmit();
   });
+}
+
+/**
+ * セレクトの選択値を #slotPatientId と計画書レコメンドへ反映
+ * @param {string} selectedId
+ */
+function applySelectedPatientId(selectedId) {
+  const targetInput = document.getElementById('slotPatientId');
+  if (targetInput) targetInput.value = selectedId || '';
+  updateModalPatientPlanRecommendation(selectedId || '');
+}
+
+/**
+ * セレクトから患者を確定（Enter用）。候補が無ければ false
+ * @returns {boolean}
+ */
+function confirmModalPatientFromSelect() {
+  const patientSelect = document.getElementById('slotPatientSelect');
+  if (!patientSelect) return false;
+
+  const options = Array.from(patientSelect.options).filter((o) => o.value && !o.disabled);
+  if (options.length === 0) {
+    showToast('該当する患者がいません', 'warn');
+    return false;
+  }
+
+  if (patientSelect.selectedIndex < 0 || !patientSelect.value) {
+    patientSelect.selectedIndex = options[0].index;
+  }
+
+  const selectedId = patientSelect.value;
+  if (!selectedId) return false;
+
+  applySelectedPatientId(selectedId);
+  return true;
+}
+
+/**
+ * 単位選択ボタン群へフォーカスを移し、キーボード操作を継続しやすくする
+ */
+function focusUnitSelectButtons() {
+  const unitBtn = document.querySelector('.btn-unit-select');
+  if (unitBtn && typeof unitBtn.focus === 'function') {
+    unitBtn.focus();
+  }
 }
 
 function setSlotEditMode(mode) {
@@ -331,6 +401,11 @@ export function openSlotModal(therapistId, slotId, currentItem) {
   const planCheck = document.getElementById('slotBillingPlanCheck');
   const planSelect = document.getElementById('slotBillingPlanSelect');
 
+  if (patientSearchDebounceTimer) {
+    clearTimeout(patientSearchDebounceTimer);
+    patientSearchDebounceTimer = null;
+  }
+
   const allTherapists = getAllTherapists();
   const activeTherapists = getActiveTherapists();
   const currentTherapist = allTherapists.find((t) => t.id === therapistId);
@@ -411,6 +486,11 @@ export function openSlotModal(therapistId, slotId, currentItem) {
   modal?.classList.add('active');
 }
 
+/**
+ * 検索結果をセレクトへ描画。候補がある場合は先頭を自動選択し hidden ID・計画書レコメンドを同期
+ * @param {string} keyword
+ * @param {string} selectId 優先選択ID（一覧に存在すれば維持）
+ */
 function populateModalPatientSelect(keyword = '', selectId = '') {
   const patientSelect = document.getElementById('slotPatientSelect');
   if (!patientSelect) return;
@@ -418,16 +498,35 @@ function populateModalPatientSelect(keyword = '', selectId = '') {
   const patients = searchPatients(keyword, 'ALL');
   if (patients.length === 0) {
     patientSelect.innerHTML = '<option value="" disabled>該当する患者がいません</option>';
+    // 検索中に候補ゼロになった場合のみ選択をクリア（初期オープンの空一覧は selectId 優先）
+    if (String(keyword || '').trim()) {
+      applySelectedPatientId('');
+    }
     return;
   }
+
+  const hasPrefer = Boolean(selectId && patients.some((p) => p.id === selectId));
+  const isSearching = Boolean(String(keyword || '').trim());
+  // 検索中は先頭候補を自動選択。既存コマ編集時は selectId を維持。空キーワードの新規は未選択のまま
+  const preferredId = hasPrefer
+    ? selectId
+    : (isSearching ? patients[0].id : '');
 
   patientSelect.innerHTML = patients
     .map((p) => {
       const cat = p.category === 'INPATIENT' ? '入' : '外';
-      const isSel = p.id === selectId ? 'selected' : '';
+      const isSel = preferredId && p.id === preferredId ? 'selected' : '';
       return `<option value="${p.id}" ${isSel}>${p.id} : ${sanitizeHtml(p.name)} (${cat} / ${sanitizeHtml(p.diseaseName || '未記入')})</option>`;
     })
     .join('');
+
+  if (preferredId) {
+    const idx = patients.findIndex((p) => p.id === preferredId);
+    patientSelect.selectedIndex = idx >= 0 ? idx : 0;
+    applySelectedPatientId(preferredId);
+  } else {
+    patientSelect.selectedIndex = -1;
+  }
 }
 
 function updateModalPatientPlanRecommendation(pId) {
