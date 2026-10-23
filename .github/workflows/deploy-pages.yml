@@ -1,0 +1,72 @@
+# GitHub Pages 静的公開（ブラウザ動作テスト用）
+# Electron / electron-builder の Windows ビルド（build-exe.yml）とは独立
+#
+# 初回または失敗継続時はリポジトリ Settings → Pages →
+# 「Build and deployment」の Source を「GitHub Actions」に設定すること。
+
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Prepare static site (repository root)
+        run: |
+          set -euo pipefail
+          # Jekyll による無視・変換を無効化（ES Module / vendor JS の 404・MIME 事故防止）
+          touch .nojekyll
+
+          mkdir -p _gh_pages
+          rsync -a \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude 'node_modules/' \
+            --exclude 'dist/' \
+            --exclude '_gh_pages/' \
+            --exclude '.cursor/' \
+            --exclude 'AgentStores/' \
+            ./ _gh_pages/
+
+          touch _gh_pages/.nojekyll
+
+          # 必須エントリの存在確認（失敗時はデプロイを中断）
+          test -f _gh_pages/index.html
+          test -f _gh_pages/js/app.js
+          test -f _gh_pages/css/style.css
+          test -f _gh_pages/js/vendor/xlsx.bundle.js
+
+          echo "Static site prepared:"
+          ls -la _gh_pages | head -n 40
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _gh_pages
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
