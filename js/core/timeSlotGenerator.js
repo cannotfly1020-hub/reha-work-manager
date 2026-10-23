@@ -1,7 +1,8 @@
 // js/core/timeSlotGenerator.js
 // 施設診療時間から20分刻みスロットを動的生成する単一情報源（Single Source of Truth）
-// デフォルト: 午前 09:00〜13:00（12コマ）／昼休憩／午後 14:00〜18:00（12コマ）＝計24コマ
+// デフォルト: 午前 09:00〜13:00（12コマ）／午後 13:00〜18:00（15コマ）＝計27コマ（昼休憩なし・完全連続）
 // 画面設定の永続化キー: localStorage 'reha_facility_hours'
+// 旧既定（pmStart=14:00）は読込時に 13:00 へ自動マイグレーションし、13:00〜14:00 の3コマを復活させる
 
 /**
  * 施設の診療時間設定（スタッフ設定モーダル／定数初期値で同じ形）
@@ -11,12 +12,24 @@
 /** localStorage キー（施設リハビリ提供時間） */
 export const FACILITY_HOURS_STORAGE_KEY = 'reha_facility_hours';
 
+/**
+ * 旧既定（昼休憩で 13:00〜14:00 が欠落していた構成）
+ * マイグレーション判定用。現行 DEFAULT とは pmStart のみ異なる。
+ * @type {FacilityHours}
+ */
+const LEGACY_LUNCH_GAP_FACILITY_HOURS = {
+  amStart: '09:00',
+  amEnd: '13:00',
+  pmStart: '14:00',
+  pmEnd: '18:00'
+};
+
 /** @type {FacilityHours} */
 export const DEFAULT_FACILITY_HOURS = {
   amStart: '09:00',
-  amEnd: '13:00',   // 昼休憩開始（午前終了）
-  pmStart: '14:00',  // 昼休憩終了（午後開始）
-  pmEnd: '18:00'     // 業務終了
+  amEnd: '13:00',   // 午前終了（12コマ: 09:00〜13:00）
+  pmStart: '13:00',  // 午後開始＝午前終了（昼休憩なし・完全連続）
+  pmEnd: '18:00'     // 業務終了（15コマ: 13:00〜18:00）→ 合計27コマ
 };
 
 /**
@@ -71,8 +84,39 @@ export function normalizeFacilityHours(hours) {
 }
 
 /**
+ * 旧「昼休憩で 13:00〜14:00 欠落」設定を現行の連続枠へ変換する。
+ * - pmStart が 14:00 かつ amEnd が 13:00 → pmStart を 13:00 に置換
+ * - 旧既定4キー完全一致の場合も同様（明示）
+ * @param {Partial<FacilityHours>|null|undefined} hours
+ * @returns {{ hours: FacilityHours, migrated: boolean }}
+ */
+export function migrateFacilityHoursIfNeeded(hours) {
+  const h = normalizeFacilityHours(hours);
+  const isLegacyGap =
+    h.pmStart === '14:00' &&
+    h.amEnd === '13:00';
+  const isExactLegacyDefault =
+    h.amStart === LEGACY_LUNCH_GAP_FACILITY_HOURS.amStart &&
+    h.amEnd === LEGACY_LUNCH_GAP_FACILITY_HOURS.amEnd &&
+    h.pmStart === LEGACY_LUNCH_GAP_FACILITY_HOURS.pmStart &&
+    h.pmEnd === LEGACY_LUNCH_GAP_FACILITY_HOURS.pmEnd;
+
+  if (isLegacyGap || isExactLegacyDefault) {
+    return {
+      hours: {
+        ...h,
+        pmStart: '13:00'
+      },
+      migrated: true
+    };
+  }
+  return { hours: h, migrated: false };
+}
+
+/**
  * 時刻逆転・コマ不足を検証
  * 条件: 午前開始 < 午前終了 <= 午後開始 < 業務終了、かつ午前・午後それぞれ最低1コマ（20分以上）
+ * ※ amEnd === pmStart（例: 13:00）は昼休憩なしの完全連続として正常許可する
  * @param {Partial<FacilityHours>|null|undefined} hours
  * @returns {{ ok: boolean, message: string, hours: FacilityHours }}
  */
@@ -123,6 +167,7 @@ export function formatFacilityHoursSummary(hours) {
 
 /**
  * 保存済み施設時間を取得（未保存・破損時はデフォルト）
+ * 旧設定（pmStart=14:00 かつ amEnd=13:00）は自動で pmStart=13:00 にマイグレーションし永続化する
  * @returns {FacilityHours}
  */
 export function getSavedFacilityHours() {
@@ -132,9 +177,19 @@ export function getSavedFacilityHours() {
     }
     const raw = localStorage.getItem(FACILITY_HOURS_STORAGE_KEY);
     if (!raw) return { ...DEFAULT_FACILITY_HOURS };
+
     const parsed = JSON.parse(raw);
-    const check = validateFacilityHours(parsed);
+    const { hours: migratedHours, migrated } = migrateFacilityHoursIfNeeded(parsed);
+    const check = validateFacilityHours(migratedHours);
     if (!check.ok) return { ...DEFAULT_FACILITY_HOURS };
+
+    if (migrated) {
+      try {
+        localStorage.setItem(FACILITY_HOURS_STORAGE_KEY, JSON.stringify(check.hours));
+      } catch (_) {
+        // 読込側マイグレーション結果は返しつつ、書き込み失敗は握りつぶす
+      }
+    }
     return check.hours;
   } catch (_) {
     return { ...DEFAULT_FACILITY_HOURS };
@@ -147,7 +202,8 @@ export function getSavedFacilityHours() {
  * @returns {{ success: boolean, message: string, hours: FacilityHours }}
  */
 export function saveFacilityHours(hours) {
-  const check = validateFacilityHours(hours);
+  const { hours: migratedHours } = migrateFacilityHoursIfNeeded(hours);
+  const check = validateFacilityHours(migratedHours);
   if (!check.ok) {
     return { success: false, message: check.message, hours: check.hours };
   }
@@ -164,6 +220,7 @@ export function saveFacilityHours(hours) {
 /**
  * 施設設定に基づいて20分刻みの TIME_SLOTS 配列を動的生成する。
  * 既存画面互換のため period は 'am'|'pm'、label は 'HH:MM - HH:MM'、start/end を必ず付与する。
+ * 既定では am_1(09:00)〜am_12(12:40)、pm_1(13:00)〜pm_15(17:40) の27コマ。
  *
  * @param {Partial<FacilityHours>} [hours]
  * @returns {Array<{
@@ -188,7 +245,7 @@ export function generateTimeSlots(hours = DEFAULT_FACILITY_HOURS) {
 
   let order = 1;
 
-  // 午前スロット（例: 09:00〜13:00 → 12コマ）
+  // 午前スロット（例: 09:00〜13:00 → 12コマ: am_1…am_12、最終枠 12:40-13:00）
   let amCount = 1;
   for (let t = amStartMin; t + 20 <= amEndMin; t += 20) {
     const startStr = minutesToTime(t);
@@ -207,7 +264,7 @@ export function generateTimeSlots(hours = DEFAULT_FACILITY_HOURS) {
     order += 1;
   }
 
-  // 午後スロット（例: 14:00〜18:00 → 12コマ）
+  // 午後スロット（例: 13:00〜18:00 → 15コマ: pm_1…pm_15、先頭3枠が 13:00/13:20/13:40）
   let pmCount = 1;
   for (let t = pmStartMin; t + 20 <= pmEndMin; t += 20) {
     const startStr = minutesToTime(t);
@@ -231,6 +288,7 @@ export function generateTimeSlots(hours = DEFAULT_FACILITY_HOURS) {
 
 /**
  * 外来予約カレンダー用の開始時刻文字列配列（TIME_SLOTS の start と完全一致）
+ * 既定では '13:00','13:20','13:40' を含む
  * @param {Partial<FacilityHours>} [hours]
  * @returns {string[]}
  */
@@ -257,7 +315,7 @@ export function getPmSlotCount(hours = DEFAULT_FACILITY_HOURS) {
 }
 
 /**
- * 1日の総コマ数（デフォルト24＝セラピスト日上限・終日休暇と調和）
+ * 1日の総コマ数（デフォルト27＝セラピスト日上限・終日休暇と調和）
  * @param {Partial<FacilityHours>} [hours]
  * @returns {number}
  */
@@ -267,6 +325,7 @@ export function getTotalSlotCount(hours = DEFAULT_FACILITY_HOURS) {
 
 /**
  * スロットが午後帯か（業務日誌の午前／午後休暇判定用）
+ * period === 'pm'（既定では 13:00 以降のブロック）を午後出勤欄へ反映する
  * @param {{ period?: string }|null|undefined} slot
  * @returns {boolean}
  */

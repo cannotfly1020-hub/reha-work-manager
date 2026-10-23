@@ -76,7 +76,7 @@ function updateFacilityHoursSlotSummaryBadge() {
 function syncLeavePresetDurations(hours) {
   const h = hours || getSavedFacilityHours();
   const half = getAmSlotCount(h) || AM_SLOT_COUNT || 12;
-  const full = getTotalSlotCount(h) || TOTAL_SLOT_COUNT || 24;
+  const full = getTotalSlotCount(h) || TOTAL_SLOT_COUNT || 27;
 
   document.querySelectorAll('.btn-task-preset').forEach((btn) => {
     const title = btn.getAttribute('data-title') || '';

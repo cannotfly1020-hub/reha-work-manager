@@ -41,7 +41,7 @@ function buildTaskCardHtml(cellData, tId, slotId) {
     badgeText = '公休';
   }
   const halfSlots = AM_SLOT_COUNT || 12;
-  const fullSlots = TOTAL_SLOT_COUNT || 24;
+  const fullSlots = TOTAL_SLOT_COUNT || 27;
   const durationLabel = u >= fullSlots ? '終日' : (u >= halfSlots ? '半日' : `${u * 20}分`);
   return `
     <div class="cell-slot">

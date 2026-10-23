@@ -131,7 +131,8 @@ export const REHA_RULES = {
 
 /**
  * 現行施設の診療時間（画面設定・localStorage と同期）
- * 初期値: 保存済み設定があればそれ、なければ 午前09:00〜13:00 / 午後14:00〜18:00
+ * 初期値: 保存済み設定があればそれ、なければ 午前09:00〜13:00 / 午後13:00〜18:00（昼休憩なし・計27コマ）
+ * ※旧保存（pmStart=14:00）は getSavedFacilityHours で 13:00 へ自動マイグレーション
  * ※オブジェクトは同一参照を維持し、プロパティだけ上書きする（import 側の参照を壊さない）
  */
 export const FACILITY_HOURS = { ...DEFAULT_FACILITY_HOURS };
