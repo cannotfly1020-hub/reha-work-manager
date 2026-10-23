@@ -1,6 +1,6 @@
 // js/app.js
 // 全体初期化・タブ切替自動再同期・ヘッダー＆時間割更新ボタン連動・全体再描画司令塔
-// ★起動: IndexedDB透過ストレージ（アクティブ窓のみメモリ）→ アーカイブ → ローカルバックアップ → 各画面
+// ★起動: IndexedDB透過ストレージ（アクティブ窓のみメモリ）→ アーカイブ → Electron自動バックアップ確認 → 各画面
 
 import { initStorage } from './core/storageAdapter.js';
 import {
@@ -47,13 +47,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.warn('[app] initArchiveManager soft-fail:', err);
   }
 
-  // 1.5 ローカルフォルダ／IDBスナップショット セーフティネット
+  // 1.5 Electron ネイティブ自動バックアップ状態ログ（File System Access は不使用）
   try {
     const backupInit = await initLocalFileBackup();
     logBackupNetStatus();
-    console.log('[app] Local file backup init:', backupInit);
+    console.log('[app] Electron backup init:', backupInit);
   } catch (err) {
-    console.warn('[app] initLocalFileBackup soft-fail:', err);
+    console.warn('[app] backup init soft-fail:', err);
   }
 
   // 2. 既存の各画面初期化（これまでと全く同一順序）

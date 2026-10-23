@@ -1,9 +1,8 @@
 // js/backup/backupService.js
 // 手動バックアップ・年度確定・復元・日次自動セーフティネット統括
-// 方式A: File System Access / Electron PCフォルダ
-// 方式B: IndexedDB 14日スナップショット（常時）
-// 方式C: ワンクリック手動ダウンロード（従来維持）
-// ★アーカイブ済みスケジュールも含め IndexedDB 全件スナップショットを正本とする
+// ★PC自動保存は Electron ネイティブ（desktopApp.saveDailyBackup → ドキュメント\リハ業務管理_自動バックアップ）に1本化
+// ★ブラウザ向け File System Access API / reha_backup_safety_net_db 依存は撤廃
+// ★手動「📦 保存」「🏛 確定保存」および JSON 復元は従来どおり維持
 
 import { getLocalDateStr } from '../core/dateUtils.js';
 import {
@@ -11,14 +10,8 @@ import {
 } from '../core/storageAdapter.js';
 import { writeStorageItem } from '../store/storageWrite.js';
 import { showToast } from '../ui/toast.js';
-import {
-  autoWriteDailyBackupToFile,
-  saveIdbDailySnapshot,
-  isAutoWriteEnabled
-} from './localFileBackup.js';
 
 let autoBackupDebounceTimer = null;
-let lastFolderWarnAt = 0;
 
 /**
  * 全ストアの最新スナップショット（アーカイブ冷データ含む）を非同期生成
@@ -73,21 +66,8 @@ function removeLegacyAutoBackupCopies() {
   storageKeys('reha_autobackup_').forEach((key) => storageRemove(key));
 }
 
-function maybeWarnFolder(reason) {
-  const now = Date.now();
-  if (now - lastFolderWarnAt < 60000) return;
-  lastFolderWarnAt = now;
-
-  if (reason === 'no_folder' || reason === 'permission_denied' || reason === 'permission_prompt') {
-    showToast(
-      '📂 PCフォルダ自動保存の権限が無効です。Excel出力画面で「自動保存先フォルダ」を再選択してください（IndexedDB内スナップショットは保存済み）',
-      'warn'
-    );
-  }
-}
-
 /**
- * 日次セーフティネット実行
+ * 日次セーフティネット実行（Electron PCフォルダへの上書き保存のみ）
  */
 export async function performDailyAutoBackup() {
   try {
@@ -95,38 +75,23 @@ export async function performDailyAutoBackup() {
     removeLegacyAutoBackupCopies();
     const dump = await createSystemDump({ backupType: 'DAILY_AUTO', targetDate: todayStr });
 
-    try {
-      await saveIdbDailySnapshot(dump, todayStr);
-    } catch (snapErr) {
-      console.warn('[backup] IDB snapshot layer failed:', snapErr);
-    }
-
     if (window.desktopApp && typeof window.desktopApp.saveDailyBackup === 'function') {
       try {
         const payload = { targetDate: todayStr, data: dump, ...dump };
         const res = await window.desktopApp.saveDailyBackup(payload);
         if (res?.success) {
-          console.log(`[自動バックアップ] Electron PCフォルダへ保存: ${res.filePath}`);
+          console.log(`[自動バックアップ] Electron PCフォルダへ保存: ${res.filePath || res.fileName || ''}`);
         } else if (res) {
-          console.warn('Desktop file auto-backup soft-fail:', res);
+          console.warn('[自動バックアップ] Desktop file auto-backup soft-fail:', res);
         }
       } catch (ipcErr) {
-        console.warn('Desktop file auto-backup IPC error:', ipcErr);
+        console.warn('[自動バックアップ] Desktop file auto-backup IPC error:', ipcErr);
       }
+      return;
     }
 
-    if (isAutoWriteEnabled()) {
-      try {
-        const fileRes = await autoWriteDailyBackupToFile(dump, todayStr);
-        if (fileRes.success) {
-          console.log(`[自動バックアップ] 指定フォルダへ保存: ${fileRes.fileName}`);
-        } else if (fileRes.reason && fileRes.reason !== 'disabled' && fileRes.reason !== 'unsupported') {
-          maybeWarnFolder(fileRes.reason);
-        }
-      } catch (fsErr) {
-        console.warn('[backup] File System Access write failed:', fsErr);
-      }
-    }
+    // ブラウザ単体起動時は PC 自動保存対象外（警告バーは出さない）
+    console.log('[自動バックアップ] Electron未検出のためPC自動保存をスキップ（手動📦保存は利用可）');
   } catch (e) {
     console.warn('Daily auto backup error:', e);
   }

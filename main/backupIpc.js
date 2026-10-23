@@ -32,12 +32,18 @@ function getBackupDirectoryPath() {
 /**
  * 直近14世代（14日分）を超過した古い自動バックアップJSONを安全に自動消去する
  */
+function isDailyBackupFileName(file) {
+  if (!file || !file.endsWith('.json')) return false;
+  // 現行: reha_backup_YYYY-MM-DD.json / 旧互換: reha_autobackup_YYYY-MM-DD.json
+  return file.startsWith('reha_backup_') || file.startsWith('reha_autobackup_');
+}
+
 function cleanOldBackupFiles(backupDir, keepCount = 14) {
   try {
     if (!fs.existsSync(backupDir)) return;
     const files = fs.readdirSync(backupDir);
     const backupFiles = files
-      .filter((file) => file.startsWith('reha_autobackup_') && file.endsWith('.json'))
+      .filter((file) => isDailyBackupFileName(file))
       .sort(); // ファイル名昇順（日付順 YYYY-MM-DD）
 
     while (backupFiles.length > keepCount) {
@@ -78,7 +84,7 @@ function setupIpcHandlers() {
       }
 
       const backupDir = getBackupDirectoryPath();
-      const fileName = `reha_autobackup_${targetDate}.json`;
+      const fileName = `reha_backup_${targetDate}.json`;
       const filePath = path.join(backupDir, fileName);
 
       // JSON文字列をインデント付きで整形してファイル書き出し
