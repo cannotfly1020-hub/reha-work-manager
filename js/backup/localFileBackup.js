@@ -1,10 +1,10 @@
 // js/backup/localFileBackup.js
 // ローカルフォルダ直結セーフティネット（File System Access API + IndexedDB 14日スナップショット）
 // フェーズ1 storageAdapter / 同期 API には一切干渉しない独立モジュール
+// ★ユーザーが選んだ親フォルダ配下に「リハビリ管理_自動バックアップ」を自動作成し、日次JSONはそこへ格納
 
 import { getLocalDateStr } from '../core/dateUtils.js';
 import { storageGet, storageSet } from '../core/storageAdapter.js';
-import { showToast } from '../ui/toast.js';
 
 const SAFETY_DB_NAME = 'reha_backup_safety_net_db';
 const SAFETY_DB_VERSION = 1;
@@ -17,13 +17,16 @@ const META_AUTO_WRITE = 'auto_write_enabled';
 const SETTING_AUTO_KEY = 'reha_backup_folder_auto_enabled';
 const SETTING_FOLDER_NAME_KEY = 'reha_backup_folder_display_name';
 
+/** ユーザー選択フォルダ直下に自動作成する専用サブフォルダ名 */
+export const BACKUP_SUBFOLDER_NAME = 'リハビリ管理_自動バックアップ';
+
 const KEEP_DAYS = 14;
 const FILE_PREFIX = 'reha_backup_';
 
 /** @type {IDBDatabase|null} */
 let safetyDb = null;
 
-/** @type {FileSystemDirectoryHandle|null} */
+/** @type {FileSystemDirectoryHandle|null} 実際に JSON を書き込む専用サブフォルダのハンドル */
 let cachedDirHandle = null;
 
 let initDone = false;
@@ -67,6 +70,15 @@ function metaPut(db, key, value) {
   });
 }
 
+function metaDelete(db, key) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_META, 'readwrite');
+    tx.objectStore(STORE_META).delete(key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 function snapshotPut(db, dateStr, jsonText) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_SNAPSHOTS, 'readwrite');
@@ -96,6 +108,49 @@ function snapshotDelete(db, dateStr) {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
+}
+
+/**
+ * 親フォルダ配下に専用サブフォルダを作成／取得する
+ * @param {FileSystemDirectoryHandle} parentDirHandle
+ * @returns {Promise<FileSystemDirectoryHandle>}
+ */
+async function ensureBackupSubfolder(parentDirHandle) {
+  return parentDirHandle.getDirectoryHandle(BACKUP_SUBFOLDER_NAME, { create: true });
+}
+
+/**
+ * 表示用パス（親名/専用サブフォルダ）
+ * @param {string} parentName
+ * @returns {string}
+ */
+function buildBackupFolderDisplayName(parentName) {
+  const parent = (parentName || '').trim() || '選択済みフォルダ';
+  return `${parent}/${BACKUP_SUBFOLDER_NAME}`;
+}
+
+/**
+ * 保存済みハンドルが親（旧仕様）か専用サブフォルダかを判定し、書き込み先を専用サブに正規化
+ * @param {FileSystemDirectoryHandle} handle
+ * @returns {Promise<{ backupDir: FileSystemDirectoryHandle, displayName: string }>}
+ */
+async function resolveBackupDirectoryHandle(handle) {
+  if (!handle) {
+    throw new Error('directory handle is null');
+  }
+
+  // すでに専用サブフォルダを指している場合はそのまま使用
+  if (handle.name === BACKUP_SUBFOLDER_NAME) {
+    return {
+      backupDir: handle,
+      displayName: getBackupFolderDisplayName() || BACKUP_SUBFOLDER_NAME
+    };
+  }
+
+  // 旧仕様（親フォルダを直接保存していた場合）→ 配下に専用サブを作成／取得して移行
+  const backupDir = await ensureBackupSubfolder(handle);
+  const displayName = buildBackupFolderDisplayName(handle.name);
+  return { backupDir, displayName };
 }
 
 /**
@@ -168,7 +223,6 @@ export async function initLocalFileBackup() {
   try {
     const handle = await metaGet(safetyDb, META_DIR_HANDLE);
     if (handle && typeof handle.queryPermission === 'function') {
-      cachedDirHandle = handle;
       permission = await handle.queryPermission({ mode: 'readwrite' });
       if (permission === 'prompt') {
         // 起動時はユーザー操作なしで request できない場合がある → 失敗しても落とさない
@@ -178,8 +232,37 @@ export async function initLocalFileBackup() {
           permission = 'prompt';
         }
       }
+
       if (permission === 'granted') {
-        storageSet(SETTING_FOLDER_NAME_KEY, handle.name || '選択済みフォルダ');
+        try {
+          const resolved = await resolveBackupDirectoryHandle(handle);
+          cachedDirHandle = resolved.backupDir;
+          // 移行後ハンドルを永続化（次回以降は専用サブを直接参照）
+          if (resolved.backupDir !== handle) {
+            await metaPut(safetyDb, META_DIR_HANDLE, resolved.backupDir);
+          }
+          storageSet(SETTING_FOLDER_NAME_KEY, resolved.displayName);
+        } catch (resolveErr) {
+          console.warn('[localFileBackup] ensure subfolder on init failed:', resolveErr);
+          cachedDirHandle = handle;
+          storageSet(
+            SETTING_FOLDER_NAME_KEY,
+            handle.name === BACKUP_SUBFOLDER_NAME
+              ? (getBackupFolderDisplayName() || BACKUP_SUBFOLDER_NAME)
+              : buildBackupFolderDisplayName(handle.name)
+          );
+        }
+      } else {
+        // 権限未付与でもハンドルは保持（再選択・解除 UI 用）
+        cachedDirHandle = handle;
+        if (!getBackupFolderDisplayName()) {
+          storageSet(
+            SETTING_FOLDER_NAME_KEY,
+            handle.name === BACKUP_SUBFOLDER_NAME
+              ? BACKUP_SUBFOLDER_NAME
+              : buildBackupFolderDisplayName(handle.name)
+          );
+        }
       }
     }
   } catch (e) {
@@ -193,7 +276,8 @@ export async function initLocalFileBackup() {
 }
 
 /**
- * ユーザー操作でバックアップ先フォルダを選択・永続化
+ * ユーザー操作でバックアップ先の親フォルダを選択し、
+ * 配下に「リハビリ管理_自動バックアップ」を自動作成して永続化する
  * @returns {Promise<{ success: boolean, folderName?: string, message?: string }>}
  */
 export async function pickBackupDirectory() {
@@ -207,20 +291,16 @@ export async function pickBackupDirectory() {
   try {
     if (!safetyDb) safetyDb = await openSafetyDb();
 
-    const handle = await window.showDirectoryPicker({
+    const parentHandle = await window.showDirectoryPicker({
       id: 'reha-work-manager-backup',
       mode: 'readwrite',
       startIn: 'documents'
     });
 
-    cachedDirHandle = handle;
-    await metaPut(safetyDb, META_DIR_HANDLE, handle);
-    storageSet(SETTING_FOLDER_NAME_KEY, handle.name || '選択済みフォルダ');
-
-    // 選択直後に権限確認
-    let perm = await handle.queryPermission({ mode: 'readwrite' });
+    // 選択直後に親フォルダの権限確認
+    let perm = await parentHandle.queryPermission({ mode: 'readwrite' });
     if (perm !== 'granted') {
-      perm = await handle.requestPermission({ mode: 'readwrite' });
+      perm = await parentHandle.requestPermission({ mode: 'readwrite' });
     }
     if (perm !== 'granted') {
       return {
@@ -229,7 +309,15 @@ export async function pickBackupDirectory() {
       };
     }
 
-    return { success: true, folderName: handle.name || '選択済みフォルダ' };
+    // 専用サブフォルダを自動作成／取得し、そちらを書き込み先として永続化
+    const backupDir = await ensureBackupSubfolder(parentHandle);
+    cachedDirHandle = backupDir;
+    await metaPut(safetyDb, META_DIR_HANDLE, backupDir);
+
+    const displayName = buildBackupFolderDisplayName(parentHandle.name);
+    storageSet(SETTING_FOLDER_NAME_KEY, displayName);
+
+    return { success: true, folderName: displayName };
   } catch (e) {
     if (e && e.name === 'AbortError') {
       return { success: false, message: 'フォルダ選択がキャンセルされました。' };
@@ -237,6 +325,44 @@ export async function pickBackupDirectory() {
     console.warn('[localFileBackup] pickBackupDirectory error:', e);
     return { success: false, message: 'フォルダ選択に失敗しました。' };
   }
+}
+
+/**
+ * フォルダ設定を初期化・削除する（再選択前の解除／誤設定のリセット）
+ * 専用DB内のディレクトリハンドルと表示名を消去し、方式B（IDBスナップショット）へ安全にフォールバックする。
+ * @returns {Promise<{ success: boolean, message: string }>}
+ */
+export async function clearBackupDirectoryHandle() {
+  cachedDirHandle = null;
+  try {
+    storageSet(SETTING_FOLDER_NAME_KEY, '');
+  } catch (_) { /* ignore */ }
+
+  try {
+    if (!safetyDb) {
+      try {
+        safetyDb = await openSafetyDb();
+      } catch (_) {
+        return {
+          success: true,
+          message: 'フォルダ設定を解除しました（IndexedDBスナップショットは継続稼働します）。'
+        };
+      }
+    }
+    await metaDelete(safetyDb, META_DIR_HANDLE);
+  } catch (e) {
+    console.warn('[localFileBackup] clearBackupDirectoryHandle meta delete failed:', e);
+    // メモリ上のハンドルは既に消しているため、UI上は未設定へ戻せる
+    return {
+      success: true,
+      message: 'フォルダ設定を解除しました（一部メタ削除に失敗しましたが、書き込み先は未設定です）。'
+    };
+  }
+
+  return {
+    success: true,
+    message: 'フォルダ設定を解除しました。以降は IndexedDB 内14日スナップショットのみが稼働します。'
+  };
 }
 
 /**
@@ -303,6 +429,7 @@ async function rotateFolderBackupFiles(dirHandle, todayStr) {
 
 /**
  * 指定フォルダへ当日 JSON を書き出し（方式 A）
+ * ※書き込み先は専用サブフォルダ「リハビリ管理_自動バックアップ」
  * @param {Object} dump
  * @param {string} dateStr
  * @returns {Promise<{ success: boolean, reason?: string, fileName?: string }>}

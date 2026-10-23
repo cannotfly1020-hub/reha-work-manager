@@ -298,23 +298,31 @@
           </div>
         </div>
 
-        <!-- 自動保存先フォルダ（File System Access API・初回のみ選択） -->
+        <!-- 自動保存先フォルダ（File System Access API・親選択＋専用サブ自動生成／変更・解除対応） -->
         <div id="localBackupFolderPanel" style="margin-bottom:16px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:14px 16px;">
           <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px;">
             <div>
               <div style="font-weight:800; font-size:0.85rem; color:#1e40af; margin-bottom:4px;">📂 PCフォルダへ完全自動バックアップ</div>
               <div id="backupFolderStatusBadge" style="font-size:0.75rem; color:#64748b; font-weight:600;">📂 自動保存先: 未設定</div>
             </div>
-            <button id="btnPickBackupFolder" type="button" style="padding:8px 14px; background:#2563eb; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer; white-space:nowrap;">
-              📂 自動保存先フォルダを選択
-            </button>
+            <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
+              <button id="btnPickBackupFolder" type="button" style="padding:8px 14px; background:#2563eb; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer; white-space:nowrap;">
+                📂 自動保存先フォルダを選択
+              </button>
+              <button id="btnChangeBackupFolder" type="button" style="display:none; padding:8px 12px; background:#fff; color:#1d4ed8; border:1px solid #93c5fd; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer; white-space:nowrap;">
+                🔄 変更
+              </button>
+              <button id="btnResetBackupFolder" type="button" style="display:none; padding:8px 12px; background:#fff; color:#b91c1c; border:1px solid #fecaca; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer; white-space:nowrap;">
+                ✕ 解除
+              </button>
+            </div>
           </div>
           <label style="display:flex; align-items:flex-start; gap:8px; font-size:0.78rem; color:#334155; cursor:pointer; line-height:1.45;">
             <input type="checkbox" id="chkAutoWriteBackupFolder" checked style="margin-top:2px; width:15px; height:15px; accent-color:#2563eb;">
             <span>データ変更時にPCフォルダへ自動書き出しを行う（IndexedDB内14日スナップショットは常時保存）</span>
           </label>
           <p style="font-size:0.68rem; color:#64748b; margin:8px 0 0; line-height:1.4;">
-            初回のみフォルダを選ぶと、以降は <code style="background:#dbeafe; padding:0 3px; border-radius:3px;">reha_backup_YYYY-MM-DD.json</code> を自動上書きします（14日超は自動削除）。キャッシュ消去事故へのセーフティネットです。
+            ドキュメントやデスクトップなど大枠の場所を選ぶと、配下に <code style="background:#dbeafe; padding:0 3px; border-radius:3px;">リハビリ管理_自動バックアップ</code> を自動作成し、その中へ <code style="background:#dbeafe; padding:0 3px; border-radius:3px;">reha_backup_YYYY-MM-DD.json</code> を保存します（14日超は自動削除）。間違えた場合は「🔄 変更」「✕ 解除」で再設定できます。
           </p>
         </div>
 

@@ -10,6 +10,7 @@ import {
 } from '../backup/backupService.js';
 import {
   pickBackupDirectory,
+  clearBackupDirectoryHandle,
   setAutoWriteEnabled,
   isAutoWriteEnabled,
   getLocalBackupUiState,
@@ -40,9 +41,26 @@ export function initExportView() {
   window.triggerDailyBackup = triggerDailyAutoBackup;
 }
 
+/**
+ * フォルダ選択ダイアログを開き、結果をトースト＆UI反映する共通処理
+ * （初回選択・変更の両方で使用）
+ */
+async function handlePickOrChangeBackupFolder() {
+  const result = await pickBackupDirectory();
+  refreshBackupFolderStatusUi();
+  if (result.success) {
+    showToast(`🟢 自動保存先を設定しました: ${result.folderName}`, 'success');
+    performDailyAutoBackup().catch(() => {});
+  } else if (result.message) {
+    showToast(result.message, 'warn');
+  }
+}
+
 function setupLocalBackupFolderUi() {
   const badge = document.getElementById('backupFolderStatusBadge');
   const btnPick = document.getElementById('btnPickBackupFolder');
+  const btnChange = document.getElementById('btnChangeBackupFolder');
+  const btnReset = document.getElementById('btnResetBackupFolder');
   const chkAuto = document.getElementById('chkAutoWriteBackupFolder');
   const panel = document.getElementById('localBackupFolderPanel');
 
@@ -53,18 +71,31 @@ function setupLocalBackupFolderUi() {
       badge.textContent = '📂 自動保存先: このブラウザはフォルダ自動保存未対応（IndexedDBスナップショットは稼働）';
       badge.style.color = '#b45309';
       if (btnPick) btnPick.disabled = true;
+      if (btnChange) btnChange.disabled = true;
+      if (btnReset) btnReset.disabled = true;
     }
   }
 
-  btnPick?.addEventListener('click', async () => {
-    const result = await pickBackupDirectory();
+  btnPick?.addEventListener('click', () => {
+    handlePickOrChangeBackupFolder();
+  });
+
+  btnChange?.addEventListener('click', () => {
+    handlePickOrChangeBackupFolder();
+  });
+
+  btnReset?.addEventListener('click', async () => {
+    const ok = window.confirm(
+      'PCフォルダへの自動保存設定を解除しますか？\n\n'
+      + '・専用サブフォルダへの自動書き出しは停止します\n'
+      + '・IndexedDB内の14日スナップショットは引き続き稼働します\n'
+      + '・フォルダ内の既存JSONファイル自体は削除しません'
+    );
+    if (!ok) return;
+
+    const result = await clearBackupDirectoryHandle();
     refreshBackupFolderStatusUi();
-    if (result.success) {
-      showToast(`🟢 自動保存先を設定しました: ${result.folderName}`, 'success');
-      performDailyAutoBackup().catch(() => {});
-    } else if (result.message) {
-      showToast(result.message, 'warn');
-    }
+    showToast(result.message || 'フォルダ設定を解除しました', result.success ? 'info' : 'warn');
   });
 
   if (chkAuto) {
@@ -82,20 +113,45 @@ function setupLocalBackupFolderUi() {
   }
 }
 
+/**
+ * 設定済み／未設定に応じてボタン表示を切り替え、バッジ文言を更新
+ */
 export function refreshBackupFolderStatusUi() {
   const badge = document.getElementById('backupFolderStatusBadge');
   const chkAuto = document.getElementById('chkAutoWriteBackupFolder');
+  const btnPick = document.getElementById('btnPickBackupFolder');
+  const btnChange = document.getElementById('btnChangeBackupFolder');
+  const btnReset = document.getElementById('btnResetBackupFolder');
   if (!badge) return;
 
   const state = getLocalBackupUiState();
   if (chkAuto) chkAuto.checked = state.autoEnabled;
 
-  if (state.hasHandle && state.folderName) {
+  const isConfigured = Boolean(state.hasHandle && state.folderName);
+  const isDesktop = Boolean(window.desktopApp && window.desktopApp.isDesktop);
+
+  // 未設定: 「選択」のみ表示／設定済み: 「変更」「解除」を表示
+  // Electron 専用パス稼働時はブラウザ側の選択 UI を隠す
+  if (isDesktop && !isConfigured) {
+    if (btnPick) btnPick.style.display = 'none';
+    if (btnChange) btnChange.style.display = 'none';
+    if (btnReset) btnReset.style.display = 'none';
+  } else if (isConfigured) {
+    if (btnPick) btnPick.style.display = 'none';
+    if (btnChange) btnChange.style.display = '';
+    if (btnReset) btnReset.style.display = '';
+  } else {
+    if (btnPick) btnPick.style.display = '';
+    if (btnChange) btnChange.style.display = 'none';
+    if (btnReset) btnReset.style.display = 'none';
+  }
+
+  if (isConfigured) {
     badge.textContent = state.autoEnabled
       ? `🟢 自動保存先: ${state.folderName}`
       : `📂 自動保存先: ${state.folderName}（自動書き出しOFF）`;
     badge.style.color = state.autoEnabled ? '#15803d' : '#64748b';
-  } else if (window.desktopApp && window.desktopApp.isDesktop) {
+  } else if (isDesktop) {
     badge.textContent = '🟢 Electron専用フォルダへ自動保存（ドキュメント/リハ業務管理_自動バックアップ）';
     badge.style.color = '#15803d';
   } else {
