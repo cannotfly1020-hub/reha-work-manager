@@ -1,5 +1,6 @@
 // js/excel/sheetUtils.js
 // 受付提出用Excelの共通スタイルとセル操作
+// ★印刷デフォルト: A4横向きを OpenXML へ確実注入（xlsx-js-style は !pageSetup を書き出さないため ZIP 後処理で補強）
 
 export const SUMMARY_SHEET = 'レセプト収益サマリー';
 export const YEARLY_TREND_SHEET = '年間推移 (入外別)';
@@ -96,17 +97,57 @@ export function getEarlyBaseDate(p) {
   return p.earlyBonusStartDate || p.admissionDate || p.onsetDate || '';
 }
 
-export function applyA4LandscapePrintSetup(ws, singlePageOnly = false) {
-  ws['!sheetPr'] = { pageSetUpPr: { fitToPage: true } };
-  ws['!properties'] = { pageSetUpPr: { fitToPage: true } };
+/**
+ * ワークシートにA4横向き・1ページ幅収容の印刷設定を適用する。
+ * ※ xlsx-js-style 0.18.x は OOXML へ orientation / paperSize を書き出さないため、
+ *    ここでの !pageSetup 設定に加え、write フックで sheet XML へ pageSetup を注入する。
+ * @param {Object} ws - SheetJS ワークシートオブジェクト
+ * @param {boolean} [fitHeight=false] - 縦も1ページに収めるか（true=サマリー等、false=リスト系は縦自動改ページ）
+ */
+export function applyA4LandscapePrintSetup(ws, fitHeight = false) {
+  if (!ws) return;
+
+  const fitToHeight = fitHeight ? 1 : 0;
+
+  // 1. ページセットアップの有効化フラグ（fitToPage）
+  ws['!sheetPr'] = {
+    pageSetUpPr: { fitToPage: true }
+  };
+  ws['!properties'] = {
+    pageSetUpPr: { fitToPage: true }
+  };
+
+  // 2. 印刷設定マスター（A4・横向き・fitToWidth=1）
   ws['!pageSetup'] = {
-    paperSize: 9, // A4
-    orientation: 'landscape',
-    fitToWidth: 1, // 横幅は必ず1ページ幅に自動収容
-    fitToHeight: singlePageOnly ? 1 : 0, // サマリーは1枚収容、リスト系は縦の自然改ページを許可
+    paperSize: 9,              // 9 = A4
+    orientation: 'landscape',  // ★確実にデフォルトを「横向き」に固定
+    fitToWidth: 1,             // 横幅は必ず1ページに収める
+    fitToHeight: fitToHeight,  // 縦のページ収容指定
+    scale: 100,
     fitToPage: true
   };
-  ws['!margins'] = { left: 0.2, right: 0.2, top: 0.3, bottom: 0.3, header: 0.1, footer: 0.1 };
+
+  // 3. 印刷余白（余白狭め：インチ単位）
+  ws['!margins'] = {
+    left: 0.2,
+    right: 0.2,
+    top: 0.3,
+    bottom: 0.3,
+    header: 0.1,
+    footer: 0.1
+  };
+
+  // 4. ZIP後処理用メタ（シート順で fitHeight を復元）
+  ws['!rehaPrintSetup'] = {
+    paperSize: 9,
+    orientation: 'landscape',
+    fitToWidth: 1,
+    fitToHeight: fitToHeight,
+    fitHeight: !!fitHeight,
+    scale: 100
+  };
+
+  installXlsxA4LandscapeWriteHook();
 }
 
 export function setStyledCell(ws, r, c, val, style = {}) {
@@ -141,4 +182,336 @@ export function appendOrReplaceSheet(wb, ws, name) {
   const existingIdx = wb.SheetNames.indexOf(name);
   if (existingIdx >= 0) wb.Sheets[name] = ws;
   else window.XLSX.utils.book_append_sheet(wb, ws, name);
+  if (wb) wb.__rehaForceA4Landscape = true;
+  installXlsxA4LandscapeWriteHook();
 }
+
+/* -------------------------------------------------------------------------- */
+/*  A4 Landscape ZIP 注入（SheetJS が pageSetup を書かない問題の根本対策）      */
+/* -------------------------------------------------------------------------- */
+
+const TEXT_ENC = (typeof TextEncoder !== 'undefined') ? new TextEncoder() : null;
+const TEXT_DEC = (typeof TextDecoder !== 'undefined') ? new TextDecoder() : null;
+
+/** @type {Uint32Array|null} */
+let CRC_TABLE = null;
+
+function getCrcTable() {
+  if (CRC_TABLE) return CRC_TABLE;
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n += 1) {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) {
+      c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    table[n] = c >>> 0;
+  }
+  CRC_TABLE = table;
+  return table;
+}
+
+function crc32(u8) {
+  const table = getCrcTable();
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < u8.length; i += 1) {
+    c = table[(c ^ u8[i]) & 0xFF] ^ (c >>> 8);
+  }
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+function u8FromString(str) {
+  if (TEXT_ENC) return TEXT_ENC.encode(str);
+  const arr = new Uint8Array(str.length);
+  for (let i = 0; i < str.length; i += 1) arr[i] = str.charCodeAt(i) & 0xFF;
+  return arr;
+}
+
+function stringFromU8(u8) {
+  if (TEXT_DEC) return TEXT_DEC.decode(u8);
+  let s = '';
+  for (let i = 0; i < u8.length; i += 1) s += String.fromCharCode(u8[i]);
+  return s;
+}
+
+/**
+ * worksheet XML に A4 landscape の pageSetup / sheetPr を注入・上書きする
+ * @param {string} xml
+ * @param {boolean} fitHeight
+ * @returns {string}
+ */
+export function injectA4LandscapeIntoSheetXml(xml, fitHeight = false) {
+  if (!xml || typeof xml !== 'string') return xml;
+  let out = xml;
+  const fitH = fitHeight ? 1 : 0;
+  const pageSetupTag =
+    `<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="${fitH}" scale="100"/>`;
+
+  // sheetPr / pageSetUpPr（fitToPage）
+  if (/<sheetPr\b[^>]*\/>/.test(out)) {
+    out = out.replace(/<sheetPr\b[^>]*\/>/, '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>');
+  } else if (/<sheetPr\b[^>]*>/.test(out)) {
+    if (!/<pageSetUpPr\b/.test(out)) {
+      out = out.replace(/<sheetPr\b[^>]*>/, (m) => `${m}<pageSetUpPr fitToPage="1"/>`);
+    } else {
+      out = out.replace(/<pageSetUpPr\b[^>]*\/>/, '<pageSetUpPr fitToPage="1"/>');
+    }
+  } else {
+    out = out.replace(/<worksheet\b[^>]*>/, (m) => `${m}<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>`);
+  }
+
+  // pageSetup（既存があれば置換、なければ pageMargins 直後へ挿入）
+  if (/<pageSetup\b[^>]*\/>/.test(out)) {
+    out = out.replace(/<pageSetup\b[^>]*\/>/, pageSetupTag);
+  } else if (/<pageSetup\b[^>]*>[\s\S]*?<\/pageSetup>/.test(out)) {
+    out = out.replace(/<pageSetup\b[^>]*>[\s\S]*?<\/pageSetup>/, pageSetupTag);
+  } else if (/<pageMargins\b[^>]*\/>/.test(out)) {
+    out = out.replace(/(<pageMargins\b[^>]*\/>)/, `$1${pageSetupTag}`);
+  } else if (/<ignoredErrors\b/.test(out)) {
+    out = out.replace(/<ignoredErrors\b/, `${pageSetupTag}<ignoredErrors`);
+  } else {
+    out = out.replace(/<\/worksheet>/, `${pageSetupTag}</worksheet>`);
+  }
+
+  return out;
+}
+
+/**
+ * STORE 方式の ZIP をエントリ配列へ展開する（圧縮エントリは非対応）
+ * @param {Uint8Array} buf
+ * @returns {{ name: string, data: Uint8Array, method: number }[]}
+ */
+function parseZipEntries(buf) {
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const entries = [];
+  let off = 0;
+  while (off + 30 <= buf.length) {
+    const sig = view.getUint32(off, true);
+    if (sig !== 0x04034b50) break;
+    const method = view.getUint16(off + 8, true);
+    const compSize = view.getUint32(off + 18, true);
+    const nameLen = view.getUint16(off + 26, true);
+    const extraLen = view.getUint16(off + 28, true);
+    const nameStart = off + 30;
+    const name = stringFromU8(buf.subarray(nameStart, nameStart + nameLen));
+    const dataStart = nameStart + nameLen + extraLen;
+    const data = buf.subarray(dataStart, dataStart + compSize);
+    entries.push({ name, data: new Uint8Array(data), method });
+    off = dataStart + compSize;
+  }
+  return entries;
+}
+
+/**
+ * STORE 方式のみの ZIP を再構築する
+ * @param {{ name: string, data: Uint8Array }[]} entries
+ * @returns {Uint8Array}
+ */
+function buildStoreZip(entries) {
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+
+  entries.forEach((entry) => {
+    const nameU8 = u8FromString(entry.name);
+    const data = entry.data;
+    const crc = crc32(data);
+    const local = new Uint8Array(30 + nameU8.length + data.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true); // version needed
+    lv.setUint16(6, 0, true);  // flags
+    lv.setUint16(8, 0, true);  // method = STORE
+    lv.setUint16(10, 0, true); // time
+    lv.setUint16(12, 0, true); // date
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, data.length, true);
+    lv.setUint32(22, data.length, true);
+    lv.setUint16(26, nameU8.length, true);
+    lv.setUint16(28, 0, true);
+    local.set(nameU8, 30);
+    local.set(data, 30 + nameU8.length);
+    locals.push(local);
+
+    const central = new Uint8Array(46 + nameU8.length);
+    const cv = new DataView(central.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0, true);
+    cv.setUint16(10, 0, true);
+    cv.setUint16(12, 0, true);
+    cv.setUint16(14, 0, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, data.length, true);
+    cv.setUint32(24, data.length, true);
+    cv.setUint16(28, nameU8.length, true);
+    cv.setUint16(30, 0, true);
+    cv.setUint16(32, 0, true);
+    cv.setUint16(34, 0, true);
+    cv.setUint16(36, 0, true);
+    cv.setUint32(38, 0, true);
+    cv.setUint32(42, offset, true);
+    central.set(nameU8, 46);
+    centrals.push(central);
+
+    offset += local.length;
+  });
+
+  const centralSize = centrals.reduce((n, c) => n + c.length, 0);
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(4, 0, true);
+  ev.setUint16(6, 0, true);
+  ev.setUint16(8, entries.length, true);
+  ev.setUint16(10, entries.length, true);
+  ev.setUint32(12, centralSize, true);
+  ev.setUint32(16, offset, true);
+  ev.setUint16(20, 0, true);
+
+  const total = offset + centralSize + end.length;
+  const out = new Uint8Array(total);
+  let p = 0;
+  locals.forEach((chunk) => { out.set(chunk, p); p += chunk.length; });
+  centrals.forEach((chunk) => { out.set(chunk, p); p += chunk.length; });
+  out.set(end, p);
+  return out;
+}
+
+/**
+ * 生成済み xlsx (Uint8Array) の各シートへ A4 landscape を注入する
+ * @param {Uint8Array} u8
+ * @param {Object} [wb] - SheetJS workbook（シート毎の fitHeight 参照用）
+ * @returns {Uint8Array}
+ */
+export function patchXlsxUint8ForA4Landscape(u8, wb) {
+  if (!u8 || !u8.length) return u8;
+  const input = (u8 instanceof Uint8Array) ? u8 : new Uint8Array(u8);
+  const entries = parseZipEntries(input);
+  if (!entries.length) return input;
+
+  const sheetFiles = entries
+    .filter((e) => /^xl\/worksheets\/sheet\d+\.xml$/i.test(e.name))
+    .sort((a, b) => {
+      const na = parseInt((a.name.match(/sheet(\d+)/i) || [])[1] || '0', 10);
+      const nb = parseInt((b.name.match(/sheet(\d+)/i) || [])[1] || '0', 10);
+      return na - nb;
+    });
+
+  // 圧縮エントリが混在する場合は安全のため無改変で返す（通常は compression:false）
+  if (sheetFiles.some((e) => e.method !== 0)) {
+    console.warn('[reha] xlsx sheet XML が圧縮されているため横向き注入をスキップしました');
+    return input;
+  }
+
+  sheetFiles.forEach((entry, idx) => {
+    const sheetName = wb && Array.isArray(wb.SheetNames) ? wb.SheetNames[idx] : null;
+    const ws = (sheetName && wb.Sheets) ? wb.Sheets[sheetName] : null;
+    const fitHeight = !!(ws && ws['!rehaPrintSetup'] && ws['!rehaPrintSetup'].fitHeight);
+    const xml = stringFromU8(entry.data);
+    const patched = injectA4LandscapeIntoSheetXml(xml, fitHeight);
+    entry.data = u8FromString(patched);
+    entry.method = 0;
+  });
+
+  // 元エントリ順を維持しつつ sheet データだけ置換
+  const byName = new Map(entries.map((e) => [e.name, e]));
+  sheetFiles.forEach((sf) => byName.set(sf.name, sf));
+  const rebuilt = entries.map((e) => byName.get(e.name) || e);
+  return buildStoreZip(rebuilt);
+}
+
+function convertWriteOutput(u8, type) {
+  const t = type || 'base64';
+  if (t === 'array' || t === 'arraybuffer') {
+    return t === 'arraybuffer' ? u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) : u8;
+  }
+  if (t === 'buffer' && typeof Buffer !== 'undefined') {
+    return Buffer.from(u8);
+  }
+  if (t === 'binary' || t === 'string') {
+    return stringFromU8(u8);
+  }
+  // base64 default
+  let bin = '';
+  for (let i = 0; i < u8.length; i += 1) bin += String.fromCharCode(u8[i]);
+  if (typeof btoa === 'function') return btoa(bin);
+  if (typeof Buffer !== 'undefined') return Buffer.from(u8).toString('base64');
+  return bin;
+}
+
+function downloadXlsxUint8(filename, u8) {
+  const blob = new Blob([u8], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename || 'export.xlsx';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * window.XLSX.write / writeFile をフックし、出力 xlsx へ A4横向きを強制注入する
+ */
+export function installXlsxA4LandscapeWriteHook() {
+  if (typeof window === 'undefined' || !window.XLSX) return;
+  if (window.XLSX.__rehaA4LandscapeHooked) return;
+
+  const X = window.XLSX;
+  const origWrite = typeof X.write === 'function' ? X.write.bind(X) : null;
+  const origWriteFile = typeof X.writeFile === 'function' ? X.writeFile.bind(X) : null;
+  if (!origWrite) return;
+
+  X.write = function rehaWrite(wb, opts) {
+    const o = Object.assign({}, opts || {});
+    const bookType = o.bookType || 'xlsx';
+    if (bookType !== 'xlsx') {
+      return origWrite(wb, opts);
+    }
+    const wantType = o.type || 'base64';
+    const writeOpts = Object.assign({}, o, {
+      bookType: 'xlsx',
+      type: 'array',
+      compression: false
+    });
+    const raw = origWrite(wb, writeOpts);
+    const u8 = patchXlsxUint8ForA4Landscape(
+      (raw instanceof Uint8Array) ? raw : new Uint8Array(raw),
+      wb
+    );
+    return convertWriteOutput(u8, wantType);
+  };
+
+  if (origWriteFile) {
+    X.writeFile = function rehaWriteFile(wb, filename, opts) {
+      const o = Object.assign({}, opts || {}, {
+        bookType: 'xlsx',
+        type: 'array',
+        compression: false
+      });
+      const u8 = X.write(wb, o);
+      if (typeof document !== 'undefined' && typeof Blob !== 'undefined') {
+        downloadXlsxUint8(filename, (u8 instanceof Uint8Array) ? u8 : new Uint8Array(u8));
+        return u8;
+      }
+      // Node 等: パッチ済み array を元 API へ渡せないため buffer 経由で再試行
+      if (typeof Buffer !== 'undefined' && typeof require === 'function') {
+        try {
+          const fs = require('fs');
+          fs.writeFileSync(filename, Buffer.from(u8));
+          return u8;
+        } catch (_) { /* fall through */ }
+      }
+      return origWriteFile(wb, filename, opts);
+    };
+  }
+
+  X.__rehaA4LandscapeHooked = true;
+}
+
+// モジュール読込時点で XLSX が既にあればフック（index.html で vendor → module の順）
+installXlsxA4LandscapeWriteHook();
