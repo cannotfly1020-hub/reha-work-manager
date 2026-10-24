@@ -1,6 +1,6 @@
 // js/excel/sheets/rehaPatientSheet.js
 // 入院・外来の疾患別実施リスト
-// ★維持期介護減算: getDailyBasePoints で日別単価を判定し、介列バッジ・実施セル▼で一目識別する
+// ★維持期介護減算: getDailyBasePoints で日別判定。日セルは数字のみ＋アンバー色で識別（記号なし）
 
 import { evaluateEarlyBonusPhase, getDailyBasePoints } from '../../core/deadlineCalc.js';
 import {
@@ -9,10 +9,18 @@ import {
   applyA4LandscapePrintSetup
 } from '../sheetUtils.js';
 
-/** 維持期減算実施日セル（計画★・早期加算より優先度は下） */
+/** 維持期減算実施日セル（数字のみ・薄いアンバー＋濃茶橙太字） */
 const STYLE_CELL_MAINT = {
-  font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '9A3412' } },
-  fill: { fgColor: { rgb: 'FFEDD5' } },
+  font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: 'B45309' } },
+  fill: { fgColor: { rgb: 'FEF3C7' } },
+  alignment: { horizontal: 'center', vertical: 'center' },
+  border: thinBorder()
+};
+
+/** 計画日かつ維持期減算日（数字のみ・計画アンバー寄り） */
+const STYLE_CELL_PLAN_MAINT = {
+  font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: 'B45309' } },
+  fill: { fgColor: { rgb: 'FDE68A' } },
   alignment: { horizontal: 'center', vertical: 'center' },
   border: thinBorder()
 };
@@ -20,27 +28,27 @@ const STYLE_CELL_MAINT = {
 /** 介列: 当月すべて維持期減算 */
 const STYLE_CARE_MAINT = {
   ...STYLES.cellCenter,
-  fill: { fgColor: { rgb: 'FFEDD5' } },
-  font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: '9A3412' } }
+  fill: { fgColor: { rgb: 'FEF3C7' } },
+  font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: 'B45309' } }
 };
 
 /** 介列: 当月内に通常→減算へ切替（日割り） */
 const STYLE_CARE_SPLIT = {
   ...STYLES.cellCenter,
   fill: { fgColor: { rgb: 'FEF3C7' } },
-  font: { name: 'Meiryo UI', sz: 7.5, bold: true, color: { rgb: 'B45309' } }
+  font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: 'B45309' } }
 };
 
 /**
- * 介列の表示文言を決定する。
+ * 介列の表示文言を決定する（3文字バッジ・記号なし）
  * - 医療のみ: '-'
- * - 要介護/要支援で通常実施のみ: '介護' / '支援'
- * - 維持期減算実施のみ: '▼減算'
- * - 当月に通常と減算が混在（満了日跨ぎ日割り）: '介→減' / '支→減'
+ * - 通常実施のみ: '介護' / '支援'
+ * - 維持期減算のみ: '介維持' / '支維持'
+ * - 当月日割り切替: '介日割' / '支日割'
  * @param {string} careType
  * @param {boolean} hasRegularRate
  * @param {boolean} hasMaintRate
- * @returns {{ label: string, styleBase: object }}
+ * @returns {{ label: string, styleBase: object|null }}
  */
 function resolveCareColumnDisplay(careType, hasRegularRate, hasMaintRate) {
   if (careType !== 'CARE' && careType !== 'SUPPORT') {
@@ -48,10 +56,10 @@ function resolveCareColumnDisplay(careType, hasRegularRate, hasMaintRate) {
   }
   const isSupport = careType === 'SUPPORT';
   if (hasMaintRate && hasRegularRate) {
-    return { label: isSupport ? '支→減' : '介→減', styleBase: STYLE_CARE_SPLIT };
+    return { label: isSupport ? '支日割' : '介日割', styleBase: STYLE_CARE_SPLIT };
   }
   if (hasMaintRate) {
-    return { label: '▼減算', styleBase: STYLE_CARE_MAINT };
+    return { label: isSupport ? '支維持' : '介維持', styleBase: STYLE_CARE_MAINT };
   }
   return { label: isSupport ? '支援' : '介護', styleBase: null };
 }
@@ -161,21 +169,21 @@ export function writeRehaPatientSheet(wb, aggregated, category, sheetName, patie
     setStyledCell(ws, curRow, 1, p.name, { ...STYLES.cellNormal, fill: zebraBg, font: { bold: true } });
     setStyledCell(ws, curRow, 2, getDiseaseInitial(displayDisType), { ...STYLES.cellCenter, fill: zebraBg, font: { bold: true } });
 
-    // 介列: 維持期減算の有無をバッジ色＋文言で明示（医事課が一目で判別可能）
+    // 介列: 維持期減算の有無を3文字バッジ＋色で明示
     const careStyle = careDisplay.styleBase
       ? { ...careDisplay.styleBase }
       : { ...STYLES.cellCenter, fill: zebraBg };
     setStyledCell(ws, curRow, 3, careDisplay.label, careStyle);
 
-    // 総単位（青系は維持）。維持期混在時はツールチップ相当のコメントは付けず、日セル▼で識別
+    // 総単位（維持期実施ありはアンバー系で強調）
     setStyledCell(ws, curRow, 4, totalRehaUnits, {
       ...STYLES.cellCenter,
-      fill: { fgColor: { rgb: hasMaintRate ? 'FFEDD5' : 'E0F2FE' } },
+      fill: { fgColor: { rgb: hasMaintRate ? 'FEF3C7' : 'E0F2FE' } },
       font: {
         name: 'Meiryo UI',
         sz: 9.5,
         bold: true,
-        color: { rgb: hasMaintRate ? '9A3412' : '0369A1' }
+        color: { rgb: hasMaintRate ? 'B45309' : '0369A1' }
       },
       numFmt: '#,##0'
     });
@@ -203,19 +211,17 @@ export function writeRehaPatientSheet(wb, aggregated, category, sheetName, patie
       else cellStyle.fill = zebraBg;
 
       if (u > 0) {
-        if (isPlanDay) {
-          // 計画書算定日は★を最優先（維持期と重なっても医事課は計画日を先に見る）
-          const planVal = isMaintDay ? `${u}★▼` : `${u}★`;
-          setStyledCell(ws, curRow, col, planVal, isMaintDay
-            ? { ...STYLES.cellPlanStar, fill: { fgColor: { rgb: 'FED7AA' } }, font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: '9A3412' } } }
-            : STYLES.cellPlanStar);
+        // ★日別セルは純粋な数字のみ（▼・★等の記号結合禁止＝幅あふれ防止）
+        if (isPlanDay && isMaintDay) {
+          setStyledCell(ws, curRow, col, u, STYLE_CELL_PLAN_MAINT);
+        } else if (isPlanDay) {
+          setStyledCell(ws, curRow, col, u, STYLES.cellPlanStar);
         } else if (isEarly1Day) {
           setStyledCell(ws, curRow, col, u, STYLES.cellEarly1);
         } else if (isEarly2Day) {
           setStyledCell(ws, curRow, col, u, STYLES.cellEarly2);
         } else if (isMaintDay) {
-          // 維持期減算実施日: 橙背景＋▼で切替日を可視化
-          setStyledCell(ws, curRow, col, `${u}▼`, STYLE_CELL_MAINT);
+          setStyledCell(ws, curRow, col, u, STYLE_CELL_MAINT);
         } else {
           setStyledCell(ws, curRow, col, u, cellStyle);
         }
@@ -246,7 +252,7 @@ export function writeRehaPatientSheet(wb, aggregated, category, sheetName, patie
   // 凡例行（受付・医事課向け）
   const legendRow = curRow + 1;
   setStyledCell(ws, legendRow, 0,
-    '凡例: 介列「▼減算」＝当月の実施が維持期減算単価のみ ／「介→減」「支→減」＝当月内に通常→減算へ切替（満了日翌日以降） ／ 日セル「n▼」＝その日の実施が減算単価（運動器102・脳血管60・廃用46）。医療保険のみ（介列「-」）は日数超過後も正規点数のまま。',
+    '凡例: 介列「介維持／支維持」＝当月実施が維持期減算単価のみ ／「介日割／支日割」＝当月内に通常→減算へ切替 ／ 日セルの薄いアンバー背景＋茶橙太字＝その日が減算単価（運動器102・脳血管60・廃用46）。医療保険のみ（介列「-」）は日数超過後も正規点数。日セルは数字のみ表示。',
     {
       font: { name: 'Meiryo UI', sz: 8, color: { rgb: '64748B' } },
       alignment: { vertical: 'center', wrapText: true }
@@ -264,20 +270,19 @@ export function writeRehaPatientSheet(wb, aggregated, category, sheetName, patie
   rHeights[legendRow] = 36;
   ws['!rows'] = rHeights;
 
-  // ★列幅設定：Excel内部展開比率（約1.165倍）を逆算補正し、目標ピクセルにジャスト調整
-  // 介列は「▼減算」「介→減」表示のためやや拡幅
+  // ★列幅設定：介列は3文字バッジ（介維持等）が収まるよう wpx:24
   const colProps = [
-    { wpx: 36 },        // ID (目標 42px 狙い: 36 * 1.167 ≒ 42px)
-    { wpx: 69 },        // 患者氏名 (目標 80px 狙い: 69 * 1.163 ≒ 80px)
-    { wpx: 25 },        // 区分 (目標 29px 狙い: 25 * 1.172 ≒ 29px)
-    { wpx: 28 },        // 介 (バッジ文言用に拡幅)
-    { wpx: 25 }         // 総 (目標 29px 狙い: 25 * 1.172 ≒ 29px)
+    { wpx: 36 },        // ID
+    { wpx: 69 },        // 患者氏名
+    { wpx: 25 },        // 区分
+    { wpx: 24 },        // 介（介維持・介日割・支維持）
+    { wpx: 25 }         // 総
   ];
   for (let d = 1; d <= daysInMonth; d++) {
-    colProps.push({ wpx: 20 }); // 日付 (目標 23px 狙い: 20 * 1.17 ≒ 23px)
+    colProps.push({ wpx: 20 }); // 日付（数字のみなので20pxで十分）
   }
-  if (isInput) colProps.push({ wpx: 29 }, { wpx: 29 }, { wpx: 33 }); // 早Ⅰ(34px), 早Ⅱ(34px), 計画(38px)
-  else colProps.push({ wpx: 33 });                                     // 計画(38px)
+  if (isInput) colProps.push({ wpx: 29 }, { wpx: 29 }, { wpx: 33 });
+  else colProps.push({ wpx: 33 });
   ws['!cols'] = colProps;
 
   ws['!autofilter'] = {

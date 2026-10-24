@@ -1,5 +1,6 @@
 // js/excel/sheets/summarySheet.js
 // レセプト収益サマリー
+// ★疾患別点数は getDailyBasePoints による日別単価積算（所定／維持期減算を行分割して印字）
 
 import { REHA_RULES } from '../../config/rules.js';
 import { evaluateEarlyBonusPhase, getDailyBasePoints } from '../../core/deadlineCalc.js';
@@ -9,24 +10,64 @@ import {
   applyA4LandscapePrintSetup, SUMMARY_SHEET
 } from '../sheetUtils.js';
 
+/**
+ * 入院／外来ごとの疾患別カウンタを初期化する
+ * STD = 所定点数、MAINT = 要介護・要支援の維持期減算点数
+ * @returns {object}
+ */
+function createCategoryStats() {
+  return {
+    LOCOMOTIVE_STD_U: 0,
+    LOCOMOTIVE_STD_PTS: 0,
+    LOCOMOTIVE_MAINT_U: 0,
+    LOCOMOTIVE_MAINT_PTS: 0,
+    CEREBROVASCULAR_STD_U: 0,
+    CEREBROVASCULAR_STD_PTS: 0,
+    CEREBROVASCULAR_MAINT_U: 0,
+    CEREBROVASCULAR_MAINT_PTS: 0,
+    DISUSE_STD_U: 0,
+    DISUSE_STD_PTS: 0,
+    DISUSE_MAINT_U: 0,
+    DISUSE_MAINT_PTS: 0,
+    early1: 0,
+    early2: 0,
+    planPts: 0,
+    planCount: 0,
+    analgesia: 0
+  };
+}
+
+/**
+ * スロット1件を疾患別・所定／維持期へ加算する
+ * @param {object} target
+ * @param {object} patient
+ * @param {{ date?: string, units?: number, isAnalgesia?: boolean }} slot
+ */
+function accumulateDiseaseSlot(target, patient, slot) {
+  const u = Number(slot.units) || 1;
+  const dType = (patient.diseaseType && patient.diseaseType !== 'ANALGESIA')
+    ? patient.diseaseType
+    : 'LOCOMOTIVE';
+  if (!['LOCOMOTIVE', 'CEREBROVASCULAR', 'DISUSE'].includes(dType)) return;
+
+  const rate = getDailyBasePoints(patient, slot.date);
+  const pts = rate.points * u;
+  if (rate.isCareReduced === true) {
+    target[`${dType}_MAINT_U`] += u;
+    target[`${dType}_MAINT_PTS`] += pts;
+  } else {
+    target[`${dType}_STD_U`] += u;
+    target[`${dType}_STD_PTS`] += pts;
+  }
+}
+
 export function writeExecutiveSummarySheet(wb, aggregated) {
   const { patientMap, year, month } = aggregated;
   const ws = {};
   const rowHeights = [];
 
-  // units = 実施単位, pts = 実施日別単価で積算した総点数（維持期日割り対応）
-  const inStats = {
-    LOCOMOTIVE: 0, CEREBROVASCULAR: 0, DISUSE: 0,
-    LOCOMOTIVE_PTS: 0, CEREBROVASCULAR_PTS: 0, DISUSE_PTS: 0,
-    early1: 0, early2: 0,
-    planPts: 0, planCount: 0
-  };
-  const outStats = {
-    LOCOMOTIVE: 0, CEREBROVASCULAR: 0, DISUSE: 0,
-    LOCOMOTIVE_PTS: 0, CEREBROVASCULAR_PTS: 0, DISUSE_PTS: 0,
-    analgesia: 0,
-    planPts: 0, planCount: 0
-  };
+  const inStats = createCategoryStats();
+  const outStats = createCategoryStats();
 
   Object.values(patientMap).forEach((item) => {
     const p = item.patient;
@@ -36,21 +77,18 @@ export function writeExecutiveSummarySheet(wb, aggregated) {
 
     item.slots.forEach((s) => {
       if (s.isAnalgesia) {
-        if (!isInput) target.analgesia++;
+        if (!isInput) target.analgesia += 1;
         return;
       }
 
       const u = Number(s.units) || 1;
-      const dType = (p.diseaseType && p.diseaseType !== 'ANALGESIA') ? p.diseaseType : 'LOCOMOTIVE';
-      if (target[dType] !== undefined) {
-        const rate = getDailyBasePoints(p, s.date);
-        target[dType] += u;
-        target[`${dType}_PTS`] += rate.points * u;
-      }
+
+      // ★日別単価で疾患別基本料を積算（一律 defaultPoints 掛けは禁止）
+      accumulateDiseaseSlot(target, p, s);
 
       if (s.billingPlan && REHA_RULES.PLAN_POINTS[s.billingPlan]) {
         target.planPts += REHA_RULES.PLAN_POINTS[s.billingPlan];
-        target.planCount++;
+        target.planCount += 1;
       }
 
       // 早期加算は単位ごとに計上（収益ダッシュボードと一致）
@@ -93,13 +131,27 @@ export function writeExecutiveSummarySheet(wb, aggregated) {
     rIdx++;
   };
 
-  const renderDataRow = (name, qty, unitPts, customPts = null, note = '') => {
+  /**
+   * @param {string} name
+   * @param {number} qty
+   * @param {number} unitPts 表示単価（0 のとき「-」）
+   * @param {number|null} customPts null なら qty*unitPts
+   * @param {string} note
+   * @param {{ maint?: boolean }} [opts]
+   */
+  const renderDataRow = (name, qty, unitPts, customPts = null, note = '', opts = {}) => {
     rowHeights[rIdx] = 25;
     const totPts = customPts !== null ? customPts : qty * unitPts;
-    const totYen = totPts * 10;
-    const bg = (rIdx % 2 === 1) ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } };
+    const totYen = totPts * REHA_RULES.POINT_RATE;
+    const isMaint = opts.maint === true;
+    const bg = isMaint
+      ? { fgColor: { rgb: 'FEF3C7' } }
+      : ((rIdx % 2 === 1) ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } });
+    const nameFont = isMaint
+      ? { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: 'B45309' } }
+      : { name: 'Meiryo UI', sz: 9.5 };
 
-    setStyledCell(ws, rIdx, 0, name, { ...STYLES.cellNormal, font: { name: 'Meiryo UI', sz: 9.5 }, fill: bg });
+    setStyledCell(ws, rIdx, 0, name, { ...STYLES.cellNormal, font: nameFont, fill: bg });
     setStyledCell(ws, rIdx, 1, qty, { ...STYLES.cellCenter, font: { name: 'Meiryo UI', sz: 9.5 }, fill: bg, numFmt: '#,##0' });
     setStyledCell(ws, rIdx, 2, unitPts > 0 ? unitPts : '-', { ...STYLES.cellCenter, font: { name: 'Meiryo UI', sz: 9.5 }, fill: bg, numFmt: '#,##0' });
     setStyledCell(ws, rIdx, 3, totPts, { ...STYLES.cellRight, fill: bg, numFmt: '#,##0', font: { name: 'Meiryo UI', sz: 9.5, bold: true } });
@@ -120,21 +172,79 @@ export function writeExecutiveSummarySheet(wb, aggregated) {
     rIdx++;
   };
 
+  /**
+   * 疾患1種について所定行＋維持期減算行を出力し、点数合計を返す
+   * @param {object} stats
+   * @param {'LOCOMOTIVE'|'CEREBROVASCULAR'|'DISUSE'} dType
+   * @param {string} labelStd
+   * @param {string} labelMaint
+   * @returns {{ pts: number, yen: number, units: number }}
+   */
+  const renderDiseasePair = (stats, dType, labelStd, labelMaint) => {
+    const disease = REHA_RULES.LIMIT_DAYS[dType];
+    const stdU = stats[`${dType}_STD_U`];
+    const stdPts = stats[`${dType}_STD_PTS`];
+    const maintU = stats[`${dType}_MAINT_U`];
+    const maintPts = stats[`${dType}_MAINT_PTS`];
+
+    let pts = 0;
+    let yen = 0;
+    let units = 0;
+
+    // 所定行は実績があるとき、または維持期も所定も0のとき（空でも行を残すのは運動器のみではなく、従来どおり常時表示）
+    const rStd = renderDataRow(
+      labelStd,
+      stdU,
+      disease.defaultPoints,
+      stdPts,
+      `単位 × ${disease.defaultPoints}点（標準算定日内・医療保険のみ超過含む）`
+    );
+    pts += rStd.pts;
+    yen += rStd.yen;
+    units += rStd.units;
+
+    if (maintU > 0 || maintPts > 0) {
+      const rMaint = renderDataRow(
+        labelMaint,
+        maintU,
+        disease.maintPoints,
+        maintPts,
+        `単位 × ${disease.maintPoints}点（要介護・要支援の標準日数超過翌日以降）`,
+        { maint: true }
+      );
+      pts += rMaint.pts;
+      yen += rMaint.yen;
+      units += rMaint.units;
+    }
+
+    return { pts, yen, units };
+  };
+
   // 1. 【入院セクション】
   renderSectionHeader('■ 【入院】リハビリテーション算定項目', '0284C7');
-  let inTotalUnits = inStats.LOCOMOTIVE + inStats.CEREBROVASCULAR + inStats.DISUSE;
-  let inTotalPts = 0;
-  let inTotalYen = 0;
 
-  const r1 = renderDataRow('運動器リハビリテーション(Ⅱ)', inStats.LOCOMOTIVE, REHA_RULES.LIMIT_DAYS.LOCOMOTIVE.defaultPoints, inStats.LOCOMOTIVE_PTS, '単位 (日別単価積算・維持期対応)');
-  const r2 = renderDataRow('脳血管疾患等リハビリテーション(Ⅲ)', inStats.CEREBROVASCULAR, REHA_RULES.LIMIT_DAYS.CEREBROVASCULAR.defaultPoints, inStats.CEREBROVASCULAR_PTS, '単位 (日別単価積算・維持期対応)');
-  const r3 = renderDataRow('廃用症候群リハビリテーション(Ⅲ)', inStats.DISUSE, REHA_RULES.LIMIT_DAYS.DISUSE.defaultPoints, inStats.DISUSE_PTS, '単位 (日別単価積算・維持期対応)');
+  const inLoco = renderDiseasePair(
+    inStats, 'LOCOMOTIVE',
+    '運動器リハビリテーション(Ⅱ)',
+    '運動器リハビリテーション(Ⅱ) 【維持期減算】'
+  );
+  const inCere = renderDiseasePair(
+    inStats, 'CEREBROVASCULAR',
+    '脳血管疾患等リハビリテーション(Ⅲ)',
+    '脳血管疾患等リハビリテーション(Ⅲ) 【維持期減算】'
+  );
+  const inDis = renderDiseasePair(
+    inStats, 'DISUSE',
+    '廃用症候群リハビリテーション(Ⅲ)',
+    '廃用症候群リハビリテーション(Ⅲ) 【維持期減算】'
+  );
   const r4 = renderDataRow('早期加算(Ⅰ) 1〜3日目', inStats.early1, REHA_RULES.EARLY_BONUS.PHASE_1.points, null, '単位 (入院のみ 60点)');
   const r5 = renderDataRow('早期加算(Ⅱ) 4〜14日目', inStats.early2, REHA_RULES.EARLY_BONUS.PHASE_2.points, null, '単位 (入院のみ 25点)');
   const r6 = renderDataRow('総合実施計画書 (入院計)', inStats.planCount, 0, inStats.planPts, '件数 (初回300点/継続240点/固定196点)');
 
-  inTotalPts = r1.pts + r2.pts + r3.pts + r4.pts + r5.pts + r6.pts;
-  inTotalYen = r1.yen + r2.yen + r3.yen + r4.yen + r5.yen + r6.yen;
+  const inTotalUnits = inLoco.units + inCere.units + inDis.units;
+  const inTotalPts = inLoco.pts + inCere.pts + inDis.pts + r4.pts + r5.pts + r6.pts;
+  const inTotalYen = inLoco.yen + inCere.yen + inDis.yen + r4.yen + r5.yen + r6.yen;
   renderSubTotalRow('★【入院 総単位・収益 小計】', inTotalUnits, inTotalPts, inTotalYen);
 
   rowHeights[rIdx] = 14;
@@ -142,18 +252,28 @@ export function writeExecutiveSummarySheet(wb, aggregated) {
 
   // 2. 【外来セクション】
   renderSectionHeader('■ 【外来】リハビリテーション算定項目', '0369A1');
-  let outTotalUnits = outStats.LOCOMOTIVE + outStats.CEREBROVASCULAR + outStats.DISUSE;
-  let outTotalPts = 0;
-  let outTotalYen = 0;
 
-  const ro1 = renderDataRow('運動器リハビリテーション(Ⅱ)', outStats.LOCOMOTIVE, REHA_RULES.LIMIT_DAYS.LOCOMOTIVE.defaultPoints, outStats.LOCOMOTIVE_PTS, '単位 (日別単価積算・維持期対応)');
-  const ro2 = renderDataRow('脳血管疾患等リハビリテーション(Ⅲ)', outStats.CEREBROVASCULAR, REHA_RULES.LIMIT_DAYS.CEREBROVASCULAR.defaultPoints, outStats.CEREBROVASCULAR_PTS, '単位 (日別単価積算・維持期対応)');
-  const ro3 = renderDataRow('廃用症候群リハビリテーション(Ⅲ)', outStats.DISUSE, REHA_RULES.LIMIT_DAYS.DISUSE.defaultPoints, outStats.DISUSE_PTS, '単位 (日別単価積算・維持期対応)');
+  const outLoco = renderDiseasePair(
+    outStats, 'LOCOMOTIVE',
+    '運動器リハビリテーション(Ⅱ)',
+    '運動器リハビリテーション(Ⅱ) 【維持期減算】'
+  );
+  const outCere = renderDiseasePair(
+    outStats, 'CEREBROVASCULAR',
+    '脳血管疾患等リハビリテーション(Ⅲ)',
+    '脳血管疾患等リハビリテーション(Ⅲ) 【維持期減算】'
+  );
+  const outDis = renderDiseasePair(
+    outStats, 'DISUSE',
+    '廃用症候群リハビリテーション(Ⅲ)',
+    '廃用症候群リハビリテーション(Ⅲ) 【維持期減算】'
+  );
   const ro4 = renderDataRow('消炎鎮痛等処置 (物療)', outStats.analgesia, 35, null, '件数 (1日1回35点)');
   const ro5 = renderDataRow('総合実施計画書 (外来計)', outStats.planCount, 0, outStats.planPts, '件数 (初回300点/継続240点/固定196点)');
 
-  outTotalPts = ro1.pts + ro2.pts + ro3.pts + ro4.pts + ro5.pts;
-  outTotalYen = ro1.yen + ro2.yen + ro3.yen + ro4.yen + ro5.yen;
+  const outTotalUnits = outLoco.units + outCere.units + outDis.units;
+  const outTotalPts = outLoco.pts + outCere.pts + outDis.pts + ro4.pts + ro5.pts;
+  const outTotalYen = outLoco.yen + outCere.yen + outDis.yen + ro4.yen + ro5.yen;
   renderSubTotalRow('★【外来 総単位・収益 小計】', outTotalUnits, outTotalPts, outTotalYen);
 
   rowHeights[rIdx] = 14;
@@ -172,9 +292,9 @@ export function writeExecutiveSummarySheet(wb, aggregated) {
   setStyledCell(ws, rIdx, 2, '-', { alignment: { horizontal: 'center', vertical: 'center' }, fill: totalFill, border: totalBorder });
   setStyledCell(ws, rIdx, 3, grandTotalPts, { alignment: { horizontal: 'right', vertical: 'center' }, font: { name: 'Meiryo UI', sz: 11, bold: true, color: { rgb: '0F172A' } }, fill: totalFill, border: totalBorder, numFmt: '#,##0' });
   setStyledCell(ws, rIdx, 4, grandTotalYen, { alignment: { horizontal: 'right', vertical: 'center' }, font: { name: 'Meiryo UI', sz: 11.5, bold: true, color: { rgb: '047857' } }, fill: totalFill, border: totalBorder, numFmt: '¥#,##0' });
-  setStyledCell(ws, rIdx, 5, '総点数×10円（保険請求確定）', { font: { name: 'Meiryo UI', sz: 9, color: { rgb: '047857' }, bold: true }, fill: totalFill, border: totalBorder, alignment: { vertical: 'center' } });
+  setStyledCell(ws, rIdx, 5, '総点数×10円（保険請求確定・維持期日割り反映済）', { font: { name: 'Meiryo UI', sz: 9, color: { rgb: '047857' }, bold: true }, fill: totalFill, border: totalBorder, alignment: { vertical: 'center' } });
 
-  setSheetCols(ws, [38, 14, 10, 14, 18, 28]);
+  setSheetCols(ws, [42, 14, 10, 14, 18, 36]);
   ws['!rows'] = rowHeights.map((h) => ({ hpt: h || 24 }));
 
   applyA4LandscapePrintSetup(ws, true);
