@@ -1,25 +1,22 @@
 // js/print/weeklyTablePrint.js
 // A4横1枚 外来リハビリ週間予約表の印刷
+// ★常に空き行を詰めた時刻軸で描画し、行高・患者名フォントを最大化（バインダー視認性）
 
-import { formatDateYMD, getWeekDates } from '../core/dateUtils.js';
-import { TIME_SLOTS } from '../config/appointmentSlots.js';
+import { formatDateYMD } from '../core/dateUtils.js';
 import { sanitizeHtml } from '../core/dataNormalizer.js';
 import { getJapaneseHolidayName } from '../core/holidayCalc.js';
 import { getPatientById } from '../store/patientStore.js';
 import { getAllTherapists } from '../store/therapistStore.js';
-import { getAllAppointments } from '../store/appointmentStore.js';
 import { showToast } from '../ui/toast.js';
+import { resolveVisibleWeekTimeSlots } from '../views/appointment/weeklyTimetable.js';
 
 export function printWeeklyAppointmentTable(baseDate) {
-  const weekDates = getWeekDates(baseDate);
+  // 印刷時は画面トグルに依存せず、常に空き行圧縮（forceCompact）
+  const { visibleSlots, weekAptList, weekDates } = resolveVisibleWeekTimeSlots(baseDate, {
+    forceCompact: true
+  });
   const startStr = formatDateYMD(weekDates[0]);
   const endStr = formatDateYMD(weekDates[5]);
-
-  const allAppointments = getAllAppointments();
-  const weekDatesSet = new Set(weekDates.map(formatDateYMD));
-  const weekAptList = Object.values(allAppointments).filter((apt) => {
-    return apt.status !== 'CANCELLED' && weekDatesSet.has(apt.date);
-  });
 
   const slotAptMap = {};
   weekAptList.forEach((apt) => {
@@ -31,6 +28,39 @@ export function printWeeklyAppointmentTable(baseDate) {
   const therapists = getAllTherapists();
   const dayNames = ['月', '火', '水', '木', '金', '土'];
 
+  // 行数に応じて行高・フォントを段階拡大（少ないほど大きく）
+  const rowCount = Math.max(1, visibleSlots.length);
+  let rowPx = 40;
+  let namePt = 11;
+  let bodyPt = 10;
+  let staffPt = 9;
+  let timePt = 10;
+  if (rowCount <= 10) {
+    rowPx = 52;
+    namePt = 12.5;
+    bodyPt = 11;
+    staffPt = 10;
+    timePt = 11;
+  } else if (rowCount <= 14) {
+    rowPx = 44;
+    namePt = 11.5;
+    bodyPt = 10.5;
+    staffPt = 9.5;
+    timePt = 10.5;
+  } else if (rowCount <= 18) {
+    rowPx = 38;
+    namePt = 10.5;
+    bodyPt = 10;
+    staffPt = 9;
+    timePt = 10;
+  } else {
+    rowPx = 32;
+    namePt = 9.5;
+    bodyPt = 9;
+    staffPt = 8;
+    timePt = 9;
+  }
+
   const printWindow = window.open('', '_blank', 'width=1100,height=780');
   if (!printWindow) {
     showToast('印刷ポップアップがブロックされました。ブラウザ設定をご確認ください。', 'warn');
@@ -41,7 +71,7 @@ export function printWeeklyAppointmentTable(baseDate) {
     <table class="weekly-print-table">
       <thead>
         <tr>
-          <th style="width: 58px;">時間</th>
+          <th style="width: 72px;">時間</th>
   `;
 
   weekDates.forEach((d, idx) => {
@@ -68,7 +98,7 @@ export function printWeeklyAppointmentTable(baseDate) {
       <tbody>
   `;
 
-  TIME_SLOTS.forEach((slotTime) => {
+  visibleSlots.forEach((slotTime) => {
     tableHtml += `
       <tr>
         <td class="time-header-cell">${slotTime}</td>
@@ -126,56 +156,71 @@ export function printWeeklyAppointmentTable(baseDate) {
       <style>
         @page {
           size: A4 landscape;
-          margin: 6mm 6mm 5mm 6mm;
+          margin: 5mm 5mm 4mm 5mm;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body {
+          height: 100%;
+        }
         body {
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Meiryo UI", sans-serif;
           color: #0f172a;
           background: #fff;
-          font-size: 8.5pt;
-          line-height: 1.15;
+          font-size: ${bodyPt}pt;
+          line-height: 1.2;
           -webkit-print-color-adjust: exact;
           print-color-adjust: exact;
+          display: flex;
+          flex-direction: column;
         }
         .page-header {
           display: flex;
           justify-content: space-between;
           align-items: flex-end;
           margin-bottom: 4px;
-          border-bottom: 2px solid #0f172a;
+          border-bottom: 2.5px solid #0f172a;
           padding-bottom: 3px;
+          flex-shrink: 0;
         }
-        .title { font-size: 13pt; font-weight: 800; color: #0f172a; }
-        .sub-info { font-size: 8.5pt; font-weight: 700; color: #475569; }
+        .title { font-size: 15pt; font-weight: 800; color: #0f172a; }
+        .sub-info { font-size: 9.5pt; font-weight: 700; color: #475569; }
+        .table-wrap {
+          flex: 1 1 auto;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
         .weekly-print-table {
           width: 100%;
+          height: 100%;
           border-collapse: collapse;
           table-layout: fixed;
         }
         .weekly-print-table th, .weekly-print-table td {
-          border: 1px solid #475569;
-          vertical-align: top;
-          padding: 1px 2px;
+          border: 1.5px solid #334155;
+          vertical-align: middle;
+          padding: 2px 4px;
         }
         .weekly-print-table th {
           background: #f1f5f9;
           font-weight: 800;
-          font-size: 8pt;
+          font-size: 10pt;
           text-align: center;
-          padding: 3px 2px;
+          padding: 5px 3px;
+          height: 28px;
         }
         .time-header-cell {
           text-align: center;
           font-weight: 800;
-          font-size: 7.5pt;
+          font-size: ${timePt}pt;
           background: #f8fafc;
           vertical-align: middle !important;
-          color: #334155;
-          height: 22px;
+          color: #0f172a;
+          height: ${rowPx}px;
         }
         .slot-content-cell {
-          height: 22px;
+          height: ${rowPx}px;
+          min-height: ${rowPx}px;
           background: #fff;
         }
         .slot-content-cell.sat-col {
@@ -188,15 +233,15 @@ export function printWeeklyAppointmentTable(baseDate) {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          gap: 2px;
+          gap: 4px;
           background: #f8fafc;
-          border: 1px solid #94a3b8;
-          border-left: 3px solid #0284c7;
-          border-radius: 2px;
-          padding: 1px 3px;
-          margin-bottom: 1px;
-          font-size: 7pt;
-          line-height: 1.1;
+          border: 1px solid #64748b;
+          border-left: 4px solid #0284c7;
+          border-radius: 3px;
+          padding: 3px 5px;
+          margin-bottom: 2px;
+          font-size: ${bodyPt}pt;
+          line-height: 1.15;
         }
         .print-card.card-analgesia {
           background: #f0fdf4;
@@ -205,6 +250,7 @@ export function printWeeklyAppointmentTable(baseDate) {
         }
         .p-name {
           font-weight: 800;
+          font-size: ${namePt}pt;
           color: #0f172a;
           white-space: nowrap;
           overflow: hidden;
@@ -212,22 +258,27 @@ export function printWeeklyAppointmentTable(baseDate) {
           flex: 1;
         }
         .p-staff {
-          font-size: 6.5pt;
-          font-weight: 700;
+          font-size: ${staffPt}pt;
+          font-weight: 800;
           color: #0369a1;
           white-space: nowrap;
+          background: #e0f2fe;
+          border-radius: 3px;
+          padding: 1px 5px;
         }
         .p-dur {
-          font-size: 6pt;
-          color: #64748b;
+          font-size: ${staffPt - 0.5}pt;
+          font-weight: 700;
+          color: #475569;
           white-space: nowrap;
         }
         .footer-note {
           display: flex;
           justify-content: space-between;
-          font-size: 7pt;
+          font-size: 8pt;
           color: #64748b;
           margin-top: 3px;
+          flex-shrink: 0;
         }
       </style>
     </head>
@@ -235,19 +286,21 @@ export function printWeeklyAppointmentTable(baseDate) {
       <div class="page-header">
         <div>
           <span class="title">外来リハビリテーション 週間予約管理表</span>
-          <span style="font-size:9pt; font-weight:700; color:#0369a1; margin-left:12px;">
+          <span style="font-size:10.5pt; font-weight:700; color:#0369a1; margin-left:12px;">
             期間: ${startStr.replace(/-/g, '/')} (月) 〜 ${endStr.replace(/-/g, '/')} (土)
           </span>
         </div>
         <div class="sub-info">
-          週間予約総数: ${weekAptList.length} 名 / 出力日: ${new Date().toLocaleDateString('ja-JP')}
+          週間予約総数: ${weekAptList.length} 名 ／ 表示枠: ${rowCount} 行（空き行除外） ／ 出力日: ${new Date().toLocaleDateString('ja-JP')}
         </div>
       </div>
 
-      ${tableHtml}
+      <div class="table-wrap">
+        ${tableHtml}
+      </div>
 
       <div class="footer-note">
-        <span>※ 同一時間枠に複数名配置可能（物療並行・担当PT別）。急患・当日キャンセル等は直接追記してください。</span>
+        <span>※ 空き時間行は自動除外。同一時間枠に複数名配置可能（物療並行・担当PT別）。急患・当日キャンセル等は直接追記してください。</span>
         <span>reha-work-manager R8</span>
       </div>
       <script>

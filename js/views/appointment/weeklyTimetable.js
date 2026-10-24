@@ -1,5 +1,6 @@
 // js/views/appointment/weeklyTimetable.js
 // 外来予約の週間タイムテーブル
+// ★空き行圧縮: 週内に有効予約が1件もない時刻行をスキップし、行高・フォントを拡大表示できる
 
 import { sanitizeHtml } from '../../core/dataNormalizer.js';
 import { getJapaneseHolidayName } from '../../core/holidayCalc.js';
@@ -13,30 +14,81 @@ import { showToast } from '../../ui/toast.js';
 import { calendarState } from './calendarState.js';
 import { renderAppointmentCalendarView } from '../appointmentCalendarView.js';
 
+/**
+ * 予約の所要時間（分）が覆う開始時刻スロット列を返す（途中欠落防止）
+ * 施設スロットは20分刻み前提。duration 未設定時は1コマ。
+ * @param {string[]} allSlotTimes
+ * @param {{ startTime?: string, durationMinutes?: number }} apt
+ * @returns {string[]}
+ */
+export function getCoveredSlotTimes(allSlotTimes, apt) {
+  const start = String(apt?.startTime || '');
+  if (!start) return [];
+  const startIdx = allSlotTimes.indexOf(start);
+  const duration = Math.max(1, Number(apt?.durationMinutes) || 20);
+  const slotCount = Math.max(1, Math.ceil(duration / 20));
+  if (startIdx < 0) return [start];
+  return allSlotTimes.slice(startIdx, startIdx + slotCount);
+}
+
+/**
+ * その週の有効予約から「表示すべき時刻行」を抽出する。
+ * compact=false のときは全 TIME_SLOTS を返す。
+ * @param {Date} baseDate
+ * @param {{ forceCompact?: boolean, appointments?: object }} [opts]
+ * @returns {{ visibleSlots: string[], weekAptList: object[], weekDates: Date[] }}
+ */
+export function resolveVisibleWeekTimeSlots(baseDate, opts = {}) {
+  const weekDates = getWeekDates(baseDate);
+  const weekDatesSet = new Set(weekDates.map(formatDateYMD));
+  const allAppointments = opts.appointments || getAllAppointments();
+  const weekAptList = Object.values(allAppointments).filter((apt) => {
+    return apt && apt.status !== 'CANCELLED' && weekDatesSet.has(apt.date);
+  });
+
+  const forceCompact = opts.forceCompact === true;
+  const compact = forceCompact || calendarState.compactEmptyRows === true;
+
+  if (!compact) {
+    return { visibleSlots: [...TIME_SLOTS], weekAptList, weekDates };
+  }
+
+  const active = new Set();
+  weekAptList.forEach((apt) => {
+    getCoveredSlotTimes(TIME_SLOTS, apt).forEach((t) => active.add(t));
+  });
+
+  // 予約が1件もない週は、操作不能にならないよう全枠を残す
+  const visibleSlots = TIME_SLOTS.filter((t) => active.has(t));
+  return {
+    visibleSlots: visibleSlots.length > 0 ? visibleSlots : [...TIME_SLOTS],
+    weekAptList,
+    weekDates
+  };
+}
+
 export function renderWeeklyTimetable() {
   const gridEl = document.getElementById('aptWeeklyGrid');
   const rangeLabel = document.getElementById('aptCalendarWeekRangeLabel');
   const countBadge = document.getElementById('aptCalendarWeekCountBadge');
   if (!gridEl) return;
 
-  const weekDates = getWeekDates(calendarState.baseDate);
+  const { visibleSlots, weekAptList, weekDates } = resolveVisibleWeekTimeSlots(calendarState.baseDate);
   const startStr = formatDateYMD(weekDates[0]);
   const endStr = formatDateYMD(weekDates[5]);
   const todayStr = formatDateYMD(new Date());
+  const isCompact = calendarState.compactEmptyRows === true
+    && visibleSlots.length < TIME_SLOTS.length;
 
   if (rangeLabel) {
     rangeLabel.textContent = `${startStr.replace(/-/g, '/')} (月) 〜 ${endStr.replace(/-/g, '/')} (土)`;
   }
 
-  // 今週の全予約を取得
-  const allAppointments = getAllAppointments();
-  const weekDatesSet = new Set(weekDates.map(formatDateYMD));
-  const weekAptList = Object.values(allAppointments).filter((apt) => {
-    return apt.status !== 'CANCELLED' && weekDatesSet.has(apt.date);
-  });
-
   if (countBadge) {
-    countBadge.textContent = `週間予約: 計 ${weekAptList.length} 件`;
+    const rowHint = calendarState.compactEmptyRows
+      ? `／ 表示 ${visibleSlots.length}/${TIME_SLOTS.length} 枠`
+      : '';
+    countBadge.textContent = `週間予約: 計 ${weekAptList.length} 件${rowHint}`;
   }
 
   // 予約マップ [日付][時間帯] -> Appointment[]
@@ -95,8 +147,8 @@ export function renderWeeklyTimetable() {
     `;
   });
 
-  // 時間帯 × 曜日行
-  TIME_SLOTS.forEach((slotTime) => {
+  // 時間帯 × 曜日行（空き圧縮時は visibleSlots のみ）
+  visibleSlots.forEach((slotTime) => {
     html += `<div class="apt-weekly-time-col">${slotTime}</div>`;
 
     weekDates.forEach((d) => {
@@ -149,6 +201,7 @@ export function renderWeeklyTimetable() {
   });
 
   gridEl.innerHTML = html;
+  gridEl.classList.toggle('apt-weekly-compact', isCompact || (calendarState.compactEmptyRows === true && weekAptList.length > 0));
 
   setupWeeklyDragAndDrop(gridEl);
 }

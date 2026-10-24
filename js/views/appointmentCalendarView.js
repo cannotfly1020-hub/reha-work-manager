@@ -1,5 +1,6 @@
 // js/views/appointmentCalendarView.js
 // 外来予約カレンダーの初期化・週/月の切り替え
+// ★週間表: 空き行圧縮トグル（画面）／印刷は常時圧縮＋大フォント（weeklyTablePrint）
 
 import { getJapaneseHolidayName } from '../core/holidayCalc.js';
 import { formatDateYMD } from '../core/dateUtils.js';
@@ -11,6 +12,69 @@ import { calendarState } from './appointment/calendarState.js';
 import { setupAptPaletteEvents, renderAptPalette } from './appointment/palette.js';
 import { renderWeeklyTimetable } from './appointment/weeklyTimetable.js';
 import { renderMonthlyCalendar } from './appointment/monthlyCalendar.js';
+
+/**
+ * ツールバーに「空き行を詰めて拡大／全枠表示」切替ボタンを動的配置する
+ * （index.html を変更せずに実務動線を追加）
+ */
+function ensureWeekCompactToggleButton() {
+  if (document.getElementById('btnAptWeekCompactToggle')) {
+    syncWeekCompactToggleButton();
+    return;
+  }
+
+  const anchor = document.getElementById('btnAptCalThisWeek');
+  if (!anchor || !anchor.parentElement) return;
+
+  const btn = document.createElement('button');
+  btn.id = 'btnAptWeekCompactToggle';
+  btn.type = 'button';
+  btn.style.cssText = [
+    'padding:6px 12px',
+    'border:1px solid #0284c7',
+    'background:#e0f2fe',
+    'color:#0369a1',
+    'border-radius:6px',
+    'cursor:pointer',
+    'font-size:0.82rem',
+    'font-weight:700',
+    'white-space:nowrap'
+  ].join(';');
+  btn.title = '予約のない時間行を隠して文字を大きくする／全時間枠を表示して空き枠クリック予約する、を切り替えます。印刷時は常に空き行を詰めた拡大表示になります。';
+
+  btn.addEventListener('click', () => {
+    calendarState.compactEmptyRows = !calendarState.compactEmptyRows;
+    syncWeekCompactToggleButton();
+    renderAppointmentCalendarView();
+    showToast(
+      calendarState.compactEmptyRows
+        ? '空き行を詰めて拡大表示に切替（印刷も同様に圧縮）'
+        : '全時間枠を表示（空き枠クリックで新規予約可）',
+      'info'
+    );
+  });
+
+  anchor.parentElement.insertBefore(btn, anchor.nextSibling);
+  syncWeekCompactToggleButton();
+}
+
+function syncWeekCompactToggleButton() {
+  const btn = document.getElementById('btnAptWeekCompactToggle');
+  if (!btn) return;
+  if (calendarState.compactEmptyRows) {
+    btn.textContent = '🔍 空き行を詰めて拡大';
+    btn.style.background = '#0284c7';
+    btn.style.color = '#fff';
+    btn.style.borderColor = '#0369a1';
+    btn.setAttribute('aria-pressed', 'true');
+  } else {
+    btn.textContent = '📋 全枠表示';
+    btn.style.background = '#fff';
+    btn.style.color = '#475569';
+    btn.style.borderColor = '#cbd5e1';
+    btn.setAttribute('aria-pressed', 'false');
+  }
+}
 
 /**
  * 外来予約カレンダー画面の初期化
@@ -27,6 +91,7 @@ export function initAppointmentCalendarView() {
   const btnPrintDaily = document.getElementById('btnAptPrintDaily');
 
   syncDateInput();
+  ensureWeekCompactToggleButton();
 
   dateInput?.addEventListener('change', (e) => {
     if (!e.target.value) return;
@@ -76,7 +141,7 @@ export function initAppointmentCalendarView() {
   btnModeWeek?.addEventListener('click', () => switchViewMode('WEEK'));
   btnModeMonth?.addEventListener('click', () => switchViewMode('MONTH'));
 
-  // ★印刷ボタン 1: 週間タイムテーブル (A4横1枚完結・原本Excel完全同一レイアウト)
+  // ★印刷ボタン 1: 週間タイムテーブル (A4横1枚完結・空き行圧縮＋大フォント強制)
   btnPrintWeekly?.addEventListener('click', () => {
     printWeeklyAppointmentTable(calendarState.baseDate);
   });
@@ -130,6 +195,7 @@ export function switchViewMode(mode) {
  * 画面全体の再描画
  */
 export function renderAppointmentCalendarView() {
+  ensureWeekCompactToggleButton();
   renderAptPalette();
 
   if (calendarState.viewMode === 'WEEK') {
