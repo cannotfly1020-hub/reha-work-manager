@@ -1,22 +1,61 @@
 // js/print/weeklyTablePrint.js
 // A4横1枚 外来リハビリ週間予約表の印刷
-// ★常に空き行を詰めた時刻軸で描画し、行高・患者名フォントを最大化（バインダー視認性）
+// ★画面の週間グリッドは全枠表示のまま。印刷時のみ空き行をスキップし行高・フォントを最大化する。
 
-import { formatDateYMD } from '../core/dateUtils.js';
+import { formatDateYMD, getWeekDates } from '../core/dateUtils.js';
+import { TIME_SLOTS } from '../config/appointmentSlots.js';
 import { sanitizeHtml } from '../core/dataNormalizer.js';
 import { getJapaneseHolidayName } from '../core/holidayCalc.js';
 import { getPatientById } from '../store/patientStore.js';
 import { getAllTherapists } from '../store/therapistStore.js';
+import { getAllAppointments } from '../store/appointmentStore.js';
 import { showToast } from '../ui/toast.js';
-import { resolveVisibleWeekTimeSlots } from '../views/appointment/weeklyTimetable.js';
+
+/**
+ * 予約の所要時間が覆う開始時刻スロット列（20分刻み）。印刷用の途中欠落防止。
+ * @param {string[]} allSlotTimes
+ * @param {{ startTime?: string, durationMinutes?: number }} apt
+ * @returns {string[]}
+ */
+function getCoveredSlotTimesForPrint(allSlotTimes, apt) {
+  const start = String(apt?.startTime || '');
+  if (!start) return [];
+  const startIdx = allSlotTimes.indexOf(start);
+  const duration = Math.max(1, Number(apt?.durationMinutes) || 20);
+  const slotCount = Math.max(1, Math.ceil(duration / 20));
+  if (startIdx < 0) return [start];
+  return allSlotTimes.slice(startIdx, startIdx + slotCount);
+}
+
+/**
+ * 印刷専用: その週のいずれかの曜日に有効予約がある時刻行だけを残す
+ * @param {Date[]} weekDates
+ * @param {object[]} weekAptList
+ * @returns {string[]}
+ */
+function resolvePrintVisibleTimeSlots(weekDates, weekAptList) {
+  const active = new Set();
+  weekAptList.forEach((apt) => {
+    getCoveredSlotTimesForPrint(TIME_SLOTS, apt).forEach((t) => active.add(t));
+  });
+  const visible = TIME_SLOTS.filter((t) => active.has(t));
+  // 予約ゼロ週は空表にならないよう全枠を印字
+  return visible.length > 0 ? visible : [...TIME_SLOTS];
+}
 
 export function printWeeklyAppointmentTable(baseDate) {
-  // 印刷時は画面トグルに依存せず、常に空き行圧縮（forceCompact）
-  const { visibleSlots, weekAptList, weekDates } = resolveVisibleWeekTimeSlots(baseDate, {
-    forceCompact: true
-  });
+  const weekDates = getWeekDates(baseDate);
   const startStr = formatDateYMD(weekDates[0]);
   const endStr = formatDateYMD(weekDates[5]);
+
+  const allAppointments = getAllAppointments();
+  const weekDatesSet = new Set(weekDates.map(formatDateYMD));
+  const weekAptList = Object.values(allAppointments).filter((apt) => {
+    return apt && apt.status !== 'CANCELLED' && weekDatesSet.has(apt.date);
+  });
+
+  // ★印刷時のみ: 空き行圧縮（画面表示ロジックには一切触れない）
+  const visibleSlots = resolvePrintVisibleTimeSlots(weekDates, weekAptList);
 
   const slotAptMap = {};
   weekAptList.forEach((apt) => {
@@ -28,7 +67,7 @@ export function printWeeklyAppointmentTable(baseDate) {
   const therapists = getAllTherapists();
   const dayNames = ['月', '火', '水', '木', '金', '土'];
 
-  // 行数に応じて行高・フォントを段階拡大（少ないほど大きく）
+  // 行数に応じて行高・フォントを段階拡大（少ないほど大きく／A4横1枚収まり優先）
   const rowCount = Math.max(1, visibleSlots.length);
   let rowPx = 40;
   let namePt = 11;
@@ -291,7 +330,7 @@ export function printWeeklyAppointmentTable(baseDate) {
           </span>
         </div>
         <div class="sub-info">
-          週間予約総数: ${weekAptList.length} 名 ／ 表示枠: ${rowCount} 行（空き行除外） ／ 出力日: ${new Date().toLocaleDateString('ja-JP')}
+          週間予約総数: ${weekAptList.length} 名 ／ 表示枠: ${rowCount} 行（印刷時のみ空き行除外） ／ 出力日: ${new Date().toLocaleDateString('ja-JP')}
         </div>
       </div>
 
@@ -300,7 +339,7 @@ export function printWeeklyAppointmentTable(baseDate) {
       </div>
 
       <div class="footer-note">
-        <span>※ 空き時間行は自動除外。同一時間枠に複数名配置可能（物療並行・担当PT別）。急患・当日キャンセル等は直接追記してください。</span>
+        <span>※ 印刷時のみ空き時間行を自動除外し文字を拡大。画面の週間表は全枠表示のままです。急患・当日キャンセル等は直接追記してください。</span>
         <span>reha-work-manager R8</span>
       </div>
       <script>
