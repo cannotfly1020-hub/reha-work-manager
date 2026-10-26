@@ -176,6 +176,8 @@ export function upsertPatient(rawData) {
     admissionDate: normalizeDateString(rawData.admissionDate),
     earlyBonusStartDate: normalizeDateString(rawData.earlyBonusStartDate || rawData.admissionDate),
     onsetDate: normalizeDateString(rawData.onsetDate),
+    // 退院予定日（未設定の過去データは空文字で下位互換）
+    plannedDischargeDate: normalizeDateString(rawData.plannedDischargeDate || ''),
     force13Limit: Boolean(rawData.force13Limit),
     defaultUnits: (() => {
       const rawUnits = Number(rawData.defaultUnits);

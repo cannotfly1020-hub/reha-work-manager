@@ -570,6 +570,13 @@
           </div>
         </div>
 
+        <!-- 退院予定日（退院予約）※入院患者向け -->
+        <div id="dischargeDateGroup" style="display:none;">
+          <label for="patientPlannedDischargeDate" style="font-size:0.75rem; font-weight:700; display:block; color:#9a3412;">📅 退院予定日 (退院予約)</label>
+          <input type="date" id="patientPlannedDischargeDate" style="width:100%; padding:6px; border:1px solid #fdba74; border-radius:4px; background:#fff7ed;">
+          <small style="color:#64748b; font-size:0.72rem; display:block; margin-top:3px;">※退院日が決定した際に入力。その日を迎えると自動で「退院済み」扱いとなります（月間単位表にも表示）。</small>
+        </div>
+
         <!-- 早期加算起算日 & 月13単位制限チェック & ドロップ即配置の既定単位 -->
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
           <div>

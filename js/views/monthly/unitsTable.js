@@ -1,5 +1,5 @@
 // js/views/monthly/unitsTable.js
-// 月間単位表
+// 月間単位表（退院予定日バッジ・退院翌日以降セルのグレーアウト対応）
 
 import { REHA_RULES } from '../../config/rules.js';
 import { sanitizeHtml, normalizeToKatakana } from '../../core/dataNormalizer.js';
@@ -33,6 +33,35 @@ function sortPatients(patients, sortKey) {
   });
 }
 
+/**
+ * 対象月における退院日情報（未設定は null）
+ * @param {Object} patient
+ * @param {number} year
+ * @param {number} month
+ * @returns {{ day: number, dateStr: string, isPastOrToday: boolean, label: string }|null}
+ */
+function resolveDischargeInMonth(patient, year, month) {
+  const dateStr = patient?.plannedDischargeDate;
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  const m = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const day = Number(m[3]);
+  if (y !== Number(year) || mo !== Number(month)) return null;
+
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const isPastOrToday = todayStr >= dateStr;
+  const md = `${mo}/${day}`;
+  return {
+    day,
+    dateStr,
+    isPastOrToday,
+    label: isPastOrToday ? `[${md} 退院]` : `[${md} 退院予定]`
+  };
+}
+
 export function renderMonthlyUnitsTable(aggregated) {
   const container = document.getElementById('monthlyTableContainer');
   if (!container) return;
@@ -46,6 +75,8 @@ export function renderMonthlyUnitsTable(aggregated) {
   }
 
   const patients = sortPatients(rawPatients, monthlyState.sortKey);
+  const year = monthlyState.year;
+  const month = monthlyState.month;
 
   let html = `
     <table class="modern-table table-monthly">
@@ -65,6 +96,7 @@ export function renderMonthlyUnitsTable(aggregated) {
     const p = item.patient;
     const isAnalgesia = p.diseaseType === 'ANALGESIA';
     const isOut = p.category === 'OUTPATIENT';
+    const dischargeInfo = (!isOut && !isAnalgesia) ? resolveDischargeInMonth(p, year, month) : null;
 
     let catBadge = isOut
       ? '<span style="color:#2563eb; font-weight:700;">外</span>'
@@ -111,16 +143,32 @@ export function renderMonthlyUnitsTable(aggregated) {
       ? `<span class="toggle-early-btn" style="cursor:pointer; margin-left:4px; font-size:0.65rem; background:#ede9fe; color:#7c3aed; padding:0 3px; border-radius:3px; font-weight:700;" title="早期加算内訳">早▼</span>`
       : '';
 
+    const dischargeBadgeHtml = dischargeInfo
+      ? `<span class="${dischargeInfo.isPastOrToday ? 'badge-monthly-discharged' : 'badge-monthly-discharge-planned'}" title="退院予定日: ${sanitizeHtml(dischargeInfo.dateStr)}">${sanitizeHtml(dischargeInfo.label)}</span>`
+      : '';
+
     html += `
-      <tr class="${hasEarly ? 'row-has-early' : ''}" data-target-id="early-${p.id}" style="${hasEarly ? 'cursor:pointer;' : ''}">
-        <td class="col-fixed"><strong>${sanitizeHtml(p.name)}</strong>${earlyBadge}</td>
+      <tr class="${hasEarly ? 'row-has-early' : ''}${dischargeInfo ? ' row-has-discharge' : ''}" data-target-id="early-${p.id}" style="${hasEarly ? 'cursor:pointer;' : ''}">
+        <td class="col-fixed"><strong>${sanitizeHtml(p.name)}</strong>${earlyBadge}${dischargeBadgeHtml ? `<br>${dischargeBadgeHtml}` : ''}</td>
         <td>${catBadge}</td>
         <td>${totalBadge}</td>
         <td>${planBadge}</td>
     `;
     for (let d = 1; d <= daysInMonth; d++) {
       const u = item.dailyUnits[d] || 0;
-      html += `<td>${u > 0 ? `<span style="font-weight:700; color:${isAnalgesia ? '#16a34a' : '#0f172a'};">${u}</span>` : '<span style="color:#e2e8f0;">-</span>'}</td>`;
+      const isAfterDischarge = dischargeInfo && d > dischargeInfo.day;
+      const isDischargeDay = dischargeInfo && d === dischargeInfo.day;
+      let cellClass = '';
+      if (isAfterDischarge) cellClass = 'cell-after-discharge';
+      else if (isDischargeDay) cellClass = 'cell-discharge-day';
+
+      if (isAfterDischarge) {
+        html += `<td class="${cellClass}">${u > 0 ? `<span class="unit-after-discharge">${u}</span>` : '<span class="dash-after-discharge">-</span>'}</td>`;
+      } else if (u > 0) {
+        html += `<td class="${cellClass}"><span style="font-weight:700; color:${isAnalgesia ? '#16a34a' : '#0f172a'};">${u}</span></td>`;
+      } else {
+        html += `<td class="${cellClass}"><span style="color:#e2e8f0;">-</span></td>`;
+      }
     }
     html += `</tr>`;
 
@@ -134,7 +182,9 @@ export function renderMonthlyUnitsTable(aggregated) {
       `;
       for (let d = 1; d <= daysInMonth; d++) {
         const eu = item.dailyEarlyUnits[d] || 0;
-        html += `<td>${eu > 0 ? `<span style="font-weight:700; color:#7c3aed;">${eu}</span>` : '<span style="color:#e2e8f0;">-</span>'}</td>`;
+        const isAfterDischarge = dischargeInfo && d > dischargeInfo.day;
+        const cellClass = isAfterDischarge ? 'cell-after-discharge' : '';
+        html += `<td class="${cellClass}">${eu > 0 ? `<span style="font-weight:700; color:#7c3aed;">${eu}</span>` : '<span style="color:#e2e8f0;">-</span>'}</td>`;
       }
       html += `</tr>`;
     }

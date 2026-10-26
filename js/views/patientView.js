@@ -38,6 +38,49 @@ function formatSlashDate(dateStr) {
   return dateStr.trim();
 }
 
+/** YYYY-MM-DD → M/D */
+function formatShortMd(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return '';
+  const m = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return '';
+  return `${parseInt(m[2], 10)}/${parseInt(m[3], 10)}`;
+}
+
+/**
+ * 基準日時点で退院済みか（plannedDischargeDate 当日以降 = 退院済み）
+ * 未設定患者は常に false（下位互換）
+ * @param {Object} patient
+ * @param {Date|string} [asOf=new Date()]
+ * @returns {boolean}
+ */
+export function isPatientDischarged(patient, asOf = new Date()) {
+  const discharge = patient?.plannedDischargeDate;
+  if (!discharge || typeof discharge !== 'string') return false;
+  let asOfStr = '';
+  if (asOf instanceof Date && !isNaN(asOf.getTime())) {
+    asOfStr = `${asOf.getFullYear()}-${String(asOf.getMonth() + 1).padStart(2, '0')}-${String(asOf.getDate()).padStart(2, '0')}`;
+  } else if (typeof asOf === 'string') {
+    asOfStr = asOf.trim().slice(0, 10);
+  }
+  if (!asOfStr) return false;
+  return asOfStr >= discharge;
+}
+
+/**
+ * 入院区分のときのみ退院予定日入力欄を表示
+ */
+function syncDischargeDateGroupVisibility() {
+  const cat = document.getElementById('patientFormCategory')?.value;
+  const group = document.getElementById('dischargeDateGroup');
+  if (!group) return;
+  const isIn = cat === 'INPATIENT';
+  group.style.display = isIn ? 'block' : 'none';
+  if (!isIn) {
+    const input = document.getElementById('patientPlannedDischargeDate');
+    if (input) input.value = '';
+  }
+}
+
 /**
  * 計画書フェーズ＋総合計画評価料2切替日セル
  * @param {Object} patient
@@ -197,11 +240,22 @@ export function renderPatientView() {
     const isOut = p.category === 'OUTPATIENT';
     const isDiscontinued = p.status === PATIENT_STATUS.DISCONTINUED;
 
-    const statusBadge = isDiscontinued
+    const discharged = !isOut && isPatientDischarged(p, today);
+    let statusBadge = isDiscontinued
       ? '<span style="background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1; padding:2px 5px; border-radius:3px; font-weight:700; font-size:0.68rem;">■ 終了</span>'
       : '<span style="background:#dcfce7; color:#15803d; border:1px solid #86efac; padding:2px 5px; border-radius:3px; font-weight:700; font-size:0.68rem;">● 継続</span>';
+    if (discharged && !isDiscontinued) {
+      statusBadge = '<span class="badge-discharged" style="background:#ffedd5; color:#9a3412; border:1px solid #fdba74; padding:2px 5px; border-radius:3px; font-weight:700; font-size:0.68rem;">退院済</span>';
+    }
 
     const catBadge = isOut ? '<span style="color:#2563eb; font-weight:700;">外</span>' : '<span style="color:#d97706; font-weight:700;">入</span>';
+    let dischargeBadge = '';
+    if (!isOut && p.plannedDischargeDate) {
+      const md = formatShortMd(p.plannedDischargeDate);
+      dischargeBadge = discharged
+        ? `<span class="badge-discharge-date" title="退院日">${md} 退院</span>`
+        : `<span class="badge-discharge-planned" title="退院予定日">${md} 退院予定</span>`;
+    }
 
     const earlyCellHtml = getEarlyBonusCellHtml(p, dl);
 
@@ -225,7 +279,7 @@ export function renderPatientView() {
       <tr style="${rowStyle}">
         <td style="padding:6px 6px; text-align:center;">${statusBadge}</td>
         <td style="padding:6px 6px;"><strong>${p.id}</strong></td>
-        <td style="padding:6px 8px; white-space:nowrap;"><strong>${sanitizeHtml(p.name)}</strong><br><span style="font-size:0.68rem; color:#64748b;">${sanitizeHtml(p.nameKana || '')}</span></td>
+        <td style="padding:6px 8px; white-space:nowrap;"><strong>${sanitizeHtml(p.name)}</strong>${dischargeBadge ? ` ${dischargeBadge}` : ''}<br><span style="font-size:0.68rem; color:#64748b;">${sanitizeHtml(p.nameKana || '')}</span></td>
         <td style="padding:6px 6px; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${sanitizeHtml(p.diseaseName || '')}">${sanitizeHtml(p.diseaseName || '-')}</td>
         <td style="padding:6px 4px; text-align:center;">${catBadge}</td>
         <td style="padding:6px 4px; text-align:center;"><span style="font-size:0.72rem; background:#f1f5f9; padding:1px 4px; border-radius:3px;">${dl.diseaseLabel}</span></td>
@@ -276,18 +330,26 @@ function setupPatientModalListeners() {
     syncStatusSelectStyle(e.target);
   });
 
+  document.getElementById('patientFormCategory')?.addEventListener('change', () => {
+    syncDischargeDateGroupVisibility();
+  });
+
   ['patientFormCareType', 'patientFormDiseaseType', 'patientFormAdmissionDate', 'patientFormOnsetDate'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', updatePlan2GuidePreview);
   });
 
   form?.addEventListener('submit', (e) => {
     e.preventDefault();
+    const category = document.getElementById('patientFormCategory').value;
+    const plannedDischargeDate = category === 'INPATIENT'
+      ? (document.getElementById('patientPlannedDischargeDate')?.value || '')
+      : '';
     const rawData = {
       id: document.getElementById('patientFormId').value,
       name: document.getElementById('patientFormName').value,
       nameKana: document.getElementById('patientFormKana').value,
       diseaseName: document.getElementById('patientFormDiseaseName').value,
-      category: document.getElementById('patientFormCategory').value,
+      category,
       status: document.getElementById('patientFormStatus')?.value || PATIENT_STATUS.ACTIVE,
       diseaseType: document.getElementById('patientFormDiseaseType').value,
       careInsuranceType: document.getElementById('patientFormCareType').value,
@@ -295,6 +357,7 @@ function setupPatientModalListeners() {
       admissionDate: document.getElementById('patientFormAdmissionDate').value,
       earlyBonusStartDate: document.getElementById('patientFormEarlyStartDate').value,
       onsetDate: document.getElementById('patientFormOnsetDate').value,
+      plannedDischargeDate,
       force13Limit: document.getElementById('patientFormForce13').checked,
       defaultUnits: document.getElementById('patientFormDefaultUnits')?.value || 3,
       notes: document.getElementById('patientFormNotes').value
@@ -358,6 +421,10 @@ function openPatientModal(patientId) {
   document.getElementById('patientFormAdmissionDate').value = p ? (p.admissionDate || '') : '';
   document.getElementById('patientFormEarlyStartDate').value = p ? (p.earlyBonusStartDate || '') : '';
   document.getElementById('patientFormOnsetDate').value = p ? (p.onsetDate || '') : '';
+  const dischargeInput = document.getElementById('patientPlannedDischargeDate');
+  if (dischargeInput) {
+    dischargeInput.value = p ? (p.plannedDischargeDate || '') : '';
+  }
   document.getElementById('patientFormForce13').checked = Boolean(p?.force13Limit);
   const defaultUnitsSelect = document.getElementById('patientFormDefaultUnits');
   if (defaultUnitsSelect) {
@@ -368,6 +435,7 @@ function openPatientModal(patientId) {
   }
   document.getElementById('patientFormNotes').value = p ? (p.notes || '') : '';
 
+  syncDischargeDateGroupVisibility();
   updatePlan2GuidePreview();
   modal.classList.add('active');
 }
