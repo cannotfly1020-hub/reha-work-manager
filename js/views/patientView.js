@@ -1,11 +1,12 @@
 // js/views/patientView.js
 // VIEW 3: 患者台帳・算定期限管理・計画書2行表示・通院中/終了ステータス管理・患者登録編集モーダル制御層
-// ★終了・退院日はモーダルの明示入力 exitDate を正本とし、Excel「退」マークへ連動
+// ★exitDate 到来で継続→終了を動的自動判定（evaluatePatientStatus）
 
 import { sanitizeHtml, normalizeToKatakana } from '../core/dataNormalizer.js';
 import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
 import {
-  getPatientById, upsertPatient, deletePatient, searchPatients, PATIENT_STATUS
+  getPatientById, upsertPatient, deletePatient, searchPatients,
+  PATIENT_STATUS, evaluatePatientStatus
 } from '../store/patientStore.js';
 import { showToast } from '../ui/toast.js';
 
@@ -47,43 +48,50 @@ function formatShortMd(dateStr) {
   return `${parseInt(m[2], 10)}/${parseInt(m[3], 10)}`;
 }
 
+/** 今日を YYYY-MM-DD で返す */
+function todayYmd() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
 /**
  * 終了・退院日（正本 exitDate）。旧フィールドは下位互換で読取のみ
  * @param {Object} patient
  * @returns {string} YYYY-MM-DD
  */
 function resolvePatientExitDate(patient) {
-  if (!patient) return '';
-  const raw = patient.exitDate
-    || patient.discontinuedDate
-    || patient.endDate
-    || patient.dischargeDate
-    || patient.finishDate
-    || patient.stoppedDate
-    || patient.plannedDischargeDate
-    || '';
-  if (!raw || typeof raw !== 'string') return '';
-  const m = raw.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
-  return m ? `${m[1]}-${m[2]}-${m[3]}` : raw.trim().slice(0, 10);
+  return evaluatePatientStatus(patient).exitDateStr
+    || (patient?.exitDate || patient?.discontinuedDate || patient?.endDate
+      || patient?.dischargeDate || patient?.plannedDischargeDate || '').toString().slice(0, 10);
 }
 
 /**
- * 基準日時点で退院・終了済みか（exitDate 当日以降）
+ * 基準日時点で退院・終了済みか（exitDate 当日以降の動的判定）
  * @param {Object} patient
  * @param {Date|string} [asOf=new Date()]
  * @returns {boolean}
  */
 export function isPatientDischarged(patient, asOf = new Date()) {
-  const discharge = resolvePatientExitDate(patient);
-  if (!discharge || typeof discharge !== 'string') return false;
-  let asOfStr = '';
-  if (asOf instanceof Date && !isNaN(asOf.getTime())) {
-    asOfStr = `${asOf.getFullYear()}-${String(asOf.getMonth() + 1).padStart(2, '0')}-${String(asOf.getDate()).padStart(2, '0')}`;
-  } else if (typeof asOf === 'string') {
-    asOfStr = asOf.trim().slice(0, 10);
+  return evaluatePatientStatus(patient, asOf).isEffectiveDiscontinued;
+}
+
+/**
+ * 日付入力と状態セレクトを exitDate ルールで整合
+ * - 未来日 → 継続（退院予定）
+ * - 当日・過去 → 終了
+ * - 空 → 継続
+ */
+function syncStatusFromExitDate(statusSelect, exitDateInput) {
+  if (!statusSelect || !exitDateInput) return;
+  const dateVal = exitDateInput.value || '';
+  if (!dateVal) {
+    statusSelect.value = PATIENT_STATUS.ACTIVE;
+  } else if (todayYmd() >= dateVal) {
+    statusSelect.value = PATIENT_STATUS.DISCONTINUED;
+  } else {
+    statusSelect.value = PATIENT_STATUS.ACTIVE;
   }
-  if (!asOfStr) return false;
-  return asOfStr >= discharge.slice(0, 10);
+  syncStatusSelectStyle(statusSelect);
 }
 
 /**
@@ -199,13 +207,13 @@ export function renderPatientView() {
   const category = document.getElementById('patientCategoryFilter')?.value || 'ALL';
   const statusFilter = document.getElementById('patientStatusFilter')?.value || 'ACTIVE';
 
-  const includeDiscontinued = statusFilter !== 'ACTIVE';
-  let patients = searchPatients(keyword, category, includeDiscontinued);
+  // 動的ステータス判定のため一旦全件取得し、フィルターで振り分け
+  let patients = searchPatients(keyword, category, true);
 
   if (statusFilter === 'ACTIVE') {
-    patients = patients.filter((p) => p.status !== PATIENT_STATUS.DISCONTINUED);
+    patients = patients.filter((p) => !evaluatePatientStatus(p).isEffectiveDiscontinued);
   } else if (statusFilter === 'DISCONTINUED') {
-    patients = patients.filter((p) => p.status === PATIENT_STATUS.DISCONTINUED);
+    patients = patients.filter((p) => evaluatePatientStatus(p).isEffectiveDiscontinued);
   }
 
   patients = sortPatientList(patients, patientSortKey);
@@ -241,27 +249,26 @@ export function renderPatientView() {
   patients.forEach((p) => {
     const dl = calculatePatientDeadlines(p, today);
     const isOut = p.category === 'OUTPATIENT';
-    const isDiscontinued = p.status === PATIENT_STATUS.DISCONTINUED;
-    const exitDate = resolvePatientExitDate(p);
-    const discharged = !isOut && isPatientDischarged(p, today);
+    const ev = evaluatePatientStatus(p, today);
+    const isDiscontinued = ev.isEffectiveDiscontinued;
+    const exitDate = ev.exitDateStr || resolvePatientExitDate(p);
 
     let statusBadge = isDiscontinued
-      ? '<span style="background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1; padding:2px 5px; border-radius:3px; font-weight:700; font-size:0.68rem;">■ 終了</span>'
+      ? (isOut
+        ? '<span style="background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1; padding:2px 5px; border-radius:3px; font-weight:700; font-size:0.68rem;">■ 終了</span>'
+        : '<span class="badge-discharged" style="background:#ffedd5; color:#9a3412; border:1px solid #fdba74; padding:2px 5px; border-radius:3px; font-weight:700; font-size:0.68rem;">■ 退院済</span>')
       : '<span style="background:#dcfce7; color:#15803d; border:1px solid #86efac; padding:2px 5px; border-radius:3px; font-weight:700; font-size:0.68rem;">● 継続</span>';
-    if (discharged && !isDiscontinued) {
-      statusBadge = '<span class="badge-discharged" style="background:#ffedd5; color:#9a3412; border:1px solid #fdba74; padding:2px 5px; border-radius:3px; font-weight:700; font-size:0.68rem;">退院済</span>';
-    }
 
     const catBadge = isOut ? '<span style="color:#2563eb; font-weight:700;">外</span>' : '<span style="color:#d97706; font-weight:700;">入</span>';
 
-    // 氏名横バッジ: 終了・退院日（exitDate）
+    // 氏名横バッジ: 到達済み＝退院済/終了、未来＝退院予定
     let nameSideBadge = '';
     if (exitDate) {
       const md = formatShortMd(exitDate);
-      if (isDiscontinued || discharged) {
-        nameSideBadge = `<span class="badge-discharge-date" title="終了・退院日">${md} ${isOut ? '終了' : '退院'}</span>`;
-      } else {
-        nameSideBadge = `<span class="badge-discharge-planned" title="終了・退院日">${md} 予定</span>`;
+      if (ev.isEffectiveDiscontinued) {
+        nameSideBadge = `<span class="badge-discharge-date" title="終了・退院日">${md} ${isOut ? '終了' : '退院済'}</span>`;
+      } else if (ev.isPlannedFuture) {
+        nameSideBadge = `<span class="badge-discharge-planned" title="終了・退院予定日">${md} 退院予定</span>`;
       }
     }
 
@@ -334,38 +341,32 @@ function setupPatientModalListeners() {
     renderPatientView();
   });
 
-  // ★状態 ↔ 終了・退院日の双方向リアルタイム連動
+  // ★状態 ↔ 終了・退院日の双方向連動（未来日は継続＋退院予定、当日以降は終了）
   statusSelect?.addEventListener('change', (e) => {
     const isDisc = e.target.value === PATIENT_STATUS.DISCONTINUED;
     if (exitDateInput) {
       if (isDisc) {
-        // 終了にした際、日付が空なら今日の日付を自動セット
+        // 終了にした際、日付が空なら今日をセット
         if (!exitDateInput.value) {
-          const today = new Date();
-          const y = today.getFullYear();
-          const m = String(today.getMonth() + 1).padStart(2, '0');
-          const d = String(today.getDate()).padStart(2, '0');
-          exitDateInput.value = `${y}-${m}-${d}`;
+          exitDateInput.value = todayYmd();
         }
       } else {
-        // 継続（ACTIVE）に戻した際、日付をクリア
-        exitDateInput.value = '';
+        // 継続へ戻す: 到達済み日付はクリア。未来の退院予定日は残す
+        const dateVal = exitDateInput.value || '';
+        if (dateVal && todayYmd() >= dateVal) {
+          exitDateInput.value = '';
+        }
       }
     }
     syncStatusSelectStyle(e.target);
   });
 
-  exitDateInput?.addEventListener('input', (e) => {
-    if (!statusSelect) return;
-    const dateVal = e.target.value;
-    if (dateVal) {
-      // 日付が入ったら自動的に「終了」へ（未来の退院予定も含む）
-      statusSelect.value = PATIENT_STATUS.DISCONTINUED;
-    } else {
-      // 日付をクリアしたら「継続」へ復帰
-      statusSelect.value = PATIENT_STATUS.ACTIVE;
-    }
-    syncStatusSelectStyle(statusSelect);
+  exitDateInput?.addEventListener('input', () => {
+    syncStatusFromExitDate(statusSelect, exitDateInput);
+  });
+
+  exitDateInput?.addEventListener('change', () => {
+    syncStatusFromExitDate(statusSelect, exitDateInput);
   });
 
   ['patientFormCareType', 'patientFormDiseaseType', 'patientFormAdmissionDate', 'patientFormOnsetDate'].forEach((id) => {
@@ -375,9 +376,17 @@ function setupPatientModalListeners() {
   form?.addEventListener('submit', (e) => {
     e.preventDefault();
     const category = document.getElementById('patientFormCategory').value;
-    const status = document.getElementById('patientFormStatus')?.value || PATIENT_STATUS.ACTIVE;
-    // モーダル連動後の値をそのまま保存（状態と exitDate は常に整合）
     const exitDate = document.getElementById('patientFormExitDate')?.value || '';
+    // 保存時も動的判定で status を正規化（未来日＝ACTIVE、到達済＝DISCONTINUED）
+    const draft = {
+      status: document.getElementById('patientFormStatus')?.value || PATIENT_STATUS.ACTIVE,
+      exitDate,
+      category
+    };
+    const ev = evaluatePatientStatus(draft);
+    const status = ev.isEffectiveDiscontinued
+      ? PATIENT_STATUS.DISCONTINUED
+      : PATIENT_STATUS.ACTIVE;
 
     const rawData = {
       id: document.getElementById('patientFormId').value,
@@ -441,11 +450,6 @@ function openPatientModal(patientId) {
   document.getElementById('patientFormDiseaseName').value = p ? (p.diseaseName || '') : '';
   document.getElementById('patientFormCategory').value = p ? p.category : 'INPATIENT';
 
-  if (statusSelect) {
-    statusSelect.value = p ? (p.status || PATIENT_STATUS.ACTIVE) : PATIENT_STATUS.ACTIVE;
-    syncStatusSelectStyle(statusSelect);
-  }
-
   document.getElementById('patientFormDiseaseType').value = p ? p.diseaseType : 'LOCOMOTIVE';
   document.getElementById('patientFormCareType').value = p ? p.careInsuranceType : 'NONE';
 
@@ -458,6 +462,18 @@ function openPatientModal(patientId) {
   const exitInput = document.getElementById('patientFormExitDate');
   if (exitInput) {
     exitInput.value = p ? resolvePatientExitDate(p) : '';
+  }
+  // 動的判定に合わせてステータス表示を整合（未来日＝継続、到達済＝終了）
+  if (statusSelect) {
+    if (p) {
+      const ev = evaluatePatientStatus(p);
+      statusSelect.value = ev.isEffectiveDiscontinued
+        ? PATIENT_STATUS.DISCONTINUED
+        : PATIENT_STATUS.ACTIVE;
+    } else {
+      statusSelect.value = PATIENT_STATUS.ACTIVE;
+    }
+    syncStatusSelectStyle(statusSelect);
   }
   document.getElementById('patientFormForce13').checked = Boolean(p?.force13Limit);
   const defaultUnitsSelect = document.getElementById('patientFormDefaultUnits');

@@ -19,6 +19,60 @@ export const PATIENT_STATUS = {
 };
 
 /**
+ * 終了・退院日の正規化（YYYY-MM-DD）
+ * @param {Object} patient
+ * @returns {string}
+ */
+function resolveExitDateStr(patient) {
+  if (!patient) return '';
+  const raw = patient.exitDate
+    || patient.plannedDischargeDate
+    || patient.dischargeDate
+    || patient.discontinuedDate
+    || patient.endDate
+    || '';
+  if (!raw || typeof raw !== 'string') return '';
+  const m = raw.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : raw.trim().slice(0, 10);
+}
+
+/**
+ * 基準日時点で患者が退院・終了しているかを動的判定
+ * - 未来の exitDate → 継続（退院予定）
+ * - 当日・過去の exitDate → 終了（退院済）自動移行
+ * - 日付未設定 → 保存済み status を採用
+ * @param {Object} patient
+ * @param {Date|string} [asOf=new Date()]
+ * @returns {{ isEffectiveDiscontinued: boolean, isPlannedFuture: boolean, exitDateStr: string }}
+ */
+export function evaluatePatientStatus(patient, asOf = new Date()) {
+  const exitDateStr = resolveExitDateStr(patient);
+
+  if (!exitDateStr) {
+    const isDisc = patient?.status === PATIENT_STATUS.DISCONTINUED;
+    return { isEffectiveDiscontinued: isDisc, isPlannedFuture: false, exitDateStr: '' };
+  }
+
+  let asOfStr = '';
+  if (asOf instanceof Date && !isNaN(asOf.getTime())) {
+    const y = asOf.getFullYear();
+    const m = String(asOf.getMonth() + 1).padStart(2, '0');
+    const d = String(asOf.getDate()).padStart(2, '0');
+    asOfStr = `${y}-${m}-${d}`;
+  } else {
+    asOfStr = String(asOf).slice(0, 10);
+  }
+
+  // 退院日・終了日が今日以前（到達済み）なら自動的に終了・退院扱い
+  if (asOfStr && asOfStr >= exitDateStr) {
+    return { isEffectiveDiscontinued: true, isPlannedFuture: false, exitDateStr };
+  }
+
+  // 退院日が今日より未来なら、まだ継続中（未来の予定）
+  return { isEffectiveDiscontinued: false, isPlannedFuture: true, exitDateStr };
+}
+
+/**
  * 初期シードデータ（未登録時のフォールバック用サンプル）
  */
 const DEFAULT_PATIENTS = [
@@ -136,7 +190,8 @@ export function getAllPatients(includeDiscontinued = true) {
     });
 
     if (includeDiscontinued) return normalized;
-    return normalized.filter((p) => p.status !== PATIENT_STATUS.DISCONTINUED);
+    // ★exitDate 到来による動的終了を反映（通院中パレット・検索用）
+    return normalized.filter((p) => !evaluatePatientStatus(p).isEffectiveDiscontinued);
   } catch (error) {
     console.error('getAllPatients error:', error);
     return [];
@@ -277,10 +332,11 @@ function normalizeSearchQuery(keyword) {
  * @returns {Array}
  */
 export function searchPatients(keyword = '', category = 'ALL', includeDiscontinued = false) {
-  let list = getAllPatients(includeDiscontinued);
+  let list = getAllPatients(true);
 
   if (!includeDiscontinued) {
-    list = list.filter((p) => p.status !== PATIENT_STATUS.DISCONTINUED);
+    // ★保存 status ではなく exitDate 到達による動的ステータスで除外
+    list = list.filter((p) => !evaluatePatientStatus(p).isEffectiveDiscontinued);
   }
 
   if (category === 'ANALGESIA') {
