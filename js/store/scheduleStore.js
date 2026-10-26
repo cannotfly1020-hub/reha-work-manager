@@ -9,7 +9,10 @@ import { getPatientById } from './patientStore.js';
 import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
 
 export function isNonPatientBlock(item) {
-  return item?.itemType === 'TASK' || item?.itemType === 'LEAVE' || item?.itemType === 'HOLIDAY';
+  return item?.itemType === 'TASK'
+    || item?.itemType === 'LEAVE'
+    || item?.itemType === 'HOLIDAY'
+    || item?.itemType === 'SPECIAL_LEAVE';
 }
 
 export function getSlotSpan(item) {

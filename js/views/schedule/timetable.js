@@ -31,7 +31,11 @@ function buildTaskCardHtml(cellData, tId, slotId) {
   let cardClass = 'card-task';
   let badgeClass = 'badge-task';
   let badgeText = '業務';
-  if (cellData.itemType === 'LEAVE' || title.includes('有休') || title.includes('有給')) {
+  if (cellData.itemType === 'SPECIAL_LEAVE' || title.includes('特別休暇')) {
+    cardClass = 'card-special-leave';
+    badgeClass = 'badge-special-leave';
+    badgeText = '特別休暇';
+  } else if (cellData.itemType === 'LEAVE' || title.includes('有休') || title.includes('有給')) {
     cardClass = 'card-leave';
     badgeClass = 'badge-leave';
     badgeText = '有休';

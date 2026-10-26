@@ -42,6 +42,7 @@ const STYLES = {
 
 export function detectDiaryLeaveType(slots) {
   const rank = {
+    FULL_SPECIAL_LEAVE: 7,
     FULL_HOLIDAY: 6,
     FULL_LEAVE: 5,
     AM_HOLIDAY: 4,
@@ -59,6 +60,7 @@ export function detectDiaryLeaveType(slots) {
     if (!item) return;
     const title = item.title || '';
     const count = Number(item.slotsCount || item.units || 1);
+    const isSpecialLeave = item.itemType === 'SPECIAL_LEAVE' || title.includes('特別休暇');
     const isHoliday = item.itemType === 'HOLIDAY' || title.includes('公休');
     const isLeave = item.itemType === 'LEAVE' || title.includes('有休') || title.includes('有給');
     const slotIdx = TIME_SLOTS.findIndex((slot) => slot.id === slotId);
@@ -66,7 +68,10 @@ export function detectDiaryLeaveType(slots) {
     // 施設設定で午前コマ数が変わっても period で午前／午後を判定（固定 index>=12 は廃止）
     const isAfternoon = isAfternoonSlot(slotMeta);
     let next = null;
-    if (isHoliday) {
+    if (isSpecialLeave) {
+      // 特別休暇は終日運用（慶弔・リフレッシュ・子の看護等）
+      next = 'FULL_SPECIAL_LEAVE';
+    } else if (isHoliday) {
       if (count >= 20) next = 'FULL_HOLIDAY';
       else if (isAfternoon) {
         next = 'PM_HOLIDAY';
@@ -173,7 +178,7 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
     activeStaffList.forEach((t) => {
       const slots = schedule[t.id] || {};
       Object.values(slots).forEach((item) => {
-        if (item?.itemType === 'TASK' || item?.itemType === 'LEAVE' || item?.itemType === 'HOLIDAY') return;
+        if (item?.itemType === 'TASK' || item?.itemType === 'LEAVE' || item?.itemType === 'HOLIDAY' || item?.itemType === 'SPECIAL_LEAVE') return;
         if (item?.patientId) {
           const p = getPatientById(item.patientId);
           const u = item.units || 1;
@@ -227,7 +232,10 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
       let statusStr = '出勤';
       let statusColor = { rgb: '15803D' };
 
-      if (leaveType === 'FULL_HOLIDAY') {
+      if (leaveType === 'FULL_SPECIAL_LEAVE') {
+        statusStr = '特別休暇';
+        statusColor = { rgb: '7C3AED' };
+      } else if (leaveType === 'FULL_HOLIDAY') {
         statusStr = '公休';
         statusColor = { rgb: 'DB2777' };
       } else if (leaveType === 'AM_HOLIDAY') {

@@ -384,7 +384,8 @@ function handleTaskSlotSubmit() {
 
   const presetType = document.getElementById('slotTaskTitleInput')?.dataset.blockType || '';
   let itemType = 'TASK';
-  if (taskTitle.includes('有休') || taskTitle.includes('有給')) itemType = 'LEAVE';
+  if (taskTitle.includes('特別休暇') || presetType === 'SPECIAL_LEAVE') itemType = 'SPECIAL_LEAVE';
+  else if (taskTitle.includes('有休') || taskTitle.includes('有給')) itemType = 'LEAVE';
   else if (taskTitle.includes('公休')) itemType = 'HOLIDAY';
   else if (presetType === 'LEAVE') itemType = 'LEAVE';
   else if (presetType === 'HOLIDAY') itemType = 'HOLIDAY';
@@ -404,7 +405,9 @@ function handleTaskSlotSubmit() {
   }
 
   modal?.classList.remove('active');
-  const savedLabel = itemType === 'LEAVE' ? '有休' : (itemType === 'HOLIDAY' ? '公休' : '業務');
+  const savedLabel = itemType === 'SPECIAL_LEAVE'
+    ? '特別休暇'
+    : (itemType === 'LEAVE' ? '有休' : (itemType === 'HOLIDAY' ? '公休' : '業務'));
   showToast(`${savedLabel}ブロックを保存しました`, 'success');
   if (typeof window.triggerDailyBackup === 'function') window.triggerDailyBackup();
   if (typeof onScheduleUpdatedCallback === 'function') onScheduleUpdatedCallback();

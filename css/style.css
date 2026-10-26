@@ -85,3 +85,20 @@
   border-radius: 3px;
   flex-shrink: 0;
 }
+
+/* 特別休暇専用カードスタイル (パープル・バイオレット系) */
+.card-special-leave {
+  background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%) !important;
+  border-left: 5px solid #7c3aed !important;
+  border: 1px solid #ddd6fe !important;
+  color: #5b21b6 !important;
+}
+.badge-special-leave {
+  font-size: 0.65rem;
+  font-weight: 700;
+  background: #7c3aed;
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
