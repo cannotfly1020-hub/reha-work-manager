@@ -102,3 +102,26 @@
   border-radius: 3px;
   flex-shrink: 0;
 }
+
+/* 患者台帳: 早期加算満了日・評価2切替日のコンパクト表示 */
+.text-muted {
+  color: #94a3b8;
+}
+.early-bonus-cell {
+  min-width: 7.5rem;
+}
+.early-bonus-dates {
+  font-size: 0.68rem;
+  color: #475569;
+  margin-top: 3px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.plan2-switch-date {
+  white-space: nowrap;
+}
+.plan-phase-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}

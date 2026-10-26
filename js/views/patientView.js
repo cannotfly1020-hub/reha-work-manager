@@ -30,6 +30,20 @@ export function initPatientView() {
   setupPatientModalListeners();
 }
 
+/** YYYY-MM-DD → YYYY/MM/DD */
+function formatSlashDate(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return '';
+  const m = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}/${m[2]}/${m[3]}`;
+  return dateStr.trim();
+}
+
+/**
+ * 計画書フェーズ＋総合計画評価料2切替日セル
+ * @param {Object} patient
+ * @param {Object} deadlines
+ * @returns {string}
+ */
 function getPlanPhaseCellHtml(patient, deadlines) {
   let badgeHtml = '<span style="color:#64748b; font-size:0.72rem;">未算定(初回)</span>';
   if (patient.planStatus === 'PLAN_2_FOLLOW') {
@@ -38,18 +52,58 @@ function getPlanPhaseCellHtml(patient, deadlines) {
     badgeHtml = '<span style="color:#0369a1; font-weight:700; background:#e0f2fe; padding:2px 5px; border-radius:3px; font-size:0.72rem;">計1継続(240点)</span>';
   }
 
-  // 要介護認定(CARE)で移行日が存在する場合のみ2行目に移行日を明記
+  // 要介護: 標準算定日数の1/3経過翌日＝評価2切替日を必ず明記
   let subTextHtml = '';
   if (patient.careInsuranceType === 'CARE' && deadlines.plan2TransitionDateStr) {
+    const switchSlash = formatSlashDate(deadlines.plan2TransitionDateStr);
     if (deadlines.isPlan2Required || patient.planStatus === 'PLAN_2_FOLLOW') {
-      subTextHtml = `<div style="font-size:0.67rem; color:#7c3aed; font-weight:600; margin-top:2px;">移行: ${deadlines.plan2TransitionDateStr} (到達済)</div>`;
+      subTextHtml = `<div class="plan2-switch-date" style="font-size:0.68rem; color:#7c3aed; font-weight:700; margin-top:3px; line-height:1.3;">評価2切替日: ${switchSlash} <span style="font-weight:600;">(到達済)</span></div>`;
     } else {
-      const remain = deadlines.plan2RemainingDays !== null ? ` (残${deadlines.plan2RemainingDays}日)` : '';
-      subTextHtml = `<div style="font-size:0.67rem; color:#0284c7; margin-top:2px;">移行: ${deadlines.plan2TransitionDateStr}${remain}</div>`;
+      const remain = deadlines.plan2RemainingDays !== null ? ` <span style="color:#0284c7; font-weight:600;">(残${deadlines.plan2RemainingDays}日)</span>` : '';
+      subTextHtml = `<div class="plan2-switch-date" style="font-size:0.68rem; color:#5b21b6; font-weight:700; margin-top:3px; line-height:1.3;">評価2切替日: ${switchSlash}${remain}</div>`;
     }
   }
 
-  return `<div>${badgeHtml}${subTextHtml}</div>`;
+  return `<div class="plan-phase-cell">${badgeHtml}${subTextHtml}</div>`;
+}
+
+/**
+ * 早期加算セル（ステータス＋60点／25点満了日）
+ * @param {Object} patient
+ * @param {Object} deadlines
+ * @returns {string}
+ */
+function getEarlyBonusCellHtml(patient, deadlines) {
+  const isOut = patient.category === 'OUTPATIENT';
+  if (isOut) {
+    return '<span class="text-muted" style="color:#94a3b8; font-size:0.72rem;">- (外来対象外)</span>';
+  }
+
+  const earlyStart = deadlines.earlyStartDateStr || patient.earlyBonusStartDate || patient.admissionDate || '';
+  if (!earlyStart) {
+    return '<span class="text-muted" style="color:#94a3b8; font-size:0.72rem;">起算日未設定</span>';
+  }
+
+  const eb = deadlines.earlyBonus || {};
+  let badgeHtml = '';
+  if (eb.phase === 'PHASE_1' && eb.points > 0) {
+    badgeHtml = '<span class="early-badge early-badge-60" style="background:#d1fae5; color:#059669; padding:1px 5px; border-radius:3px; font-weight:700; font-size:0.72rem;">早60点</span>';
+  } else if (eb.phase === 'PHASE_2' && eb.points > 0) {
+    badgeHtml = '<span class="early-badge early-badge-25" style="background:#e0f2fe; color:#0284c7; padding:1px 5px; border-radius:3px; font-weight:700; font-size:0.72rem;">早25点</span>';
+  } else {
+    badgeHtml = '<span class="early-badge early-badge-done" style="background:#f1f5f9; color:#64748b; padding:1px 5px; border-radius:3px; font-weight:700; font-size:0.72rem;">満了</span>';
+  }
+
+  const p1Slash = formatSlashDate(deadlines.earlyPhase1EndDateStr || eb.phase1EndDateStr);
+  const p2Slash = formatSlashDate(deadlines.earlyPhase2EndDateStr || eb.phase2EndDateStr);
+  const datesHtml = (p1Slash || p2Slash)
+    ? `<div class="early-bonus-dates" style="font-size:0.68rem; color:#475569; margin-top:3px; line-height:1.35; text-align:left;">
+        <div><span style="color:#0284c7; font-weight:600;">60点満了:</span> ${p1Slash || '-'}</div>
+        <div><span style="color:#64748b; font-weight:600;">25点満了:</span> ${p2Slash || '-'}</div>
+      </div>`
+    : '';
+
+  return `<div class="early-bonus-cell" style="display:inline-flex; flex-direction:column; align-items:center;">${badgeHtml}${datesHtml}</div>`;
 }
 
 function comparePatientId(a, b) {
@@ -149,11 +203,7 @@ export function renderPatientView() {
 
     const catBadge = isOut ? '<span style="color:#2563eb; font-weight:700;">外</span>' : '<span style="color:#d97706; font-weight:700;">入</span>';
 
-    let earlyBadge = '<span style="color:#94a3b8;">-</span>';
-    if (!isOut && dl.earlyBonus && dl.earlyBonus.points > 0) {
-      const isP1 = dl.earlyBonus.phase === 'PHASE_1';
-      earlyBadge = `<span style="background:${isP1 ? '#d1fae5' : '#e0f2fe'}; color:${isP1 ? '#059669' : '#0284c7'}; padding:1px 5px; border-radius:3px; font-weight:700; font-size:0.72rem;">+${dl.earlyBonus.points}点</span>`;
-    }
+    const earlyCellHtml = getEarlyBonusCellHtml(p, dl);
 
     let limitDisplay = '<span style="color:#94a3b8;">上限なし</span>';
     if (dl.limitDateStr) {
@@ -161,7 +211,7 @@ export function renderPatientView() {
         limitDisplay = `<span style="color:#e11d48; font-weight:700;">超過 (${dl.remainingDays}日)</span>`;
       } else {
         const warnStyle = (dl.remainingDays <= 30) ? 'color:#d97706; font-weight:700;' : 'color:#334155;';
-        limitDisplay = `<span style="${warnStyle}">${dl.limitDateStr} (${dl.remainingDays}日)</span>`;
+        limitDisplay = `<span style="${warnStyle}">${formatSlashDate(dl.limitDateStr)} (${dl.remainingDays}日)</span>`;
       }
     }
 
@@ -180,11 +230,11 @@ export function renderPatientView() {
         <td style="padding:6px 4px; text-align:center;">${catBadge}</td>
         <td style="padding:6px 4px; text-align:center;"><span style="font-size:0.72rem; background:#f1f5f9; padding:1px 4px; border-radius:3px;">${dl.diseaseLabel}</span></td>
         <td style="padding:6px 4px; text-align:center;">${careDisplay}</td>
-        <td style="padding:6px 6px; font-size:0.75rem; white-space:nowrap;">${p.admissionDate || '-'}</td>
-        <td style="padding:6px 6px; font-size:0.75rem; white-space:nowrap;">${p.onsetDate || p.admissionDate || '-'}</td>
-        <td style="padding:6px 6px; text-align:center;">${earlyBadge}</td>
+        <td style="padding:6px 6px; font-size:0.75rem; white-space:nowrap;">${formatSlashDate(p.admissionDate) || '-'}</td>
+        <td style="padding:6px 6px; font-size:0.75rem; white-space:nowrap;">${formatSlashDate(p.onsetDate || p.admissionDate) || '-'}</td>
+        <td style="padding:6px 6px; text-align:center; vertical-align:middle;">${earlyCellHtml}</td>
         <td style="padding:6px 6px; font-size:0.75rem; white-space:nowrap;">${limitDisplay}</td>
-        <td style="padding:6px 6px; text-align:center; white-space:nowrap;">${getPlanPhaseCellHtml(p, dl)}</td>
+        <td style="padding:6px 6px; text-align:center; vertical-align:middle;">${getPlanPhaseCellHtml(p, dl)}</td>
         <td style="padding:6px 6px; text-align:center;">
           <button class="btn-edit-patient" data-id="${p.id}" style="padding:2px 6px; font-size:0.72rem; border:1px solid #cbd5e1; background:#fff; border-radius:4px; cursor:pointer;">編集</button>
         </td>

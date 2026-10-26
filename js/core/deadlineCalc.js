@@ -87,6 +87,25 @@ export function addDays(baseDate, daysToAdd) {
 }
 
 /**
+ * 早期加算 60点／25点の各満了日を算出する（起算日当日＝第1日目）
+ * 令和8年度: 60点=通算3日目まで、25点=通算14日目まで
+ * @param {string|Date} earlyStart 早期加算起算日
+ * @returns {{ phase1EndDateStr: string, phase2EndDateStr: string }}
+ */
+export function getEarlyBonusDeadlineDates(earlyStart) {
+  const start = normalizeDateString(earlyStart) || formatDate(normalizeDate(earlyStart));
+  if (!start) {
+    return { phase1EndDateStr: '', phase2EndDateStr: '' };
+  }
+  const p1Days = REHA_RULES.EARLY_BONUS.PHASE_1.maxDays;
+  const p2Days = REHA_RULES.EARLY_BONUS.PHASE_2.maxDays;
+  return {
+    phase1EndDateStr: addDays(start, p1Days - 1),
+    phase2EndDateStr: addDays(start, p2Days - 1)
+  };
+}
+
+/**
  * 入院患者の早期加算フェーズ・終了日・残日数を自動評価する（令和8年度改定準拠）
  * 起算日（転院患者は前医入院日、直接入院は当院入院日）当日を 1 日目とする
  * 1〜3日目: 60点, 4〜14日目: 25点, 15日目以降: なし
@@ -97,15 +116,36 @@ export function addDays(baseDate, daysToAdd) {
  * @returns {Object}
  */
 export function evaluateEarlyBonusPhase(admissionOrStart, sessionDate, category = 'INPATIENT') {
+  const deadlineDates = getEarlyBonusDeadlineDates(admissionOrStart);
   if (category !== 'INPATIENT') {
-    return { phase: null, points: 0, label: '外来対象外', isEligible: false, endDateStr: '', remainingDays: null, shortLabel: '' };
+    return {
+      phase: null,
+      points: 0,
+      label: '外来対象外',
+      isEligible: false,
+      endDateStr: '',
+      remainingDays: null,
+      shortLabel: '',
+      phase1EndDateStr: '',
+      phase2EndDateStr: ''
+    };
   }
   const dayCount = getInclusiveDayCount(admissionOrStart, sessionDate);
   if (dayCount === null || dayCount < 1) {
-    return { phase: null, points: 0, label: '対象外', isEligible: false, endDateStr: '', remainingDays: null, shortLabel: '' };
+    return {
+      phase: null,
+      points: 0,
+      label: '対象外',
+      isEligible: false,
+      endDateStr: '',
+      remainingDays: null,
+      shortLabel: '',
+      phase1EndDateStr: deadlineDates.phase1EndDateStr,
+      phase2EndDateStr: deadlineDates.phase2EndDateStr
+    };
   }
   const maxAllowedDays = REHA_RULES.EARLY_BONUS.PHASE_2.maxDays;
-  const endDateStr = addDays(admissionOrStart, maxAllowedDays - 1);
+  const endDateStr = deadlineDates.phase2EndDateStr || addDays(admissionOrStart, maxAllowedDays - 1);
   const remainingDays = maxAllowedDays - dayCount;
 
   const endParts = endDateStr.split('-');
@@ -120,7 +160,9 @@ export function evaluateEarlyBonusPhase(admissionOrStart, sessionDate, category 
       dayCount,
       endDateStr,
       remainingDays,
-      shortLabel: `早:〜${shortDateStr}`
+      shortLabel: `早:〜${shortDateStr}`,
+      phase1EndDateStr: deadlineDates.phase1EndDateStr,
+      phase2EndDateStr: deadlineDates.phase2EndDateStr
     };
   }
   if (dayCount <= maxAllowedDays) {
@@ -132,7 +174,9 @@ export function evaluateEarlyBonusPhase(admissionOrStart, sessionDate, category 
       dayCount,
       endDateStr,
       remainingDays,
-      shortLabel: `早:〜${shortDateStr}`
+      shortLabel: `早:〜${shortDateStr}`,
+      phase1EndDateStr: deadlineDates.phase1EndDateStr,
+      phase2EndDateStr: deadlineDates.phase2EndDateStr
     };
   }
   return {
@@ -143,7 +187,9 @@ export function evaluateEarlyBonusPhase(admissionOrStart, sessionDate, category 
     dayCount,
     endDateStr,
     remainingDays: 0,
-    shortLabel: ''
+    shortLabel: '',
+    phase1EndDateStr: deadlineDates.phase1EndDateStr,
+    phase2EndDateStr: deadlineDates.phase2EndDateStr
   };
 }
 
@@ -175,6 +221,7 @@ export function calculatePatientDeadlines(patient, baseDate = new Date()) {
   }
 
   const earlyBonus = evaluateEarlyBonusPhase(earlyStartStr, baseDate, patient?.category);
+  const earlyDeadlines = getEarlyBonusDeadlineDates(earlyStartStr);
 
   let plan2TransitionDateStr = '';
   let plan2RemainingDays = null;
@@ -204,6 +251,9 @@ export function calculatePatientDeadlines(patient, baseDate = new Date()) {
     remainingDays,
     isLimitExceeded,
     earlyBonus,
+    earlyPhase1EndDateStr: earlyBonus.phase1EndDateStr || earlyDeadlines.phase1EndDateStr || '',
+    earlyPhase2EndDateStr: earlyBonus.phase2EndDateStr || earlyDeadlines.phase2EndDateStr || '',
+    earlyStartDateStr: earlyStartStr || '',
     isCareInsured,
     isMaintenanceReduction,
     currentBasePoints,
