@@ -1,6 +1,6 @@
 // js/excel/uketsukeWriter.js
 // 受付提出用Excelのシート組み立て
-// ★個別リハ実施リストは医事課要望により「通常／減算」2シートへ分離（旧疾患別日別グリッドは呼び出し停止・ファイルは残置）
+// ★個別リハ: 入院/外来 × 疾患 × 通常/減算 で最大12シート物理分離（日別1〜31マトリクス）
 
 import { ANALGESIA_SHEET } from './sheetUtils.js';
 import { writeExecutiveSummarySheet } from './sheets/summarySheet.js';
@@ -19,7 +19,7 @@ export function generateUketsukeWorkbook(aggregated) {
   // 2. 年間推移シート（当年1月〜12月 入外別推移）
   writeYearlyTrendSheet(wb, aggregated.year);
 
-  // 3. 個別リハビリ実施リスト（原本A4横マトリクス: 通常/減算の2シート・入院日列・日別1〜31）
+  // 3. 個別リハビリ実施リスト（最大12シート: 入外×疾患×通常/減算・日別マトリクス）
   writeIndividualRehaSheets(wb, aggregated);
 
   // 4. 消炎鎮痛 専用シート
