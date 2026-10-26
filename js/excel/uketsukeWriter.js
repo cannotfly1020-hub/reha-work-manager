@@ -19,7 +19,7 @@ export function generateUketsukeWorkbook(aggregated) {
   // 2. 年間推移シート（当年1月〜12月 入外別推移）
   writeYearlyTrendSheet(wb, aggregated.year);
 
-  // 3. 個別リハビリ実施リスト（通常・減算なし / 維持期減算）※医事課提出用・A4横1枚
+  // 3. 個別リハビリ実施リスト（原本A4横マトリクス: 通常/減算の2シート・入院日列・日別1〜31）
   writeIndividualRehaSheets(wb, aggregated);
 
   // 4. 消炎鎮痛 専用シート
