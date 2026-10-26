@@ -60,7 +60,7 @@ export function generateUketsukeWorkbook(aggregated) {
   // 5. 消炎鎮痛 専用シート
   writeAnalgesiaDedicatedSheet(wb, aggregated, ANALGESIA_SHEET);
 
-  // 6. 当月実施患者一覧（入院/外来・疾患別グループ / 個人台帳の診断名）※受付提出用
+  // 6. 当月実施患者一覧（区分×疾患×算定ステータス【維持期減算／当月切替／医療のみ／通常】）※受付提出用
   buildPatientMonthlyListSheet(wb, aggregated);
 
   return wb;
