@@ -317,6 +317,7 @@ function setupPatientModalListeners() {
   const btnDelete = document.getElementById('btnDeletePatient');
   const form = document.getElementById('patientEditForm');
   const statusSelect = document.getElementById('patientFormStatus');
+  const exitDateInput = document.getElementById('patientFormExitDate');
 
   btnClose?.addEventListener('click', () => modal.classList.remove('active'));
 
@@ -333,8 +334,38 @@ function setupPatientModalListeners() {
     renderPatientView();
   });
 
+  // ★状態 ↔ 終了・退院日の双方向リアルタイム連動
   statusSelect?.addEventListener('change', (e) => {
+    const isDisc = e.target.value === PATIENT_STATUS.DISCONTINUED;
+    if (exitDateInput) {
+      if (isDisc) {
+        // 終了にした際、日付が空なら今日の日付を自動セット
+        if (!exitDateInput.value) {
+          const today = new Date();
+          const y = today.getFullYear();
+          const m = String(today.getMonth() + 1).padStart(2, '0');
+          const d = String(today.getDate()).padStart(2, '0');
+          exitDateInput.value = `${y}-${m}-${d}`;
+        }
+      } else {
+        // 継続（ACTIVE）に戻した際、日付をクリア
+        exitDateInput.value = '';
+      }
+    }
     syncStatusSelectStyle(e.target);
+  });
+
+  exitDateInput?.addEventListener('input', (e) => {
+    if (!statusSelect) return;
+    const dateVal = e.target.value;
+    if (dateVal) {
+      // 日付が入ったら自動的に「終了」へ（未来の退院予定も含む）
+      statusSelect.value = PATIENT_STATUS.DISCONTINUED;
+    } else {
+      // 日付をクリアしたら「継続」へ復帰
+      statusSelect.value = PATIENT_STATUS.ACTIVE;
+    }
+    syncStatusSelectStyle(statusSelect);
   });
 
   ['patientFormCareType', 'patientFormDiseaseType', 'patientFormAdmissionDate', 'patientFormOnsetDate'].forEach((id) => {
@@ -345,7 +376,7 @@ function setupPatientModalListeners() {
     e.preventDefault();
     const category = document.getElementById('patientFormCategory').value;
     const status = document.getElementById('patientFormStatus')?.value || PATIENT_STATUS.ACTIVE;
-    // ★終了・退院日はユーザー明示入力のみ（自動スタンプ禁止）
+    // モーダル連動後の値をそのまま保存（状態と exitDate は常に整合）
     const exitDate = document.getElementById('patientFormExitDate')?.value || '';
 
     const rawData = {
