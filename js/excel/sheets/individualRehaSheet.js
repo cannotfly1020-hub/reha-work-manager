@@ -231,10 +231,14 @@ function analyzePatientItem(item, year, month, daysInMonth) {
     ? (formatAdmissionShort(baseEarlyDate || p.admissionDate || p.onsetDate) || '-')
     : '-';
 
+  // 退院日（未設定の過去データは空＝マークなし）
+  const dischargeDateStr = String(p.plannedDischargeDate || p.dischargeDate || '').trim().slice(0, 10);
+
   return {
     placement,
     limitDateStr,
     switchStartStr,
+    dischargeDateStr,
     dailyUnits,
     early1ByDay,
     early2ByDay,
@@ -306,15 +310,38 @@ function buildPeriodRowView(analysis, mode, year, month, daysInMonth) {
 
   return {
     mode,
-    periodTotal,
+    periodTotal, // ★純粋な数値合算（「退」「維」文字列は含めない）
     early1,
     early2,
     planDateStr,
     visibleUnits,
     careLabel,
     careStyleBase,
-    admissionLabel: analysis.admissionLabel
+    admissionLabel: analysis.admissionLabel,
+    dischargeDateStr: analysis.dischargeDateStr || '',
+    // 維持開始日＝満了翌日（当月切替の減算初日に「維」を印字）
+    maintenanceStartDateStr: analysis.switchStartStr || ''
   };
+}
+
+/**
+ * 日セル表示値（単位＋退/維マーク）。総列計算には使わない。
+ * @param {number} units
+ * @param {boolean} isDischargeDay
+ * @param {boolean} isMaintenanceStartDay
+ * @returns {string}
+ */
+function buildDayCellDisplay(units, isDischargeDay, isMaintenanceStartDay) {
+  const u = Number(units) || 0;
+  if (u > 0) {
+    let displayVal = String(u);
+    if (isDischargeDay) displayVal += '退';
+    else if (isMaintenanceStartDay) displayVal += '維';
+    return displayVal;
+  }
+  if (isDischargeDay) return '退';
+  if (isMaintenanceStartDay) return '維';
+  return '';
 }
 
 function collectSheetRows(aggregated) {
@@ -430,7 +457,8 @@ function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraB
   const p = item.patient;
   const {
     periodTotal, early1, early2, planDateStr, visibleUnits,
-    careLabel, careStyleBase, admissionLabel, mode
+    careLabel, careStyleBase, admissionLabel, mode,
+    dischargeDateStr, maintenanceStartDateStr
   } = rowView;
 
   setStyledCell(ws, curRow, 0, p.id, {
@@ -444,6 +472,7 @@ function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraB
     : { ...STYLE_DATA_C, fill: zebraBg };
   setStyledCell(ws, curRow, 3, careLabel, careStyle);
 
+  // ★「総」は期間内の純粋な数値単位のみ（退・維マークは一切含めない）
   const isReducedSheet = mode === 'FULL_REDUCED' || mode === 'SPLIT_REDUCED';
   setStyledCell(ws, curRow, 4, periodTotal, {
     ...STYLE_DATA_C,
@@ -467,34 +496,68 @@ function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraB
 
     const dateObj = new Date(year, month - 1, d);
     const dow = dateObj.getDay();
+    const dateStr = buildDateStr(year, month, d);
     const cellVal = visibleUnits[d];
+    const isDischargeDay = !!(dischargeDateStr && dischargeDateStr === dateStr);
+    const isMaintenanceStartDay = !!(maintenanceStartDateStr && maintenanceStartDateStr === dateStr);
+    const isDayAfterDischarge = !!(dischargeDateStr && dateStr > dischargeDateStr);
 
-    // 期間外 → 空欄＋グレー
+    // シート期間外 → 空欄＋グレー
     if (cellVal === null) {
       setStyledCell(ws, curRow, col, '', STYLE_OUT_OF_PERIOD);
       continue;
     }
 
-    const u = cellVal || 0;
-    const dateStr = buildDateStr(year, month, d);
+    const u = Number(cellVal) || 0;
+    const displayVal = buildDayCellDisplay(u, isDischargeDay, isMaintenanceStartDay);
+    const hasMark = displayVal.includes('退') || displayVal.includes('維');
     const dayRate = getDailyBasePoints(p, dateStr);
     const isMaint = u > 0 && dayRate.isMaintenance && dayRate.isCareReduced;
     const isPlan = !!row.analysis.planByDay[d];
     const isE1 = (row.analysis.early1ByDay[d] || 0) > 0;
     const isE2 = (row.analysis.early2ByDay[d] || 0) > 0;
 
+    // 退院翌日以降の空欄はグレー。マーク付きは強調色
     let cellStyle = { ...STYLE_UNIT };
-    if (dow === 6) cellStyle.fill = STYLES.cellSatCol;
-    else if (dow === 0) cellStyle.fill = STYLES.cellSunCol;
-    else cellStyle.fill = zebraBg;
+    if (isDayAfterDischarge && !displayVal) {
+      cellStyle = { ...STYLE_OUT_OF_PERIOD };
+    } else if (displayVal.includes('退')) {
+      cellStyle = {
+        ...STYLE_UNIT,
+        fill: { fgColor: { rgb: 'FEE2E2' } },
+        font: { name: 'Meiryo UI', sz: 7.5, bold: true, color: { rgb: 'B91C1C' } }
+      };
+    } else if (displayVal.includes('維')) {
+      cellStyle = {
+        ...STYLE_UNIT,
+        fill: { fgColor: { rgb: 'FEF3C7' } },
+        font: { name: 'Meiryo UI', sz: 7.5, bold: true, color: { rgb: 'B45309' } }
+      };
+    } else if (dow === 6) {
+      cellStyle.fill = STYLES.cellSatCol;
+    } else if (dow === 0) {
+      cellStyle.fill = STYLES.cellSunCol;
+    } else {
+      cellStyle.fill = zebraBg;
+    }
 
-    if (u > 0) {
-      if (isPlan && isMaint) setStyledCell(ws, curRow, col, u, STYLE_CELL_PLAN_MAINT);
-      else if (isPlan) setStyledCell(ws, curRow, col, u, { ...STYLES.cellPlanStar, font: { ...STYLES.cellPlanStar.font, sz: 8 } });
-      else if (isE1) setStyledCell(ws, curRow, col, u, { ...STYLES.cellEarly1, font: { ...STYLES.cellEarly1.font, sz: 8 } });
-      else if (isE2) setStyledCell(ws, curRow, col, u, { ...STYLES.cellEarly2, font: { ...STYLES.cellEarly2.font, sz: 8 } });
-      else if (isMaint) setStyledCell(ws, curRow, col, u, STYLE_CELL_MAINT);
-      else setStyledCell(ws, curRow, col, u, cellStyle);
+    if (displayVal) {
+      // マーク付きは文字列として印字。無印の単位は従来どおり背景優先ルールも適用
+      if (hasMark) {
+        setStyledCell(ws, curRow, col, displayVal, cellStyle);
+      } else if (isPlan && isMaint) {
+        setStyledCell(ws, curRow, col, u, STYLE_CELL_PLAN_MAINT);
+      } else if (isPlan) {
+        setStyledCell(ws, curRow, col, u, { ...STYLES.cellPlanStar, font: { ...STYLES.cellPlanStar.font, sz: 8 } });
+      } else if (isE1) {
+        setStyledCell(ws, curRow, col, u, { ...STYLES.cellEarly1, font: { ...STYLES.cellEarly1.font, sz: 8 } });
+      } else if (isE2) {
+        setStyledCell(ws, curRow, col, u, { ...STYLES.cellEarly2, font: { ...STYLES.cellEarly2.font, sz: 8 } });
+      } else if (isMaint) {
+        setStyledCell(ws, curRow, col, u, STYLE_CELL_MAINT);
+      } else {
+        setStyledCell(ws, curRow, col, u, cellStyle);
+      }
     } else {
       setStyledCell(ws, curRow, col, '', cellStyle);
     }
