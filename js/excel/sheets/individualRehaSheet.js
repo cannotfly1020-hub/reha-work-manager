@@ -144,18 +144,26 @@ function resolveLivePatient(snap) {
   const id = snap.id;
   const live = id ? getPatientById(id) : null;
   if (!live) return { ...snap };
-  // マスター側のステータス・終了/退院日フィールドを優先
+  // マスター側のステータス・終了/退院日フィールドを優先（exitDate が正本）
+  const exitDate = live.exitDate
+    || snap.exitDate
+    || live.discontinuedDate
+    || live.endDate
+    || live.plannedDischargeDate
+    || snap.discontinuedDate
+    || snap.endDate
+    || snap.plannedDischargeDate
+    || '';
   return {
     ...snap,
     ...live,
-    // スナップにしか無い運用メモ等は残しつつ、日付系はマスター優先で上書き済み
-    plannedDischargeDate: live.plannedDischargeDate || snap.plannedDischargeDate || '',
-    discontinuedDate: live.discontinuedDate || snap.discontinuedDate || '',
-    endDate: live.endDate || snap.endDate || live.discontinuedDate || '',
+    exitDate,
+    plannedDischargeDate: live.plannedDischargeDate || snap.plannedDischargeDate || exitDate || '',
+    discontinuedDate: live.discontinuedDate || snap.discontinuedDate || exitDate || '',
+    endDate: live.endDate || snap.endDate || exitDate || '',
     dischargeDate: live.dischargeDate || snap.dischargeDate || '',
     finishDate: live.finishDate || snap.finishDate || '',
     stoppedDate: live.stoppedDate || snap.stoppedDate || '',
-    exitDate: live.exitDate || snap.exitDate || '',
     status: live.status || snap.status
   };
 }
@@ -196,15 +204,15 @@ function extractPatientExitDate(patient) {
   }
   const src = p.id ? p : (patient || {});
 
-  // 退院予定 → 確定退院 → 終了 → 互換 endDate 系の順で最初の有効日を採用
+  // ★正本 exitDate を最優先。旧フィールドは下位互換
   const candidates = [
-    src.plannedDischargeDate,
-    src.dischargeDate,
+    src.exitDate,
     src.discontinuedDate,
     src.endDate,
+    src.plannedDischargeDate,
+    src.dischargeDate,
     src.finishDate,
-    src.stoppedDate,
-    src.exitDate
+    src.stoppedDate
   ];
   for (let i = 0; i < candidates.length; i += 1) {
     const normalized = normalizeExitDateString(candidates[i]);

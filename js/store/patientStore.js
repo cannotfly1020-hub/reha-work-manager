@@ -120,10 +120,18 @@ export function getAllPatients(includeDiscontinued = true) {
       const defaultUnits = Number.isFinite(rawUnits)
         ? Math.min(4, Math.max(1, Math.round(rawUnits)))
         : 3;
+      // 旧データ: exitDate 未設定なら旧フィールドから補完（破壊しない）
+      const exitDate = p.exitDate
+        || p.discontinuedDate
+        || p.endDate
+        || p.plannedDischargeDate
+        || p.dischargeDate
+        || '';
       return {
         ...p,
         status: p.status || PATIENT_STATUS.ACTIVE,
-        defaultUnits
+        defaultUnits,
+        exitDate
       };
     });
 
@@ -160,6 +168,18 @@ export function upsertPatient(rawData) {
   if (!id) return { success: false, message: '患者IDは必須です。' };
   if (!name) return { success: false, message: '患者氏名は必須です。' };
 
+  // ★終了・退院日の正本。フォームが exitDate を渡したらそれを優先（空＝クリア）。
+  // 旧呼び出し互換: exitDate キー未指定時のみ旧フィールドから採用。
+  const exitDate = Object.prototype.hasOwnProperty.call(rawData, 'exitDate')
+    ? normalizeDateString(rawData.exitDate || '')
+    : normalizeDateString(
+      rawData.discontinuedDate
+      || rawData.endDate
+      || rawData.plannedDischargeDate
+      || rawData.dischargeDate
+      || ''
+    );
+
   const cleanPatient = {
     id,
     name,
@@ -176,11 +196,11 @@ export function upsertPatient(rawData) {
     admissionDate: normalizeDateString(rawData.admissionDate),
     earlyBonusStartDate: normalizeDateString(rawData.earlyBonusStartDate || rawData.admissionDate),
     onsetDate: normalizeDateString(rawData.onsetDate),
-    // 退院予定日（未設定の過去データは空文字で下位互換）
-    plannedDischargeDate: normalizeDateString(rawData.plannedDischargeDate || ''),
-    // 終了・退院（中止）確定日（Excel「退」マーク用。ACTIVE 時は空）
-    discontinuedDate: normalizeDateString(rawData.discontinuedDate || ''),
-    endDate: normalizeDateString(rawData.endDate || rawData.discontinuedDate || ''),
+    exitDate,
+    // 後方互換ミラー（月間単位表・旧読取経路は同一日を参照）
+    plannedDischargeDate: exitDate,
+    discontinuedDate: exitDate,
+    endDate: exitDate,
     force13Limit: Boolean(rawData.force13Limit),
     defaultUnits: (() => {
       const rawUnits = Number(rawData.defaultUnits);

@@ -1,6 +1,6 @@
 // js/views/patientView.js
 // VIEW 3: 患者台帳・算定期限管理・計画書2行表示・通院中/終了ステータス管理・患者登録編集モーダル制御層
-// ★終了(DISCONTINUED)保存時は discontinuedDate / endDate を自動スタンプ（Excel「退」マーク連動）
+// ★終了・退院日はモーダルの明示入力 exitDate を正本とし、Excel「退」マークへ連動
 
 import { sanitizeHtml, normalizeToKatakana } from '../core/dataNormalizer.js';
 import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
@@ -47,20 +47,15 @@ function formatShortMd(dateStr) {
   return `${parseInt(m[2], 10)}/${parseInt(m[3], 10)}`;
 }
 
-/** 今日を YYYY-MM-DD で返す */
-function todayYmd() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-}
-
 /**
- * 終了・退院日候補を患者オブジェクトから取得
+ * 終了・退院日（正本 exitDate）。旧フィールドは下位互換で読取のみ
  * @param {Object} patient
- * @returns {string}
+ * @returns {string} YYYY-MM-DD
  */
 function resolvePatientExitDate(patient) {
   if (!patient) return '';
-  const raw = patient.discontinuedDate
+  const raw = patient.exitDate
+    || patient.discontinuedDate
     || patient.endDate
     || patient.dischargeDate
     || patient.finishDate
@@ -73,13 +68,13 @@ function resolvePatientExitDate(patient) {
 }
 
 /**
- * 基準日時点で退院済みか（plannedDischargeDate / discontinuedDate 当日以降）
+ * 基準日時点で退院・終了済みか（exitDate 当日以降）
  * @param {Object} patient
  * @param {Date|string} [asOf=new Date()]
  * @returns {boolean}
  */
 export function isPatientDischarged(patient, asOf = new Date()) {
-  const discharge = resolvePatientExitDate(patient) || patient?.plannedDischargeDate;
+  const discharge = resolvePatientExitDate(patient);
   if (!discharge || typeof discharge !== 'string') return false;
   let asOfStr = '';
   if (asOf instanceof Date && !isNaN(asOf.getTime())) {
@@ -89,21 +84,6 @@ export function isPatientDischarged(patient, asOf = new Date()) {
   }
   if (!asOfStr) return false;
   return asOfStr >= discharge.slice(0, 10);
-}
-
-/**
- * 入院区分のときのみ退院予定日入力欄を表示
- */
-function syncDischargeDateGroupVisibility() {
-  const cat = document.getElementById('patientFormCategory')?.value;
-  const group = document.getElementById('dischargeDateGroup');
-  if (!group) return;
-  const isIn = cat === 'INPATIENT';
-  group.style.display = isIn ? 'block' : 'none';
-  if (!isIn) {
-    const input = document.getElementById('patientPlannedDischargeDate');
-    if (input) input.value = '';
-  }
 }
 
 /**
@@ -274,19 +254,15 @@ export function renderPatientView() {
 
     const catBadge = isOut ? '<span style="color:#2563eb; font-weight:700;">外</span>' : '<span style="color:#d97706; font-weight:700;">入</span>';
 
-    // 氏名横バッジ: 終了日 / 退院日 / 退院予定
+    // 氏名横バッジ: 終了・退院日（exitDate）
     let nameSideBadge = '';
-    if (isDiscontinued && exitDate) {
+    if (exitDate) {
       const md = formatShortMd(exitDate);
-      nameSideBadge = `<span class="badge-discharge-date" title="終了日">${md} 終了</span>`;
-    } else if (!isOut && p.plannedDischargeDate) {
-      const md = formatShortMd(p.plannedDischargeDate);
-      nameSideBadge = discharged
-        ? `<span class="badge-discharge-date" title="退院日">${md} 退院</span>`
-        : `<span class="badge-discharge-planned" title="退院予定日">${md} 退院予定</span>`;
-    } else if (exitDate && !isDiscontinued) {
-      const md = formatShortMd(exitDate);
-      nameSideBadge = `<span class="badge-discharge-date" title="終了・退院日">${md} 終了</span>`;
+      if (isDiscontinued || discharged) {
+        nameSideBadge = `<span class="badge-discharge-date" title="終了・退院日">${md} ${isOut ? '終了' : '退院'}</span>`;
+      } else {
+        nameSideBadge = `<span class="badge-discharge-planned" title="終了・退院日">${md} 予定</span>`;
+      }
     }
 
     const earlyCellHtml = getEarlyBonusCellHtml(p, dl);
@@ -361,10 +337,6 @@ function setupPatientModalListeners() {
     syncStatusSelectStyle(e.target);
   });
 
-  document.getElementById('patientFormCategory')?.addEventListener('change', () => {
-    syncDischargeDateGroupVisibility();
-  });
-
   ['patientFormCareType', 'patientFormDiseaseType', 'patientFormAdmissionDate', 'patientFormOnsetDate'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', updatePlan2GuidePreview);
   });
@@ -373,23 +345,8 @@ function setupPatientModalListeners() {
     e.preventDefault();
     const category = document.getElementById('patientFormCategory').value;
     const status = document.getElementById('patientFormStatus')?.value || PATIENT_STATUS.ACTIVE;
-    const plannedDischargeDate = category === 'INPATIENT'
-      ? (document.getElementById('patientPlannedDischargeDate')?.value || '')
-      : '';
-
-    // ★終了ステータス保存時: discontinuedDate / endDate を自動スタンプ（Excel「退」連動）
-    const existing = editingPatientId ? getPatientById(editingPatientId) : null;
-    let discontinuedDate = '';
-    let endDate = '';
-    if (status === PATIENT_STATUS.DISCONTINUED) {
-      const prev = existing?.discontinuedDate || existing?.endDate || '';
-      discontinuedDate = prev || todayYmd();
-      endDate = discontinuedDate;
-    } else {
-      // ACTIVE 復帰時は終了日をクリア
-      discontinuedDate = '';
-      endDate = '';
-    }
+    // ★終了・退院日はユーザー明示入力のみ（自動スタンプ禁止）
+    const exitDate = document.getElementById('patientFormExitDate')?.value || '';
 
     const rawData = {
       id: document.getElementById('patientFormId').value,
@@ -404,9 +361,7 @@ function setupPatientModalListeners() {
       admissionDate: document.getElementById('patientFormAdmissionDate').value,
       earlyBonusStartDate: document.getElementById('patientFormEarlyStartDate').value,
       onsetDate: document.getElementById('patientFormOnsetDate').value,
-      plannedDischargeDate,
-      discontinuedDate,
-      endDate,
+      exitDate,
       force13Limit: document.getElementById('patientFormForce13').checked,
       defaultUnits: document.getElementById('patientFormDefaultUnits')?.value || 3,
       notes: document.getElementById('patientFormNotes').value
@@ -469,9 +424,9 @@ function openPatientModal(patientId) {
   document.getElementById('patientFormAdmissionDate').value = p ? (p.admissionDate || '') : '';
   document.getElementById('patientFormEarlyStartDate').value = p ? (p.earlyBonusStartDate || '') : '';
   document.getElementById('patientFormOnsetDate').value = p ? (p.onsetDate || '') : '';
-  const dischargeInput = document.getElementById('patientPlannedDischargeDate');
-  if (dischargeInput) {
-    dischargeInput.value = p ? (p.plannedDischargeDate || '') : '';
+  const exitInput = document.getElementById('patientFormExitDate');
+  if (exitInput) {
+    exitInput.value = p ? resolvePatientExitDate(p) : '';
   }
   document.getElementById('patientFormForce13').checked = Boolean(p?.force13Limit);
   const defaultUnitsSelect = document.getElementById('patientFormDefaultUnits');
@@ -483,7 +438,6 @@ function openPatientModal(patientId) {
   }
   document.getElementById('patientFormNotes').value = p ? (p.notes || '') : '';
 
-  syncDischargeDateGroupVisibility();
   updatePlan2GuidePreview();
   modal.classList.add('active');
 }

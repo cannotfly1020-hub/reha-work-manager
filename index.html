@@ -570,11 +570,11 @@
           </div>
         </div>
 
-        <!-- 退院予定日（退院予約）※入院患者向け -->
-        <div id="dischargeDateGroup" style="display:none;">
-          <label for="patientPlannedDischargeDate" style="font-size:0.75rem; font-weight:700; display:block; color:#9a3412;">📅 退院予定日 (退院予約)</label>
-          <input type="date" id="patientPlannedDischargeDate" style="width:100%; padding:6px; border:1px solid #fdba74; border-radius:4px; background:#fff7ed;">
-          <small style="color:#64748b; font-size:0.72rem; display:block; margin-top:3px;">※退院日が決定した際に入力。その日を迎えると自動で「退院済み」扱いとなります（月間単位表にも表示）。</small>
+        <!-- 終了・退院日（Excel個別リハ「退」マーク・翌日以降グレーアウト連動） -->
+        <div class="form-group" id="patientExitDateGroup">
+          <label for="patientFormExitDate" class="form-label" style="font-size:0.75rem; font-weight:700; display:block; color:#9a3412;">📅 終了・退院日</label>
+          <input type="date" id="patientFormExitDate" class="form-input" style="width:100%; padding:6px; border:1px solid #fdba74; border-radius:4px; background:#fff7ed;">
+          <small class="form-hint" style="color:#64748b; font-size:0.75rem; display:block; margin-top:3px;">※退院日またはリハビリ終了・中止日。設定するとExcelの該当日に「退」が印字され、翌日以降がグレーアウトされます。</small>
         </div>
 
         <!-- 早期加算起算日 & 月13単位制限チェック & ドロップ即配置の既定単位 -->

@@ -41,7 +41,7 @@ function sortPatients(patients, sortKey) {
  * @returns {{ day: number, dateStr: string, isPastOrToday: boolean, label: string }|null}
  */
 function resolveDischargeInMonth(patient, year, month) {
-  const dateStr = patient?.plannedDischargeDate;
+  const dateStr = patient?.exitDate || patient?.plannedDischargeDate || patient?.discontinuedDate || patient?.endDate;
   if (!dateStr || typeof dateStr !== 'string') return null;
   const m = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return null;
