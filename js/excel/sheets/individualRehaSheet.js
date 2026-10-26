@@ -364,16 +364,17 @@ function writePatientMatrixRow(ws, curRow, packed, year, month, daysInMonth, zeb
 }
 
 /**
- * 1シート生成（該当患者がいる場合のみ）
- * @param {Object} wb
+ * ★物理タブ1枚分のワークシートオブジェクトを新規生成する（他グループの行は一切含めない）
  * @param {Object} aggregated
- * @param {object[]} packedList
- * @param {object} def - SHEET_DEFS の1要素
+ * @param {object[]} packedList - 当該グループの患者のみ
+ * @param {object} def
+ * @returns {Object|null} SheetJS worksheet（0名なら null）
  */
-function writeOneSplitSheet(wb, aggregated, packedList, def) {
-  if (!packedList.length) return;
+function buildSingleGroupWorksheet(aggregated, packedList, def) {
+  if (!packedList || packedList.length === 0) return null;
 
   const { year, month, daysInMonth } = aggregated;
+  // ★毎回まっさらなオブジェクト。縦積み禁止のため他グループと絶対に共有しない
   const ws = {};
   let curRow = 0;
 
@@ -423,7 +424,6 @@ function writeOneSplitSheet(wb, aggregated, packedList, def) {
   ws['!views'] = [{ showGridLines: true }];
   ws['!freeze'] = { xSplit: 5, ySplit: 2, topLeftCell: 'F3', activePane: 'bottomRight', state: 'frozen' };
 
-  // A4横: 横幅1ページ強制、縦は行数に応じて自動改ページ
   applyA4LandscapePrintSetup(ws, false);
   ws['!margins'] = {
     left: 0.2,
@@ -435,19 +435,40 @@ function writeOneSplitSheet(wb, aggregated, packedList, def) {
   };
 
   updateSheetRange(ws);
-  appendOrReplaceSheet(wb, ws, def.sheetName);
+  return ws;
 }
 
 /**
- * 個別リハ実施リストを最大12シートへ物理分離して追加
- * （入院/外来 × 運動器/脳血管/廃用 × 通常/減算。0名シートはスキップ）
+ * ワークブックへ物理タブとして追加（1グループ＝1回 book_append_sheet）
+ * @param {Object} wb
+ * @param {Object} ws
+ * @param {string} sheetName
+ */
+function appendPhysicalSheet(wb, ws, sheetName) {
+  if (!wb || !ws || !sheetName) return;
+  // 同名タブが既にあれば置換、なければ新規タブ追加（左下のワークシートが増える）
+  appendOrReplaceSheet(wb, ws, sheetName);
+  // 保険: SheetNames に必ず載っていることを確認
+  if (wb.SheetNames.indexOf(sheetName) < 0 && window.XLSX?.utils?.book_append_sheet) {
+    window.XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  }
+}
+
+/**
+ * 個別リハ実施リストを最大12の物理タブへ完全分離して追加
+ * ★禁止: 1つの ws に複数グループを縦積みして1回だけ append する実装
+ * ★必須: グループごとに ws を新規生成し、その都度 book_append_sheet する
  * @param {Object} wb
  * @param {Object} aggregated
+ * @returns {string[]} 追加されたシート名一覧
  */
 export function writeIndividualRehaSheets(wb, aggregated) {
   const all = collectAnalyzedPatients(aggregated);
+  const appendedNames = [];
 
-  SHEET_DEFS.forEach((def) => {
+  // 12通りを順に走査。該当患者がいる組み合わせだけ物理タブを追加する
+  for (let i = 0; i < SHEET_DEFS.length; i += 1) {
+    const def = SHEET_DEFS[i];
     const filtered = all.filter((pk) => {
       const p = pk.item.patient;
       if (p.category !== def.category) return false;
@@ -455,11 +476,22 @@ export function writeIndividualRehaSheets(wb, aggregated) {
       const isReduced = pk.analysis.hasMaintRate === true;
       return def.reduced ? isReduced : !isReduced;
     });
-    writeOneSplitSheet(wb, aggregated, filtered, def);
-  });
+
+    // 0名 → 空タブは作らない
+    if (filtered.length === 0) continue;
+
+    // ★ここが本命: このグループ専用の新しい ws を生成し、専用タブ名で append
+    const wsForThisGroupOnly = buildSingleGroupWorksheet(aggregated, filtered, def);
+    if (!wsForThisGroupOnly) continue;
+
+    appendPhysicalSheet(wb, wsForThisGroupOnly, def.sheetName);
+    appendedNames.push(def.sheetName);
+  }
+
+  return appendedNames;
 }
 
-/** 互換: 旧2シート分離API名（内部は12シート分割） */
+/** 互換: 旧2シート分離API名 */
 export function splitIndividualRehaPatients(aggregated) {
   const all = collectAnalyzedPatients(aggregated);
   return {
