@@ -103,6 +103,90 @@ function formatMd(dateStr) {
   return formatAdmissionShort(dateStr);
 }
 
+/**
+ * 任意の日付入力を YYYY-MM-DD へ正規化（無効は空文字）
+ * @param {string|Date|*} raw
+ * @returns {string}
+ */
+function normalizeExitDateString(raw) {
+  if (!raw) return '';
+  if (raw instanceof Date && !isNaN(raw.getTime())) {
+    const y = raw.getFullYear();
+    const m = String(raw.getMonth() + 1).padStart(2, '0');
+    const d = String(raw.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const str = String(raw).trim();
+  if (!str) return '';
+  const iso = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) {
+    return `${iso[1]}-${String(iso[2]).padStart(2, '0')}-${String(iso[3]).padStart(2, '0')}`;
+  }
+  const slash = str.match(/^(\d{4})[/.](\d{1,2})[/.](\d{1,2})/);
+  if (slash) {
+    return `${slash[1]}-${String(slash[2]).padStart(2, '0')}-${String(slash[3]).padStart(2, '0')}`;
+  }
+  // 先頭10文字が YYYY-MM-DD 形式なら採用
+  const head = str.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(head)) return head;
+  return '';
+}
+
+/**
+ * 終了系ステータスか（患者台帳の DISCONTINUED / 退院・終了・中止 等）
+ * @param {Object} patient
+ * @returns {boolean}
+ */
+function isPatientExitStatus(patient) {
+  const st = String(patient?.status || '').trim();
+  if (!st) return false;
+  const upper = st.toUpperCase();
+  if (
+    upper === 'DISCONTINUED'
+    || upper === 'DISCHARGED'
+    || upper === 'FINISHED'
+    || upper === 'STOPPED'
+    || upper === 'END'
+    || upper === 'CLOSED'
+  ) {
+    return true;
+  }
+  return st === '退院' || st === '終了' || st === '中止' || st === '終了・退院' || st.includes('退院') || st.includes('終了');
+}
+
+/**
+ * 患者台帳から終了・退院（中止）日を網羅的に取得
+ * ※新規フィールドを増やさず、既存日付・ステータスを直接走査する
+ * @param {Object} patient
+ * @returns {string} YYYY-MM-DD（未設定は空文字）
+ */
+function extractPatientExitDate(patient) {
+  if (!patient) return '';
+
+  // 1. 各種日付フィールドから最初に有効なものを採用
+  const candidates = [
+    patient.dischargeDate,
+    patient.endDate,
+    patient.finishDate,
+    patient.stoppedDate,
+    patient.discontinuedDate,
+    patient.exitDate,
+    patient.plannedDischargeDate
+  ];
+  for (let i = 0; i < candidates.length; i += 1) {
+    const normalized = normalizeExitDateString(candidates[i]);
+    if (normalized) return normalized;
+  }
+
+  // 2. 終了系ステータスだが日付フィールドが空の場合は印字日を特定できない
+  //    （誤って全日に「退」を付けないよう空を返す）
+  if (isPatientExitStatus(patient)) {
+    return '';
+  }
+
+  return '';
+}
+
 function resolveDiseaseKey(patient) {
   const key = patient?.diseaseType;
   if (key === 'LOCOMOTIVE' || key === 'CEREBROVASCULAR' || key === 'DISUSE') return key;
@@ -231,8 +315,8 @@ function analyzePatientItem(item, year, month, daysInMonth) {
     ? (formatAdmissionShort(baseEarlyDate || p.admissionDate || p.onsetDate) || '-')
     : '-';
 
-  // 退院日（未設定の過去データは空＝マークなし）
-  const dischargeDateStr = String(p.plannedDischargeDate || p.dischargeDate || '').trim().slice(0, 10);
+  // 終了・退院（中止）日: 患者台帳の既存フィールドを網羅走査（二重入力不要）
+  const dischargeDateStr = extractPatientExitDate(p);
 
   return {
     placement,
