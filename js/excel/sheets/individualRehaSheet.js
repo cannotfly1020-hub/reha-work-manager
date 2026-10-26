@@ -1,10 +1,12 @@
 // js/excel/sheets/individualRehaSheet.js
 // 個別リハビリ実施リスト（原本A4横マトリクス）
-// ★入院/外来 × 疾患 × 通常/減算 → 最大12物理タブ（1タブ＝1表のみ、縦積み禁止）
-// ★凡例・注釈は一切出力しない（原本準拠）
+// ★入院/外来 × 疾患 × 通常/減算 → 最大12物理タブ（1タブ＝1表、縦積み禁止、凡例なし）
+// ★当月中切替（要介護・要支援）: 満了日まで通常シート／翌日以降減算シートへ日割り分割
 // ★旧 rehaPatientSheet.js は削除せず残置
 
-import { evaluateEarlyBonusPhase, getDailyBasePoints } from '../../core/deadlineCalc.js';
+import {
+  addDays, calculatePatientDeadlines, evaluateEarlyBonusPhase, getDailyBasePoints
+} from '../../core/deadlineCalc.js';
 import {
   STYLES, thinBorder, getEarlyBaseDate,
   setStyledCell, updateSheetRange, appendOrReplaceSheet,
@@ -14,7 +16,8 @@ import {
 const DAY_COLS = 31;
 const DAY_OF_WEEK = ['日', '月', '火', '水', '木', '金', '土'];
 
-/** 生成対象シート定義（Excelタブ名 ≦ 31文字） */
+/** @typedef {'FULL_NORMAL'|'FULL_REDUCED'|'SPLIT_NORMAL'|'SPLIT_REDUCED'} SheetPeriodMode */
+
 const SHEET_DEFS = [
   { category: 'INPATIENT', diseaseType: 'LOCOMOTIVE', reduced: false, sheetName: '入院_運動器(通常)', catLabel: '入院', disLabel: '運動器', kindLabel: '通常' },
   { category: 'INPATIENT', diseaseType: 'LOCOMOTIVE', reduced: true, sheetName: '入院_運動器(減算)', catLabel: '入院', disLabel: '運動器', kindLabel: '減算' },
@@ -50,7 +53,7 @@ const STYLE_CARE_MAINT = {
 const STYLE_CARE_SPLIT = {
   ...STYLES.cellCenter,
   fill: { fgColor: { rgb: 'FEF3C7' } },
-  font: { name: 'Meiryo UI', sz: 7.5, bold: true, color: { rgb: 'B45309' } }
+  font: { name: 'Meiryo UI', sz: 7, bold: true, color: { rgb: 'B45309' } }
 };
 const STYLE_HEADER = {
   font: { name: 'Meiryo UI', sz: 8.5, bold: true, color: { rgb: 'FFFFFF' } },
@@ -77,6 +80,13 @@ const STYLE_UNIT = {
   alignment: { horizontal: 'center', vertical: 'center' },
   border: thinBorder()
 };
+/** 期間外セル（当月切替の相手側期間） */
+const STYLE_OUT_OF_PERIOD = {
+  font: { name: 'Meiryo UI', sz: 8, color: { rgb: 'CBD5E1' } },
+  fill: { fgColor: { rgb: 'F1F5F9' } },
+  alignment: { horizontal: 'center', vertical: 'center' },
+  border: thinBorder()
+};
 
 function buildDateStr(year, month, day) {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -89,111 +99,228 @@ function formatAdmissionShort(dateStr) {
   return `${m[2]}/${m[3]}`;
 }
 
+function formatMd(dateStr) {
+  return formatAdmissionShort(dateStr);
+}
+
 function resolveDiseaseKey(patient) {
   const key = patient?.diseaseType;
   if (key === 'LOCOMOTIVE' || key === 'CEREBROVASCULAR' || key === 'DISUSE') return key;
   return 'LOCOMOTIVE';
 }
 
-function resolveCareColumnDisplay(careType, hasRegularRate, hasMaintRate, maintUnits) {
-  if (careType !== 'CARE' && careType !== 'SUPPORT') {
-    return { label: '-', styleBase: null };
-  }
-  const isSupport = careType === 'SUPPORT';
-  const uSuffix = maintUnits > 0 ? ` ${maintUnits}` : '';
-  if (hasMaintRate && hasRegularRate) {
-    return { label: `${isSupport ? '支日割' : '介日割'}${uSuffix}`, styleBase: STYLE_CARE_SPLIT };
-  }
-  if (hasMaintRate) {
-    return { label: `${isSupport ? '支維持' : '介維持'}${uSuffix}`, styleBase: STYLE_CARE_MAINT };
-  }
-  return { label: isSupport ? '支援' : '介護', styleBase: null };
+function isCareInsured(patient) {
+  return patient?.careInsuranceType === 'CARE' || patient?.careInsuranceType === 'SUPPORT';
 }
 
+function getMonthBounds(year, month) {
+  const y = Number(year);
+  const m = Number(month);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  return {
+    monthStart: `${y}-${String(m).padStart(2, '0')}-01`,
+    monthEnd: `${y}-${String(m).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`,
+    daysInMonth
+  };
+}
+
+/**
+ * 当月における算定区分
+ * - FULL_NORMAL: 通常シートのみ（全日）
+ * - FULL_REDUCED: 減算シートのみ（全日・前月以前満了の要介護等）
+ * - MID_MONTH_SWITCH: 通常＋減算の両方（日割り）
+ * @param {Object} patient
+ * @param {string} monthStart
+ * @param {string} monthEnd
+ * @param {string} limitDateStr
+ * @returns {'FULL_NORMAL'|'FULL_REDUCED'|'MID_MONTH_SWITCH'}
+ */
+function classifyBillingPlacement(patient, monthStart, monthEnd, limitDateStr) {
+  const care = isCareInsured(patient);
+  const force13 = patient?.force13Limit === true || patient?.force13UnitsLimit === true;
+
+  // 医療のみ・期限なし・ANALGESIA相当: 常に通常（減算免除）
+  if (!care) return 'FULL_NORMAL';
+  if (!limitDateStr) return 'FULL_NORMAL';
+
+  // 強制13単位制限（要介護）は満了扱いに近いが、起算未設定時は全日減算
+  if (force13) {
+    if (limitDateStr >= monthStart && limitDateStr <= monthEnd) return 'MID_MONTH_SWITCH';
+    if (limitDateStr < monthStart) return 'FULL_REDUCED';
+    return 'FULL_NORMAL';
+  }
+
+  // 前月以前に満了 → 全日減算
+  if (limitDateStr < monthStart) return 'FULL_REDUCED';
+  // 当月内に満了 → 日割り分割（通常＋減算）
+  if (limitDateStr >= monthStart && limitDateStr <= monthEnd) return 'MID_MONTH_SWITCH';
+  // 満了が翌月以降 → 全日通常
+  return 'FULL_NORMAL';
+}
+
+/**
+ * 日付 d がそのシート期間に属するか
+ * @param {string} dateStr YYYY-MM-DD
+ * @param {SheetPeriodMode} mode
+ * @param {string} limitDateStr
+ * @returns {boolean}
+ */
+function isDateInSheetPeriod(dateStr, mode, limitDateStr) {
+  if (mode === 'FULL_NORMAL' || mode === 'FULL_REDUCED') return true;
+  if (!limitDateStr) return mode === 'SPLIT_NORMAL';
+  // 満了日当日まで通常、翌日以降減算
+  if (mode === 'SPLIT_NORMAL') return dateStr <= limitDateStr;
+  if (mode === 'SPLIT_REDUCED') return dateStr > limitDateStr;
+  return true;
+}
+
+/**
+ * 患者スロット解析＋日割り用メタ
+ */
 function analyzePatientItem(item, year, month, daysInMonth) {
   const p = item.patient;
   const isIn = p.category === 'INPATIENT';
   const baseEarlyDate = getEarlyBaseDate(p);
-  const planDatesSet = new Set();
-  const early1DatesSet = new Set();
-  const early2DatesSet = new Set();
-  const maintDatesSet = new Set();
-  let early1Units = 0;
-  let early2Units = 0;
-  let planDateStr = '';
-  let hasMaintRate = false;
-  let hasRegularRate = false;
-  let maintUnits = 0;
+  const { monthStart, monthEnd } = getMonthBounds(year, month);
+  const deadlines = calculatePatientDeadlines(p, monthEnd);
+  const limitDateStr = deadlines.limitDateStr || '';
+  const placement = classifyBillingPlacement(p, monthStart, monthEnd, limitDateStr);
+  const switchStartStr = limitDateStr ? addDays(limitDateStr, 1) : '';
+
+  const dailyUnits = Array(daysInMonth + 1).fill(0);
+  const early1ByDay = Array(daysInMonth + 1).fill(0);
+  const early2ByDay = Array(daysInMonth + 1).fill(0);
+  const planByDay = Array(daysInMonth + 1).fill('');
+  const isMaintDay = Array(daysInMonth + 1).fill(false);
+
+  // dailyRehaUnits 優先で単位を埋める
+  for (let d = 1; d <= daysInMonth; d += 1) {
+    dailyUnits[d] = item.dailyRehaUnits
+      ? (item.dailyRehaUnits[d] || 0)
+      : (item.dailyUnits?.[d] || 0);
+  }
 
   (item.slots || []).forEach((s) => {
     if (!s || s.isAnalgesia || !s.date) return;
+    const parts = s.date.split('-');
+    const dNum = parseInt(parts[2], 10);
+    if (!(dNum >= 1 && dNum <= daysInMonth)) return;
     const u = s.units || 1;
-    if (s.billingPlan) {
-      planDateStr = s.date.slice(5);
-      planDatesSet.add(parseInt(s.date.split('-')[2], 10));
-    }
+
+    if (s.billingPlan) planByDay[dNum] = s.date.slice(5);
+
     if (isIn && baseEarlyDate) {
-      const dNum = parseInt(s.date.split('-')[2], 10);
       const ph = evaluateEarlyBonusPhase(baseEarlyDate, s.date, 'INPATIENT');
-      if (ph.phase === 'PHASE_1') {
-        early1DatesSet.add(dNum);
-        early1Units += u;
-      } else if (ph.phase === 'PHASE_2') {
-        early2DatesSet.add(dNum);
-        early2Units += u;
-      }
+      if (ph.phase === 'PHASE_1') early1ByDay[dNum] += u;
+      else if (ph.phase === 'PHASE_2') early2ByDay[dNum] += u;
     }
+
     const rateInfo = getDailyBasePoints(p, s.date);
-    if (rateInfo.isMaintenance && rateInfo.isCareReduced) {
-      const dNum = parseInt(s.date.split('-')[2], 10);
-      maintDatesSet.add(dNum);
-      hasMaintRate = true;
-      maintUnits += u;
-    } else {
-      hasRegularRate = true;
-    }
+    if (rateInfo.isMaintenance && rateInfo.isCareReduced) isMaintDay[dNum] = true;
   });
 
   for (let d = 1; d <= daysInMonth; d += 1) {
-    const u = item.dailyRehaUnits ? (item.dailyRehaUnits[d] || 0) : (item.dailyUnits?.[d] || 0);
-    if (u <= 0) continue;
+    if (dailyUnits[d] <= 0) continue;
     const dateStr = buildDateStr(year, month, d);
     const dayRate = getDailyBasePoints(p, dateStr);
-    if (dayRate.isMaintenance && dayRate.isCareReduced) {
-      hasMaintRate = true;
-      if (!maintDatesSet.has(d)) {
-        maintDatesSet.add(d);
-        maintUnits += u;
-      }
-    } else {
-      hasRegularRate = true;
-    }
+    if (dayRate.isMaintenance && dayRate.isCareReduced) isMaintDay[d] = true;
   }
 
-  const totalRehaUnits = item.rehaTotalUnits !== undefined ? item.rehaTotalUnits : (item.totalUnits || 0);
-  const hasEarly = early1Units > 0 || early2Units > 0;
+  const hasEarly = early1ByDay.some((v) => v > 0) || early2ByDay.some((v) => v > 0);
   const admissionLabel = (isIn && hasEarly)
     ? (formatAdmissionShort(baseEarlyDate || p.admissionDate || p.onsetDate) || '-')
     : '-';
 
   return {
-    hasMaintRate,
-    early1Units,
-    early2Units,
-    early1DatesSet,
-    early2DatesSet,
-    maintDatesSet,
-    planDatesSet,
-    planDateStr,
-    totalRehaUnits,
+    placement,
+    limitDateStr,
+    switchStartStr,
+    dailyUnits,
+    early1ByDay,
+    early2ByDay,
+    planByDay,
+    isMaintDay,
     admissionLabel,
-    careDisplay: resolveCareColumnDisplay(p.careInsuranceType, hasRegularRate, hasMaintRate, maintUnits)
+    careType: p.careInsuranceType || 'NONE'
   };
 }
 
-function collectAnalyzedPatients(aggregated) {
+/**
+ * シート期間モード向けの行ビュー（総単位・介ラベル・期間内早期/計画）を構築
+ * @param {object} analysis
+ * @param {SheetPeriodMode} mode
+ * @param {number} year
+ * @param {number} month
+ * @param {number} daysInMonth
+ */
+function buildPeriodRowView(analysis, mode, year, month, daysInMonth) {
+  const {
+    limitDateStr, switchStartStr, dailyUnits, early1ByDay, early2ByDay,
+    planByDay, isMaintDay, careType
+  } = analysis;
+
+  let periodTotal = 0;
+  let early1 = 0;
+  let early2 = 0;
+  let planDateStr = '';
+  let maintUnitsInPeriod = 0;
+  const visibleUnits = Array(daysInMonth + 1).fill(null); // null=期間外空欄, number=表示
+
+  for (let d = 1; d <= daysInMonth; d += 1) {
+    const dateStr = buildDateStr(year, month, d);
+    const inPeriod = isDateInSheetPeriod(dateStr, mode, limitDateStr);
+    if (!inPeriod) {
+      visibleUnits[d] = null;
+      continue;
+    }
+    const u = dailyUnits[d] || 0;
+    visibleUnits[d] = u;
+    periodTotal += u;
+    early1 += early1ByDay[d] || 0;
+    early2 += early2ByDay[d] || 0;
+    if (planByDay[d]) planDateStr = planByDay[d];
+    if (isMaintDay[d]) maintUnitsInPeriod += u;
+  }
+
+  // 介列
+  let careLabel = '-';
+  let careStyleBase = null;
+  if (mode === 'SPLIT_NORMAL') {
+    const md = formatMd(limitDateStr);
+    careLabel = md ? `〜${md}通常` : '-';
+  } else if (mode === 'SPLIT_REDUCED') {
+    const md = formatMd(switchStartStr);
+    careLabel = md ? `${md}〜維持` : '維持';
+    careStyleBase = STYLE_CARE_SPLIT;
+  } else if (mode === 'FULL_REDUCED') {
+    if (careType === 'CARE' || careType === 'SUPPORT') {
+      const prefix = careType === 'SUPPORT' ? '支維持' : '介維持';
+      careLabel = maintUnitsInPeriod > 0 ? `${prefix} ${maintUnitsInPeriod}` : prefix;
+      careStyleBase = STYLE_CARE_MAINT;
+    }
+  } else if (mode === 'FULL_NORMAL') {
+    if (careType === 'CARE') careLabel = '介護';
+    else if (careType === 'SUPPORT') careLabel = '支援';
+    else careLabel = '-';
+  }
+
+  return {
+    mode,
+    periodTotal,
+    early1,
+    early2,
+    planDateStr,
+    visibleUnits,
+    careLabel,
+    careStyleBase,
+    admissionLabel: analysis.admissionLabel
+  };
+}
+
+function collectSheetRows(aggregated) {
   const { year, month, daysInMonth, patientMap } = aggregated;
-  const list = [];
+  /** @type {object[]} */
+  const rows = [];
 
   Object.values(patientMap || {}).forEach((item) => {
     if (!item?.patient) return;
@@ -204,29 +331,47 @@ function collectAnalyzedPatients(aggregated) {
     if (!(rehaUnits > 0 || item.hasRehaSlots)) return;
 
     const analysis = analyzePatientItem(item, year, month, daysInMonth);
-    list.push({ item, analysis });
+    const p = item.patient;
+    const base = {
+      item,
+      analysis,
+      category: p.category === 'INPATIENT' ? 'INPATIENT' : 'OUTPATIENT',
+      diseaseKey: resolveDiseaseKey(p),
+      id: String(p.id || ''),
+      name: String(p.name || '')
+    };
+
+    if (analysis.placement === 'FULL_NORMAL') {
+      rows.push({
+        ...base,
+        reduced: false,
+        rowView: buildPeriodRowView(analysis, 'FULL_NORMAL', year, month, daysInMonth)
+      });
+    } else if (analysis.placement === 'FULL_REDUCED') {
+      rows.push({
+        ...base,
+        reduced: true,
+        rowView: buildPeriodRowView(analysis, 'FULL_REDUCED', year, month, daysInMonth)
+      });
+    } else {
+      // MID_MONTH_SWITCH → 通常・減算の両方（各期間の単位のみ計上）
+      rows.push({
+        ...base,
+        reduced: false,
+        rowView: buildPeriodRowView(analysis, 'SPLIT_NORMAL', year, month, daysInMonth)
+      });
+      rows.push({
+        ...base,
+        reduced: true,
+        rowView: buildPeriodRowView(analysis, 'SPLIT_REDUCED', year, month, daysInMonth)
+      });
+    }
   });
 
-  list.sort((a, b) => {
-    const pa = a.item.patient;
-    const pb = b.item.patient;
-    return String(pa.id || '').localeCompare(String(pb.id || ''), 'ja', { numeric: true });
-  });
-  return list;
+  rows.sort((a, b) => a.id.localeCompare(b.id, 'ja', { numeric: true }));
+  return rows;
 }
 
-/**
- * 2段ヘッダー
- * rowH1: ID / 患者氏名 / 入院日 / 介 / 総 / 1〜31 / 早Ⅰ / 早Ⅱ / 計画
- * rowH2: （固定列は空結合相当） / 曜日 / （固定列は空）
- * @param {Object} ws
- * @param {number} rowH1
- * @param {number} rowH2
- * @param {number} year
- * @param {number} month
- * @param {number} daysInMonth
- * @param {Array} merges
- */
 function writeTwoRowHeader(ws, rowH1, rowH2, year, month, daysInMonth, merges) {
   const fixedLabels = ['ID', '患者氏名', '入院日', '介', '総'];
   fixedLabels.forEach((label, c) => {
@@ -280,14 +425,13 @@ function writeTwoRowHeader(ws, rowH1, rowH2, year, month, daysInMonth, merges) {
   });
 }
 
-function writePatientMatrixRow(ws, curRow, packed, year, month, daysInMonth, zebraBg) {
-  const { item, analysis } = packed;
+function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraBg) {
+  const { item, rowView } = row;
   const p = item.patient;
   const {
-    early1Units, early2Units, early1DatesSet, early2DatesSet,
-    maintDatesSet, planDatesSet, planDateStr, totalRehaUnits,
-    admissionLabel, careDisplay, hasMaintRate
-  } = analysis;
+    periodTotal, early1, early2, planDateStr, visibleUnits,
+    careLabel, careStyleBase, admissionLabel, mode
+  } = rowView;
 
   setStyledCell(ws, curRow, 0, p.id, {
     ...STYLE_DATA_C, fill: zebraBg, font: { name: 'Meiryo UI', sz: 8, bold: true }
@@ -295,19 +439,20 @@ function writePatientMatrixRow(ws, curRow, packed, year, month, daysInMonth, zeb
   setStyledCell(ws, curRow, 1, p.name, { ...STYLE_DATA_L, fill: zebraBg });
   setStyledCell(ws, curRow, 2, admissionLabel, { ...STYLE_DATA_C, fill: zebraBg });
 
-  const careStyle = careDisplay.styleBase
-    ? { ...careDisplay.styleBase }
+  const careStyle = careStyleBase
+    ? { ...careStyleBase }
     : { ...STYLE_DATA_C, fill: zebraBg };
-  setStyledCell(ws, curRow, 3, careDisplay.label, careStyle);
+  setStyledCell(ws, curRow, 3, careLabel, careStyle);
 
-  setStyledCell(ws, curRow, 4, totalRehaUnits, {
+  const isReducedSheet = mode === 'FULL_REDUCED' || mode === 'SPLIT_REDUCED';
+  setStyledCell(ws, curRow, 4, periodTotal, {
     ...STYLE_DATA_C,
-    fill: { fgColor: { rgb: hasMaintRate ? 'FEF3C7' : 'E0F2FE' } },
+    fill: { fgColor: { rgb: isReducedSheet ? 'FEF3C7' : 'E0F2FE' } },
     font: {
       name: 'Meiryo UI',
       sz: 8.5,
       bold: true,
-      color: { rgb: hasMaintRate ? 'B45309' : '0369A1' }
+      color: { rgb: isReducedSheet ? 'B45309' : '0369A1' }
     },
     numFmt: '#,##0'
   });
@@ -316,22 +461,27 @@ function writePatientMatrixRow(ws, curRow, packed, year, month, daysInMonth, zeb
   for (let d = 1; d <= DAY_COLS; d += 1) {
     const col = dayColStart + (d - 1);
     if (d > daysInMonth) {
-      setStyledCell(ws, curRow, col, '', { ...STYLE_UNIT, fill: { fgColor: { rgb: 'F8FAFC' } } });
+      setStyledCell(ws, curRow, col, '', STYLE_OUT_OF_PERIOD);
       continue;
     }
 
     const dateObj = new Date(year, month - 1, d);
     const dow = dateObj.getDay();
-    const u = item.dailyRehaUnits ? (item.dailyRehaUnits[d] || 0) : (item.dailyUnits?.[d] || 0);
-    const isPlanDay = planDatesSet.has(d);
-    const isEarly1Day = early1DatesSet.has(d);
-    const isEarly2Day = early2DatesSet.has(d);
+    const cellVal = visibleUnits[d];
+
+    // 期間外 → 空欄＋グレー
+    if (cellVal === null) {
+      setStyledCell(ws, curRow, col, '', STYLE_OUT_OF_PERIOD);
+      continue;
+    }
+
+    const u = cellVal || 0;
     const dateStr = buildDateStr(year, month, d);
     const dayRate = getDailyBasePoints(p, dateStr);
-    const isMaintDay = (u > 0) && (
-      maintDatesSet.has(d)
-      || (dayRate.isMaintenance === true && dayRate.isCareReduced === true)
-    );
+    const isMaint = u > 0 && dayRate.isMaintenance && dayRate.isCareReduced;
+    const isPlan = !!row.analysis.planByDay[d];
+    const isE1 = (row.analysis.early1ByDay[d] || 0) > 0;
+    const isE2 = (row.analysis.early2ByDay[d] || 0) > 0;
 
     let cellStyle = { ...STYLE_UNIT };
     if (dow === 6) cellStyle.fill = STYLES.cellSatCol;
@@ -339,11 +489,11 @@ function writePatientMatrixRow(ws, curRow, packed, year, month, daysInMonth, zeb
     else cellStyle.fill = zebraBg;
 
     if (u > 0) {
-      if (isPlanDay && isMaintDay) setStyledCell(ws, curRow, col, u, STYLE_CELL_PLAN_MAINT);
-      else if (isPlanDay) setStyledCell(ws, curRow, col, u, { ...STYLES.cellPlanStar, font: { ...STYLES.cellPlanStar.font, sz: 8 } });
-      else if (isEarly1Day) setStyledCell(ws, curRow, col, u, { ...STYLES.cellEarly1, font: { ...STYLES.cellEarly1.font, sz: 8 } });
-      else if (isEarly2Day) setStyledCell(ws, curRow, col, u, { ...STYLES.cellEarly2, font: { ...STYLES.cellEarly2.font, sz: 8 } });
-      else if (isMaintDay) setStyledCell(ws, curRow, col, u, STYLE_CELL_MAINT);
+      if (isPlan && isMaint) setStyledCell(ws, curRow, col, u, STYLE_CELL_PLAN_MAINT);
+      else if (isPlan) setStyledCell(ws, curRow, col, u, { ...STYLES.cellPlanStar, font: { ...STYLES.cellPlanStar.font, sz: 8 } });
+      else if (isE1) setStyledCell(ws, curRow, col, u, { ...STYLES.cellEarly1, font: { ...STYLES.cellEarly1.font, sz: 8 } });
+      else if (isE2) setStyledCell(ws, curRow, col, u, { ...STYLES.cellEarly2, font: { ...STYLES.cellEarly2.font, sz: 8 } });
+      else if (isMaint) setStyledCell(ws, curRow, col, u, STYLE_CELL_MAINT);
       else setStyledCell(ws, curRow, col, u, cellStyle);
     } else {
       setStyledCell(ws, curRow, col, '', cellStyle);
@@ -351,15 +501,15 @@ function writePatientMatrixRow(ws, curRow, packed, year, month, daysInMonth, zeb
   }
 
   const extraCol = dayColStart + DAY_COLS;
-  setStyledCell(ws, curRow, extraCol, early1Units > 0 ? early1Units : '-', {
+  setStyledCell(ws, curRow, extraCol, early1 > 0 ? early1 : '-', {
     ...STYLE_DATA_C,
-    fill: early1Units > 0 ? { fgColor: { rgb: 'D1FAE5' } } : zebraBg,
-    font: { name: 'Meiryo UI', sz: 8, bold: early1Units > 0 }
+    fill: early1 > 0 ? { fgColor: { rgb: 'D1FAE5' } } : zebraBg,
+    font: { name: 'Meiryo UI', sz: 8, bold: early1 > 0 }
   });
-  setStyledCell(ws, curRow, extraCol + 1, early2Units > 0 ? early2Units : '-', {
+  setStyledCell(ws, curRow, extraCol + 1, early2 > 0 ? early2 : '-', {
     ...STYLE_DATA_C,
-    fill: early2Units > 0 ? { fgColor: { rgb: 'DBEAFE' } } : zebraBg,
-    font: { name: 'Meiryo UI', sz: 8, bold: early2Units > 0 }
+    fill: early2 > 0 ? { fgColor: { rgb: 'DBEAFE' } } : zebraBg,
+    font: { name: 'Meiryo UI', sz: 8, bold: early2 > 0 }
   });
   setStyledCell(ws, curRow, extraCol + 2, planDateStr || '-', {
     ...STYLE_DATA_C,
@@ -368,19 +518,14 @@ function writePatientMatrixRow(ws, curRow, packed, year, month, daysInMonth, zeb
   });
 }
 
-/**
- * 1グループ＝1物理タブ用のワークシートを新規生成（凡例なし）
- * @returns {Object|null}
- */
-function buildSingleGroupWorksheet(aggregated, packedList, def) {
-  if (!packedList || packedList.length === 0) return null;
+function buildSingleGroupWorksheet(aggregated, groupRows, def) {
+  if (!groupRows || groupRows.length === 0) return null;
 
   const { year, month, daysInMonth } = aggregated;
   const ws = {};
   const merges = [];
   let curRow = 0;
 
-  // 1行目: タイトルのみ
   const titleColor = def.reduced ? '881337' : '1E3A8A';
   const title = `【${year}年${month}月 ${def.catLabel} ${def.disLabel} (${def.kindLabel})（個別リハビリ実施リスト）】`;
   setStyledCell(ws, curRow, 0, title, {
@@ -388,16 +533,14 @@ function buildSingleGroupWorksheet(aggregated, packedList, def) {
   });
   curRow += 1;
 
-  // 2〜3行目: ヘッダー上段（項目・日付）／下段（曜日）
   const rowH1 = curRow;
   const rowH2 = curRow + 1;
   writeTwoRowHeader(ws, rowH1, rowH2, year, month, daysInMonth, merges);
   curRow = rowH2 + 1;
 
-  // 4行目以降: データ行のみ（表終了後に凡例・注釈は一切書かない）
-  packedList.forEach((pk, idx) => {
+  groupRows.forEach((row, idx) => {
     const zebraBg = (idx % 2 === 1) ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } };
-    writePatientMatrixRow(ws, curRow, pk, year, month, daysInMonth, zebraBg);
+    writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraBg);
     curRow += 1;
   });
 
@@ -407,11 +550,7 @@ function buildSingleGroupWorksheet(aggregated, packedList, def) {
   ws['!merges'] = merges;
 
   const colProps = [
-    { wch: 7 },
-    { wch: 13 },
-    { wch: 9 },
-    { wch: 8 },
-    { wch: 6 }
+    { wch: 7 }, { wch: 13 }, { wch: 9 }, { wch: 8 }, { wch: 6 }
   ];
   for (let d = 0; d < DAY_COLS; d += 1) colProps.push({ wch: 3.2 });
   colProps.push({ wch: 5 }, { wch: 5 }, { wch: 7 });
@@ -422,12 +561,7 @@ function buildSingleGroupWorksheet(aggregated, packedList, def) {
 
   applyA4LandscapePrintSetup(ws, false);
   ws['!margins'] = {
-    left: 0.2,
-    right: 0.2,
-    top: 0.3,
-    bottom: 0.3,
-    header: 0.1,
-    footer: 0.1
+    left: 0.2, right: 0.2, top: 0.3, bottom: 0.3, header: 0.1, footer: 0.1
   };
 
   updateSheetRange(ws);
@@ -435,33 +569,28 @@ function buildSingleGroupWorksheet(aggregated, packedList, def) {
 }
 
 /**
- * 個別リハ実施リストを最大12物理タブへ追加
- * ★1グループごとに新しい ws を作り、その都度 append（縦積み禁止）
- * ★凡例テキストは出力しない
+ * 個別リハ実施リストを最大12物理タブへ追加（当月切替は日割りで両シートへ）
  * @param {Object} wb
  * @param {Object} aggregated
  * @returns {string[]}
  */
 export function writeIndividualRehaSheets(wb, aggregated) {
-  const all = collectAnalyzedPatients(aggregated);
+  const allRows = collectSheetRows(aggregated);
   const appendedNames = [];
 
   for (let i = 0; i < SHEET_DEFS.length; i += 1) {
     const def = SHEET_DEFS[i];
-    const filtered = all.filter((pk) => {
-      const p = pk.item.patient;
-      if (p.category !== def.category) return false;
-      if (resolveDiseaseKey(p) !== def.diseaseType) return false;
-      const isReduced = pk.analysis.hasMaintRate === true;
-      return def.reduced ? isReduced : !isReduced;
-    });
+    const filtered = allRows.filter((row) => (
+      row.category === def.category
+      && row.diseaseKey === def.diseaseType
+      && row.reduced === def.reduced
+    ));
 
     if (filtered.length === 0) continue;
 
     const ws = buildSingleGroupWorksheet(aggregated, filtered, def);
     if (!ws) continue;
 
-    // 物理タブ追加（Excel左下のワークシートが増える）
     appendOrReplaceSheet(wb, ws, def.sheetName);
     if (wb.SheetNames.indexOf(def.sheetName) < 0 && window.XLSX?.utils?.book_append_sheet) {
       window.XLSX.utils.book_append_sheet(wb, ws, def.sheetName);
@@ -472,11 +601,10 @@ export function writeIndividualRehaSheets(wb, aggregated) {
   return appendedNames;
 }
 
-/** 互換API */
 export function splitIndividualRehaPatients(aggregated) {
-  const all = collectAnalyzedPatients(aggregated);
+  const allRows = collectSheetRows(aggregated);
   return {
-    normalList: all.filter((pk) => !pk.analysis.hasMaintRate),
-    reducedList: all.filter((pk) => pk.analysis.hasMaintRate)
+    normalList: allRows.filter((r) => !r.reduced),
+    reducedList: allRows.filter((r) => r.reduced)
   };
 }
