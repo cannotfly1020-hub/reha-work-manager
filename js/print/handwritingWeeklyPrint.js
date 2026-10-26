@@ -1,6 +1,6 @@
 // js/print/handwritingWeeklyPrint.js
-// 週間予約受付簿 A4横印刷（手書き余白完備・疾患／消炎／担当の視認性強化）
-// ★画面の週間グリッドには一切干渉しない。全 TIME_SLOTS を歯抜けなく印字する。
+// 週間予約受付簿 A4縦印刷（手書き余白完備・疾患／消炎／担当の視認性強化）
+// ★画面の週間グリッドには一切干渉しない。全 TIME_SLOTS を歯抜けなく印字し、A4縦1枚にジャスト収容する。
 
 import { formatDateYMD, getWeekDates } from '../core/dateUtils.js';
 import { TIME_SLOTS } from '../config/appointmentSlots.js';
@@ -33,7 +33,6 @@ function formatStaffBadgeLabel(therapists, therapistId) {
   if (therapistId === 'ANALGESIA') return '物療';
   const staff = therapists.find((t) => t.id === therapistId);
   let label = staff?.name || therapistId;
-  // 「PT 佐藤」→「PT佐藤」寄りに圧縮
   label = String(label).replace(/\s+/g, '');
   if (label.length > 5) label = label.slice(0, 5);
   return label;
@@ -41,7 +40,6 @@ function formatStaffBadgeLabel(therapists, therapistId) {
 
 /**
  * 患者マスター＋予約から疾患／消炎を安全に解決する
- * 優先: 予約が ANALGESIA → 消炎。それ以外は patient.diseaseType（不正時は LOCOMOTIVE）
  * @param {object|null|undefined} patient
  * @param {object} apt
  * @returns {{ isAnalgesia: boolean, diseaseType: string, diseaseTag: string, diseaseClass: string }}
@@ -85,7 +83,7 @@ function resolveDiseaseVisual(patient, apt) {
 }
 
 /**
- * 予約1件分のカードHTML
+ * 予約1件分のカードHTML（縦用紙・狭セル向けコンパクト）
  * @param {object} apt
  * @param {object[]} therapists
  * @returns {string}
@@ -116,7 +114,7 @@ function renderBookedCardHtml(apt, therapists) {
 }
 
 /**
- * 週間予約受付簿（A4横）を印刷する
+ * 週間予約受付簿（A4縦・1枚ジャスト収容）を印刷する
  * @param {Date} baseDate
  */
 export function printHandwritingWeeklySheet(baseDate) {
@@ -143,7 +141,6 @@ export function printHandwritingWeeklySheet(baseDate) {
     slotAptMap[k].push(apt);
   });
 
-  // 縦結合でスキップするセル（date_slotTime）
   const rowspanSkip = new Set();
   weekDates.forEach((d) => {
     const dateStr = formatDateYMD(d);
@@ -182,26 +179,18 @@ export function printHandwritingWeeklySheet(baseDate) {
   const outStamp = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   const periodLabel = `${startStr.slice(0, 4)}年${Number(startStr.slice(5, 7))}月${Number(startStr.slice(8, 10))}日(月) 〜 ${endStr.slice(0, 4)}年${Number(endStr.slice(5, 7))}月${Number(endStr.slice(8, 10))}日(土)`;
 
-  // A4横1枚収容: 枠数に応じて行高・氏名ptを調整（バッジ込みでも収まるサイズ）
+  // A4縦 印字可能高さ ≈ 297 - 5 - 4 = 288mm
+  // ヘッダー帯≈12mm + thead≈7mm + 昼境界≈3.5mm + footer≈6mm → データ行に ≈259mm
+  // スロット数 N に対し 1行 ≈ 259/N mm（CSS mm 指定で下方向はみ出しを物理的に抑止）
   const slotCount = allSlotTimes.length;
-  let rowPx = 22;
-  let namePt = 8.5;
-  let badgePt = 6.5;
-  if (slotCount <= 22) {
-    rowPx = 26;
-    namePt = 9.5;
-    badgePt = 7;
-  } else if (slotCount <= 24) {
-    rowPx = 24;
-    namePt = 9;
-    badgePt = 6.8;
-  } else {
-    rowPx = 21;
-    namePt = 8.5;
-    badgePt = 6.5;
-  }
+  const dataAreaMm = 259;
+  const lunchMm = 3.5;
+  const rowMm = Math.max(6.2, Math.min(9.5, (dataAreaMm - lunchMm) / Math.max(1, slotCount)));
+  const namePt = rowMm >= 8.5 ? 8.2 : (rowMm >= 7.2 ? 7.6 : 7.1);
+  const badgePt = rowMm >= 8.5 ? 6.2 : 5.6;
+  const timePt = rowMm >= 8 ? 7.5 : 6.8;
 
-  const printWindow = window.open('', '_blank', 'width=1200,height=800');
+  const printWindow = window.open('', '_blank', 'width=900,height=1200');
   if (!printWindow) {
     showToast('印刷ポップアップがブロックされました。ブラウザ設定をご確認ください。', 'warn');
     return;
@@ -223,7 +212,7 @@ export function printHandwritingWeeklySheet(baseDate) {
       `;
     }
 
-    bodyRows += `<tr>`;
+    bodyRows += `<tr class="slot-row">`;
     bodyRows += `<td class="time-col">${slotTime}</td>`;
 
     weekDates.forEach((d) => {
@@ -287,57 +276,68 @@ export function printHandwritingWeeklySheet(baseDate) {
       <title>外来リハビリ 週間予約受付簿 (${startStr.replace(/-/g, '/')}〜)</title>
       <style>
         @page {
-          size: A4 landscape;
-          margin: 6mm 8mm;
+          size: A4 portrait;
+          margin: 5mm 5mm 4mm 5mm;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body { height: 100%; }
+        html, body {
+          width: 100%;
+          height: 100%;
+        }
         body {
           font-family: "Meiryo UI", Meiryo, system-ui, -apple-system, sans-serif;
           color: #0f172a;
           background: #fff;
-          font-size: 9pt;
-          line-height: 1.15;
+          font-size: 8pt;
+          line-height: 1.1;
           -webkit-print-color-adjust: exact;
           print-color-adjust: exact;
           display: flex;
           flex-direction: column;
+          height: 288mm; /* 297 - 5 - 4 */
+          max-height: 288mm;
+          overflow: hidden;
+          page-break-after: avoid;
+          page-break-inside: avoid;
         }
         .page-header {
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
-          gap: 10px;
-          border-bottom: 2.5px solid #0f172a;
-          padding-bottom: 4px;
-          margin-bottom: 4px;
-          flex-shrink: 0;
+          gap: 6px;
+          border-bottom: 1.8px solid #0f172a;
+          padding-bottom: 2px;
+          margin-bottom: 2px;
+          flex: 0 0 auto;
+          max-height: 12mm;
         }
-        .title-block { min-width: 0; }
+        .title-block { min-width: 0; flex: 1; }
         .title {
-          font-size: 13pt;
+          font-size: 11pt;
           font-weight: 800;
           color: #0f172a;
         }
         .period {
-          font-size: 9.5pt;
+          font-size: 8pt;
           font-weight: 700;
           color: #047857;
-          margin-left: 8px;
+          margin-left: 6px;
         }
         .legend {
-          margin-top: 3px;
-          font-size: 7.5pt;
+          margin-top: 1px;
+          font-size: 6.5pt;
           font-weight: 700;
           color: #334155;
-          letter-spacing: 0.01em;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .legend .lg {
           display: inline-block;
           border: 1px solid #475569;
-          padding: 0 4px;
-          margin-right: 2px;
-          border-radius: 2px;
+          padding: 0 2px;
+          margin-right: 1px;
+          border-radius: 1px;
           font-weight: 800;
         }
         .legend .lg-loco { background: #dbeafe; }
@@ -345,11 +345,11 @@ export function printHandwritingWeeklySheet(baseDate) {
         .legend .lg-disuse { background: #fef3c7; }
         .legend .lg-analgesia {
           background: repeating-linear-gradient(
-            -45deg, #ecfdf5, #ecfdf5 2px, #d1fae5 2px, #d1fae5 4px
+            -45deg, #ecfdf5, #ecfdf5 1.5px, #d1fae5 1.5px, #d1fae5 3px
           );
         }
         .meta {
-          font-size: 8pt;
+          font-size: 7pt;
           font-weight: 700;
           color: #334155;
           text-align: right;
@@ -359,12 +359,14 @@ export function printHandwritingWeeklySheet(baseDate) {
         .sheet-wrap {
           flex: 1 1 auto;
           min-height: 0;
+          overflow: hidden;
         }
         table.hw-table {
           width: 100%;
           height: 100%;
           border-collapse: collapse;
           table-layout: fixed;
+          page-break-inside: avoid;
         }
         .hw-table th,
         .hw-table td {
@@ -373,11 +375,11 @@ export function printHandwritingWeeklySheet(baseDate) {
         }
         .hw-table thead th {
           background: #e2e8f0;
-          font-size: 9pt;
+          font-size: 7.5pt;
           font-weight: 800;
           text-align: center;
-          padding: 3px 2px;
-          height: 24px;
+          padding: 1px 1px;
+          height: 6.5mm;
           vertical-align: middle;
           color: #0f172a;
         }
@@ -389,21 +391,28 @@ export function printHandwritingWeeklySheet(baseDate) {
           background: #fecdd3;
           color: #9f1239;
         }
+        .slot-row {
+          height: ${rowMm}mm;
+          max-height: ${rowMm}mm;
+        }
         .time-col {
-          width: 52px;
+          width: 11mm;
           text-align: center;
           font-weight: 800;
-          font-size: 8.5pt;
+          font-size: ${timePt}pt;
           vertical-align: middle !important;
           background: #f8fafc;
           color: #0f172a;
-          height: ${rowPx}px;
+          height: ${rowMm}mm;
+          max-height: ${rowMm}mm;
+          padding: 0;
         }
         .slot-cell {
-          height: ${rowPx}px;
-          min-height: ${rowPx}px;
-          padding: 1px 2px;
+          height: ${rowMm}mm;
+          max-height: ${rowMm}mm;
+          padding: 0.4mm 0.6mm;
           position: relative;
+          overflow: hidden;
         }
         .slot-cell.sat { background: #f8fbff; }
         .slot-cell.holiday { background: #fff7f7; }
@@ -412,52 +421,52 @@ export function printHandwritingWeeklySheet(baseDate) {
         }
         .empty-time {
           position: absolute;
-          top: 1px;
-          left: 2px;
-          font-size: 6pt;
+          top: 0.3mm;
+          left: 0.5mm;
+          font-size: 5.5pt;
           font-weight: 600;
           color: #cbd5e1;
         }
         .write-space {
           height: 100%;
-          min-height: ${Math.max(12, rowPx - 5)}px;
+          min-height: ${Math.max(3.5, rowMm - 1.2)}mm;
         }
         .booked-cell {
           background: #f1f5f9 !important;
           vertical-align: middle;
-          padding: 1px 2px;
+          overflow: hidden;
         }
         .booked-card {
-          padding: 1px 2px;
-          margin-bottom: 1px;
+          padding: 0;
+          margin: 0;
         }
         .booked-card.is-analgesia {
           background: repeating-linear-gradient(
             -45deg,
             #ecfdf5,
-            #ecfdf5 2px,
-            #d1fae5 2px,
-            #d1fae5 4px
+            #ecfdf5 1.5px,
+            #d1fae5 1.5px,
+            #d1fae5 3px
           );
           border: 1px solid #059669;
-          border-radius: 2px;
-          padding: 1px 3px;
+          border-radius: 1px;
+          padding: 0 1px;
         }
         .bk-top {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          gap: 2px;
-          margin-bottom: 1px;
+          gap: 1px;
+          margin-bottom: 0;
         }
         .badge-disease,
         .badge-staff {
           display: inline-block;
           font-size: ${badgePt}pt;
           font-weight: 800;
-          line-height: 1.15;
-          padding: 0 3px;
-          border-radius: 2px;
+          line-height: 1.05;
+          padding: 0 1.5px;
+          border-radius: 1px;
           border: 1px solid #0f172a;
           white-space: nowrap;
         }
@@ -485,46 +494,65 @@ export function printHandwritingWeeklySheet(baseDate) {
           background: #ffffff;
           color: #065f46;
           border-color: #059669;
-          border-style: solid;
-          border-width: 1.5px;
+          border-width: 1.2px;
         }
         .bk-main {
           display: flex;
-          flex-wrap: wrap;
+          flex-wrap: nowrap;
           align-items: baseline;
-          gap: 2px 4px;
+          gap: 1px 3px;
+          overflow: hidden;
         }
         .bk-name {
           font-size: ${namePt}pt;
           font-weight: 800;
           color: #000000;
-          line-height: 1.1;
+          line-height: 1.05;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 100%;
         }
         .bk-dur {
-          font-size: ${Math.max(7, namePt - 1)}pt;
+          font-size: ${Math.max(5.8, namePt - 0.8)}pt;
           font-weight: 700;
           color: #1e293b;
+          flex-shrink: 0;
         }
         tr.lunch-band td {
           background: #e2e8f0;
           text-align: center;
-          font-size: 7pt;
+          font-size: 6pt;
           font-weight: 800;
           color: #334155;
-          letter-spacing: 0.1em;
-          padding: 1px 0;
-          height: 12px;
+          letter-spacing: 0.08em;
+          padding: 0;
+          height: ${lunchMm}mm;
+          max-height: ${lunchMm}mm;
           border: 1px solid #475569;
+          vertical-align: middle;
         }
         .footer {
           display: flex;
           justify-content: space-between;
-          gap: 8px;
-          margin-top: 3px;
-          font-size: 7pt;
+          gap: 6px;
+          margin-top: 1.5mm;
+          font-size: 6pt;
           font-weight: 600;
           color: #334155;
-          flex-shrink: 0;
+          flex: 0 0 auto;
+          max-height: 6mm;
+          page-break-inside: avoid;
+        }
+        @media print {
+          html, body {
+            height: 288mm !important;
+            max-height: 288mm !important;
+            overflow: hidden !important;
+          }
+          .sheet-wrap, .hw-table, .slot-row, .slot-cell {
+            page-break-inside: avoid;
+          }
         }
       </style>
     </head>
@@ -533,21 +561,20 @@ export function printHandwritingWeeklySheet(baseDate) {
         <div class="title-block">
           <div>
             <span class="title">【外来リハビリ 週間予約受付簿】</span>
-            <span class="period">対象期間: ${periodLabel}</span>
+            <span class="period">${periodLabel}</span>
           </div>
           <div class="legend">
             【凡例】
-            <span class="lg lg-loco">[運]</span> 運動器
-            <span class="lg lg-cerebro">[脳]</span> 脳血管
-            <span class="lg lg-disuse">[廃]</span> 廃用
-            <span class="lg lg-analgesia">[消炎]</span> 消炎鎮痛(物療)
-            ｜ 黒地白文字 = 担当セラピスト
-            ｜ 白い空き枠 = 手書き予約可
+            <span class="lg lg-loco">[運]</span>運動器
+            <span class="lg lg-cerebro">[脳]</span>脳血管
+            <span class="lg lg-disuse">[廃]</span>廃用
+            <span class="lg lg-analgesia">[消炎]</span>消炎鎮痛
+            ｜黒地白文字=担当 ｜白い空き枠=手書き可
           </div>
         </div>
         <div class="meta">
-          出力日時: ${outStamp}<br>
-          リハビリテーション科
+          出力: ${outStamp}<br>
+          リハビリテーション科／A4縦1枚
         </div>
       </div>
 
@@ -555,7 +582,7 @@ export function printHandwritingWeeklySheet(baseDate) {
         <table class="hw-table">
           <thead>
             <tr>
-              <th style="width:52px;">時間</th>
+              <th style="width:11mm;">時間</th>
               ${weekDates.map((d, idx) => {
                 const mmdd = `${d.getMonth() + 1}/${d.getDate()}`;
                 const holidayName = getJapaneseHolidayName(d);
@@ -563,8 +590,8 @@ export function printHandwritingWeeklySheet(baseDate) {
                 let cls = '';
                 if (holidayName) cls = 'holiday';
                 else if (isSat) cls = 'sat';
-                const hol = holidayName ? `<div style="font-size:6.5pt;font-weight:800;">${sanitizeHtml(holidayName)}</div>` : '';
-                return `<th class="${cls}">${dayNames[idx]} (${mmdd})${hol}</th>`;
+                const hol = holidayName ? `<div style="font-size:5.5pt;font-weight:800;">${sanitizeHtml(holidayName)}</div>` : '';
+                return `<th class="${cls}">${dayNames[idx]} ${mmdd}${hol}</th>`;
               }).join('')}
             </tr>
           </thead>
@@ -575,8 +602,8 @@ export function printHandwritingWeeklySheet(baseDate) {
       </div>
 
       <div class="footer">
-        <span>※ 白い空き枠に患者名・メモを手書きし、後からPCへ入力してください。罫線は白黒コピーでも掠れにくい濃色です。</span>
-        <span>予約 ${weekAptList.length} 件 ／ ${slotCount} 枠全表示 ／ reha-work-manager</span>
+        <span>※ 白い空き枠に手書きし、後からPC入力。罫線は白黒コピーでも掠れにくい濃色です。</span>
+        <span>予約 ${weekAptList.length} 件／${slotCount} 枠全表示／行高 ${rowMm.toFixed(1)}mm</span>
       </div>
       <script>
         window.onload = function() { window.print(); };
