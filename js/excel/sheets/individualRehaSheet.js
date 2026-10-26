@@ -1,7 +1,7 @@
 // js/excel/sheets/individualRehaSheet.js
 // 個別リハビリ実施リスト（原本A4横マトリクス）
-// ★医事課要望: 入院/外来 × 疾患 × 通常/減算 で最大12シートへ物理分離（該当0名はスキップ）
-// ★各シートは 1〜31日の日別実施単位マトリクスを完全展開（サマリー化禁止）
+// ★入院/外来 × 疾患 × 通常/減算 → 最大12物理タブ（1タブ＝1表のみ、縦積み禁止）
+// ★凡例・注釈は一切出力しない（原本準拠）
 // ★旧 rehaPatientSheet.js は削除せず残置
 
 import { evaluateEarlyBonusPhase, getDailyBasePoints } from '../../core/deadlineCalc.js';
@@ -14,7 +14,7 @@ import {
 const DAY_COLS = 31;
 const DAY_OF_WEEK = ['日', '月', '火', '水', '木', '金', '土'];
 
-/** 生成対象シート定義（Excelシート名 ≦ 31文字） */
+/** 生成対象シート定義（Excelタブ名 ≦ 31文字） */
 const SHEET_DEFS = [
   { category: 'INPATIENT', diseaseType: 'LOCOMOTIVE', reduced: false, sheetName: '入院_運動器(通常)', catLabel: '入院', disLabel: '運動器', kindLabel: '通常' },
   { category: 'INPATIENT', diseaseType: 'LOCOMOTIVE', reduced: true, sheetName: '入院_運動器(減算)', catLabel: '入院', disLabel: '運動器', kindLabel: '減算' },
@@ -95,13 +95,6 @@ function resolveDiseaseKey(patient) {
   return 'LOCOMOTIVE';
 }
 
-/**
- * 介列表示
- * @param {string} careType
- * @param {boolean} hasRegularRate
- * @param {boolean} hasMaintRate
- * @param {number} maintUnits
- */
 function resolveCareColumnDisplay(careType, hasRegularRate, hasMaintRate, maintUnits) {
   if (careType !== 'CARE' && careType !== 'SUPPORT') {
     return { label: '-', styleBase: null };
@@ -117,9 +110,6 @@ function resolveCareColumnDisplay(careType, hasRegularRate, hasMaintRate, maintU
   return { label: isSupport ? '支援' : '介護', styleBase: null };
 }
 
-/**
- * 患者1名の当月解析（減算・早期加算・計画）
- */
 function analyzePatientItem(item, year, month, daysInMonth) {
   const p = item.patient;
   const isIn = p.category === 'INPATIENT';
@@ -188,8 +178,6 @@ function analyzePatientItem(item, year, month, daysInMonth) {
 
   return {
     hasMaintRate,
-    hasRegularRate,
-    maintUnits,
     early1Units,
     early2Units,
     early1DatesSet,
@@ -203,11 +191,6 @@ function analyzePatientItem(item, year, month, daysInMonth) {
   };
 }
 
-/**
- * 当月個別リハ患者を解析付きリスト化
- * @param {Object} aggregated
- * @returns {object[]}
- */
 function collectAnalyzedPatients(aggregated) {
   const { year, month, daysInMonth, patientMap } = aggregated;
   const list = [];
@@ -233,48 +216,70 @@ function collectAnalyzedPatients(aggregated) {
 }
 
 /**
- * ヘッダー行（ID〜計画、日列は常に1〜31）
+ * 2段ヘッダー
+ * rowH1: ID / 患者氏名 / 入院日 / 介 / 総 / 1〜31 / 早Ⅰ / 早Ⅱ / 計画
+ * rowH2: （固定列は空結合相当） / 曜日 / （固定列は空）
+ * @param {Object} ws
+ * @param {number} rowH1
+ * @param {number} rowH2
+ * @param {number} year
+ * @param {number} month
+ * @param {number} daysInMonth
+ * @param {Array} merges
  */
-function writeMatrixHeader(ws, headerRow, year, month, daysInMonth) {
-  setStyledCell(ws, headerRow, 0, 'ID', STYLE_HEADER);
-  setStyledCell(ws, headerRow, 1, '患者氏名', STYLE_HEADER);
-  setStyledCell(ws, headerRow, 2, '入院日', STYLE_HEADER);
-  setStyledCell(ws, headerRow, 3, '介', STYLE_HEADER);
-  setStyledCell(ws, headerRow, 4, '総', STYLE_HEADER_TOTAL);
+function writeTwoRowHeader(ws, rowH1, rowH2, year, month, daysInMonth, merges) {
+  const fixedLabels = ['ID', '患者氏名', '入院日', '介', '総'];
+  fixedLabels.forEach((label, c) => {
+    const style = c === 4 ? STYLE_HEADER_TOTAL : STYLE_HEADER;
+    setStyledCell(ws, rowH1, c, label, style);
+    setStyledCell(ws, rowH2, c, '', style);
+    merges.push({ s: { r: rowH1, c }, e: { r: rowH2, c } });
+  });
 
   const dayColStart = 5;
   for (let d = 1; d <= DAY_COLS; d += 1) {
     const col = dayColStart + (d - 1);
     if (d > daysInMonth) {
-      setStyledCell(ws, headerRow, col, `${d}`, {
+      const muted = {
         font: { name: 'Meiryo UI', sz: 7, color: { rgb: '94A3B8' } },
         fill: { fgColor: { rgb: 'F1F5F9' } },
-        alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+        alignment: { horizontal: 'center', vertical: 'center' },
         border: thinBorder()
-      });
+      };
+      setStyledCell(ws, rowH1, col, String(d), muted);
+      setStyledCell(ws, rowH2, col, '', muted);
       continue;
     }
     const dateObj = new Date(year, month - 1, d);
     const dow = dateObj.getDay();
-    const hLabel = `${d}\n${DAY_OF_WEEK[dow]}`;
-    let style = STYLE_HEADER;
-    if (dow === 6) style = STYLES.headerSat;
-    else if (dow === 0) style = STYLES.headerSun;
-    setStyledCell(ws, headerRow, col, hLabel, {
-      ...style,
-      font: { ...(style.font || {}), sz: 7.5, bold: true }
+    let dayStyle = STYLE_HEADER;
+    let dowStyle = STYLE_HEADER;
+    if (dow === 6) {
+      dayStyle = STYLES.headerSat;
+      dowStyle = STYLES.headerSat;
+    } else if (dow === 0) {
+      dayStyle = STYLES.headerSun;
+      dowStyle = STYLES.headerSun;
+    }
+    setStyledCell(ws, rowH1, col, String(d), {
+      ...dayStyle,
+      font: { ...(dayStyle.font || {}), sz: 8, bold: true }
+    });
+    setStyledCell(ws, rowH2, col, DAY_OF_WEEK[dow], {
+      ...dowStyle,
+      font: { ...(dowStyle.font || {}), sz: 7.5, bold: true }
     });
   }
 
   const extraCol = dayColStart + DAY_COLS;
-  setStyledCell(ws, headerRow, extraCol, '早Ⅰ', STYLE_HEADER);
-  setStyledCell(ws, headerRow, extraCol + 1, '早Ⅱ', STYLE_HEADER);
-  setStyledCell(ws, headerRow, extraCol + 2, '計画', STYLE_HEADER);
+  ['早Ⅰ', '早Ⅱ', '計画'].forEach((label, i) => {
+    const c = extraCol + i;
+    setStyledCell(ws, rowH1, c, label, STYLE_HEADER);
+    setStyledCell(ws, rowH2, c, '', STYLE_HEADER);
+    merges.push({ s: { r: rowH1, c }, e: { r: rowH2, c } });
+  });
 }
 
-/**
- * 患者1行（日別マトリクス完全展開）
- */
 function writePatientMatrixRow(ws, curRow, packed, year, month, daysInMonth, zebraBg) {
   const { item, analysis } = packed;
   const p = item.patient;
@@ -364,20 +369,18 @@ function writePatientMatrixRow(ws, curRow, packed, year, month, daysInMonth, zeb
 }
 
 /**
- * ★物理タブ1枚分のワークシートオブジェクトを新規生成する（他グループの行は一切含めない）
- * @param {Object} aggregated
- * @param {object[]} packedList - 当該グループの患者のみ
- * @param {object} def
- * @returns {Object|null} SheetJS worksheet（0名なら null）
+ * 1グループ＝1物理タブ用のワークシートを新規生成（凡例なし）
+ * @returns {Object|null}
  */
 function buildSingleGroupWorksheet(aggregated, packedList, def) {
   if (!packedList || packedList.length === 0) return null;
 
   const { year, month, daysInMonth } = aggregated;
-  // ★毎回まっさらなオブジェクト。縦積み禁止のため他グループと絶対に共有しない
   const ws = {};
+  const merges = [];
   let curRow = 0;
 
+  // 1行目: タイトルのみ
   const titleColor = def.reduced ? '881337' : '1E3A8A';
   const title = `【${year}年${month}月 ${def.catLabel} ${def.disLabel} (${def.kindLabel})（個別リハビリ実施リスト）】`;
   setStyledCell(ws, curRow, 0, title, {
@@ -385,30 +388,23 @@ function buildSingleGroupWorksheet(aggregated, packedList, def) {
   });
   curRow += 1;
 
-  writeMatrixHeader(ws, curRow, year, month, daysInMonth);
-  curRow += 1;
+  // 2〜3行目: ヘッダー上段（項目・日付）／下段（曜日）
+  const rowH1 = curRow;
+  const rowH2 = curRow + 1;
+  writeTwoRowHeader(ws, rowH1, rowH2, year, month, daysInMonth, merges);
+  curRow = rowH2 + 1;
 
+  // 4行目以降: データ行のみ（表終了後に凡例・注釈は一切書かない）
   packedList.forEach((pk, idx) => {
     const zebraBg = (idx % 2 === 1) ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } };
     writePatientMatrixRow(ws, curRow, pk, year, month, daysInMonth, zebraBg);
     curRow += 1;
   });
 
-  const legendRow = curRow + 1;
-  setStyledCell(ws, legendRow, 0,
-    '凡例: 「入院日」＝早期加算対象者のみ（非対象・外来は -）／ 介列「介維持・支維持」＝維持期減算 ／「介日割・支日割」＝当月切替 ／ 日セル薄アンバー＝減算単価 ／ 薄緑＝早Ⅰ ／ 薄青＝早Ⅱ ／ 計画日＝薄黄。',
-    {
-      font: { name: 'Meiryo UI', sz: 7.5, color: { rgb: '64748B' } },
-      alignment: { vertical: 'center', wrapText: true }
-    }
-  );
-
-  const rHeights = [];
-  for (let r = 0; r <= legendRow; r += 1) rHeights.push({ hpt: 18 });
-  rHeights[0] = { hpt: 22 };
-  rHeights[1] = { hpt: 28 };
-  rHeights[legendRow] = { hpt: 26 };
+  const rHeights = [{ hpt: 22 }, { hpt: 16 }, { hpt: 14 }];
+  for (let r = 3; r < curRow; r += 1) rHeights.push({ hpt: 18 });
   ws['!rows'] = rHeights;
+  ws['!merges'] = merges;
 
   const colProps = [
     { wch: 7 },
@@ -422,7 +418,7 @@ function buildSingleGroupWorksheet(aggregated, packedList, def) {
   ws['!cols'] = colProps;
 
   ws['!views'] = [{ showGridLines: true }];
-  ws['!freeze'] = { xSplit: 5, ySplit: 2, topLeftCell: 'F3', activePane: 'bottomRight', state: 'frozen' };
+  ws['!freeze'] = { xSplit: 5, ySplit: 3, topLeftCell: 'F4', activePane: 'bottomRight', state: 'frozen' };
 
   applyA4LandscapePrintSetup(ws, false);
   ws['!margins'] = {
@@ -439,34 +435,17 @@ function buildSingleGroupWorksheet(aggregated, packedList, def) {
 }
 
 /**
- * ワークブックへ物理タブとして追加（1グループ＝1回 book_append_sheet）
- * @param {Object} wb
- * @param {Object} ws
- * @param {string} sheetName
- */
-function appendPhysicalSheet(wb, ws, sheetName) {
-  if (!wb || !ws || !sheetName) return;
-  // 同名タブが既にあれば置換、なければ新規タブ追加（左下のワークシートが増える）
-  appendOrReplaceSheet(wb, ws, sheetName);
-  // 保険: SheetNames に必ず載っていることを確認
-  if (wb.SheetNames.indexOf(sheetName) < 0 && window.XLSX?.utils?.book_append_sheet) {
-    window.XLSX.utils.book_append_sheet(wb, ws, sheetName);
-  }
-}
-
-/**
- * 個別リハ実施リストを最大12の物理タブへ完全分離して追加
- * ★禁止: 1つの ws に複数グループを縦積みして1回だけ append する実装
- * ★必須: グループごとに ws を新規生成し、その都度 book_append_sheet する
+ * 個別リハ実施リストを最大12物理タブへ追加
+ * ★1グループごとに新しい ws を作り、その都度 append（縦積み禁止）
+ * ★凡例テキストは出力しない
  * @param {Object} wb
  * @param {Object} aggregated
- * @returns {string[]} 追加されたシート名一覧
+ * @returns {string[]}
  */
 export function writeIndividualRehaSheets(wb, aggregated) {
   const all = collectAnalyzedPatients(aggregated);
   const appendedNames = [];
 
-  // 12通りを順に走査。該当患者がいる組み合わせだけ物理タブを追加する
   for (let i = 0; i < SHEET_DEFS.length; i += 1) {
     const def = SHEET_DEFS[i];
     const filtered = all.filter((pk) => {
@@ -477,21 +456,23 @@ export function writeIndividualRehaSheets(wb, aggregated) {
       return def.reduced ? isReduced : !isReduced;
     });
 
-    // 0名 → 空タブは作らない
     if (filtered.length === 0) continue;
 
-    // ★ここが本命: このグループ専用の新しい ws を生成し、専用タブ名で append
-    const wsForThisGroupOnly = buildSingleGroupWorksheet(aggregated, filtered, def);
-    if (!wsForThisGroupOnly) continue;
+    const ws = buildSingleGroupWorksheet(aggregated, filtered, def);
+    if (!ws) continue;
 
-    appendPhysicalSheet(wb, wsForThisGroupOnly, def.sheetName);
+    // 物理タブ追加（Excel左下のワークシートが増える）
+    appendOrReplaceSheet(wb, ws, def.sheetName);
+    if (wb.SheetNames.indexOf(def.sheetName) < 0 && window.XLSX?.utils?.book_append_sheet) {
+      window.XLSX.utils.book_append_sheet(wb, ws, def.sheetName);
+    }
     appendedNames.push(def.sheetName);
   }
 
   return appendedNames;
 }
 
-/** 互換: 旧2シート分離API名 */
+/** 互換API */
 export function splitIndividualRehaPatients(aggregated) {
   const all = collectAnalyzedPatients(aggregated);
   return {
