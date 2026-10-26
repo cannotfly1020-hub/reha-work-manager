@@ -1,5 +1,6 @@
 // js/views/patientView.js
-// VIEW 3: 患者台帳・算定期限管理・計画書2行表示・通院中/終了ステータス管理・患者登録編集モーダル制御層（200行制限準拠）
+// VIEW 3: 患者台帳・算定期限管理・計画書2行表示・通院中/終了ステータス管理・患者登録編集モーダル制御層
+// ★終了(DISCONTINUED)保存時は discontinuedDate / endDate を自動スタンプ（Excel「退」マーク連動）
 
 import { sanitizeHtml, normalizeToKatakana } from '../core/dataNormalizer.js';
 import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
@@ -46,15 +47,39 @@ function formatShortMd(dateStr) {
   return `${parseInt(m[2], 10)}/${parseInt(m[3], 10)}`;
 }
 
+/** 今日を YYYY-MM-DD で返す */
+function todayYmd() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
 /**
- * 基準日時点で退院済みか（plannedDischargeDate 当日以降 = 退院済み）
- * 未設定患者は常に false（下位互換）
+ * 終了・退院日候補を患者オブジェクトから取得
+ * @param {Object} patient
+ * @returns {string}
+ */
+function resolvePatientExitDate(patient) {
+  if (!patient) return '';
+  const raw = patient.discontinuedDate
+    || patient.endDate
+    || patient.dischargeDate
+    || patient.finishDate
+    || patient.stoppedDate
+    || patient.plannedDischargeDate
+    || '';
+  if (!raw || typeof raw !== 'string') return '';
+  const m = raw.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : raw.trim().slice(0, 10);
+}
+
+/**
+ * 基準日時点で退院済みか（plannedDischargeDate / discontinuedDate 当日以降）
  * @param {Object} patient
  * @param {Date|string} [asOf=new Date()]
  * @returns {boolean}
  */
 export function isPatientDischarged(patient, asOf = new Date()) {
-  const discharge = patient?.plannedDischargeDate;
+  const discharge = resolvePatientExitDate(patient) || patient?.plannedDischargeDate;
   if (!discharge || typeof discharge !== 'string') return false;
   let asOfStr = '';
   if (asOf instanceof Date && !isNaN(asOf.getTime())) {
@@ -63,7 +88,7 @@ export function isPatientDischarged(patient, asOf = new Date()) {
     asOfStr = asOf.trim().slice(0, 10);
   }
   if (!asOfStr) return false;
-  return asOfStr >= discharge;
+  return asOfStr >= discharge.slice(0, 10);
 }
 
 /**
@@ -95,7 +120,6 @@ function getPlanPhaseCellHtml(patient, deadlines) {
     badgeHtml = '<span style="color:#0369a1; font-weight:700; background:#e0f2fe; padding:2px 5px; border-radius:3px; font-size:0.72rem;">計1継続(240点)</span>';
   }
 
-  // 要介護: 標準算定日数の1/3経過翌日＝評価2切替日を必ず明記
   let subTextHtml = '';
   if (patient.careInsuranceType === 'CARE' && deadlines.plan2TransitionDateStr) {
     const switchSlash = formatSlashDate(deadlines.plan2TransitionDateStr);
@@ -195,7 +219,6 @@ export function renderPatientView() {
   const category = document.getElementById('patientCategoryFilter')?.value || 'ALL';
   const statusFilter = document.getElementById('patientStatusFilter')?.value || 'ACTIVE';
 
-  // 終了患者も含めて検索し、ステータス条件で精密に絞り込み
   const includeDiscontinued = statusFilter !== 'ACTIVE';
   let patients = searchPatients(keyword, category, includeDiscontinued);
 
@@ -239,8 +262,9 @@ export function renderPatientView() {
     const dl = calculatePatientDeadlines(p, today);
     const isOut = p.category === 'OUTPATIENT';
     const isDiscontinued = p.status === PATIENT_STATUS.DISCONTINUED;
-
+    const exitDate = resolvePatientExitDate(p);
     const discharged = !isOut && isPatientDischarged(p, today);
+
     let statusBadge = isDiscontinued
       ? '<span style="background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1; padding:2px 5px; border-radius:3px; font-weight:700; font-size:0.68rem;">■ 終了</span>'
       : '<span style="background:#dcfce7; color:#15803d; border:1px solid #86efac; padding:2px 5px; border-radius:3px; font-weight:700; font-size:0.68rem;">● 継続</span>';
@@ -249,12 +273,20 @@ export function renderPatientView() {
     }
 
     const catBadge = isOut ? '<span style="color:#2563eb; font-weight:700;">外</span>' : '<span style="color:#d97706; font-weight:700;">入</span>';
-    let dischargeBadge = '';
-    if (!isOut && p.plannedDischargeDate) {
+
+    // 氏名横バッジ: 終了日 / 退院日 / 退院予定
+    let nameSideBadge = '';
+    if (isDiscontinued && exitDate) {
+      const md = formatShortMd(exitDate);
+      nameSideBadge = `<span class="badge-discharge-date" title="終了日">${md} 終了</span>`;
+    } else if (!isOut && p.plannedDischargeDate) {
       const md = formatShortMd(p.plannedDischargeDate);
-      dischargeBadge = discharged
+      nameSideBadge = discharged
         ? `<span class="badge-discharge-date" title="退院日">${md} 退院</span>`
         : `<span class="badge-discharge-planned" title="退院予定日">${md} 退院予定</span>`;
+    } else if (exitDate && !isDiscontinued) {
+      const md = formatShortMd(exitDate);
+      nameSideBadge = `<span class="badge-discharge-date" title="終了・退院日">${md} 終了</span>`;
     }
 
     const earlyCellHtml = getEarlyBonusCellHtml(p, dl);
@@ -279,7 +311,7 @@ export function renderPatientView() {
       <tr style="${rowStyle}">
         <td style="padding:6px 6px; text-align:center;">${statusBadge}</td>
         <td style="padding:6px 6px;"><strong>${p.id}</strong></td>
-        <td style="padding:6px 8px; white-space:nowrap;"><strong>${sanitizeHtml(p.name)}</strong>${dischargeBadge ? ` ${dischargeBadge}` : ''}<br><span style="font-size:0.68rem; color:#64748b;">${sanitizeHtml(p.nameKana || '')}</span></td>
+        <td style="padding:6px 8px; white-space:nowrap;"><strong>${sanitizeHtml(p.name)}</strong>${nameSideBadge ? ` ${nameSideBadge}` : ''}<br><span style="font-size:0.68rem; color:#64748b;">${sanitizeHtml(p.nameKana || '')}</span></td>
         <td style="padding:6px 6px; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${sanitizeHtml(p.diseaseName || '')}">${sanitizeHtml(p.diseaseName || '-')}</td>
         <td style="padding:6px 4px; text-align:center;">${catBadge}</td>
         <td style="padding:6px 4px; text-align:center;"><span style="font-size:0.72rem; background:#f1f5f9; padding:1px 4px; border-radius:3px;">${dl.diseaseLabel}</span></td>
@@ -318,7 +350,6 @@ function setupPatientModalListeners() {
     modal.classList.remove('active');
     showToast('患者レコードを削除しました', 'warn');
 
-    // ★患者削除後の最新データを当日バックアップファイルへ自動上書きトリガー
     if (typeof window.triggerDailyBackup === 'function') {
       window.triggerDailyBackup();
     }
@@ -341,16 +372,32 @@ function setupPatientModalListeners() {
   form?.addEventListener('submit', (e) => {
     e.preventDefault();
     const category = document.getElementById('patientFormCategory').value;
+    const status = document.getElementById('patientFormStatus')?.value || PATIENT_STATUS.ACTIVE;
     const plannedDischargeDate = category === 'INPATIENT'
       ? (document.getElementById('patientPlannedDischargeDate')?.value || '')
       : '';
+
+    // ★終了ステータス保存時: discontinuedDate / endDate を自動スタンプ（Excel「退」連動）
+    const existing = editingPatientId ? getPatientById(editingPatientId) : null;
+    let discontinuedDate = '';
+    let endDate = '';
+    if (status === PATIENT_STATUS.DISCONTINUED) {
+      const prev = existing?.discontinuedDate || existing?.endDate || '';
+      discontinuedDate = prev || todayYmd();
+      endDate = discontinuedDate;
+    } else {
+      // ACTIVE 復帰時は終了日をクリア
+      discontinuedDate = '';
+      endDate = '';
+    }
+
     const rawData = {
       id: document.getElementById('patientFormId').value,
       name: document.getElementById('patientFormName').value,
       nameKana: document.getElementById('patientFormKana').value,
       diseaseName: document.getElementById('patientFormDiseaseName').value,
       category,
-      status: document.getElementById('patientFormStatus')?.value || PATIENT_STATUS.ACTIVE,
+      status,
       diseaseType: document.getElementById('patientFormDiseaseType').value,
       careInsuranceType: document.getElementById('patientFormCareType').value,
       planStatus: document.getElementById('patientFormPlanStatus')?.value || 'NOT_YET',
@@ -358,6 +405,8 @@ function setupPatientModalListeners() {
       earlyBonusStartDate: document.getElementById('patientFormEarlyStartDate').value,
       onsetDate: document.getElementById('patientFormOnsetDate').value,
       plannedDischargeDate,
+      discontinuedDate,
+      endDate,
       force13Limit: document.getElementById('patientFormForce13').checked,
       defaultUnits: document.getElementById('patientFormDefaultUnits')?.value || 3,
       notes: document.getElementById('patientFormNotes').value
@@ -372,7 +421,6 @@ function setupPatientModalListeners() {
     modal.classList.remove('active');
     showToast(`患者情報(${res.patient.name})を保存しました`, 'success');
 
-    // ★患者登録・更新保存後の最新データを当日バックアップファイルへ自動上書きトリガー
     if (typeof window.triggerDailyBackup === 'function') {
       window.triggerDailyBackup();
     }
@@ -414,7 +462,7 @@ function openPatientModal(patientId) {
 
   document.getElementById('patientFormDiseaseType').value = p ? p.diseaseType : 'LOCOMOTIVE';
   document.getElementById('patientFormCareType').value = p ? p.careInsuranceType : 'NONE';
-  
+
   const planSelect = document.getElementById('patientFormPlanStatus');
   if (planSelect) planSelect.value = p ? (p.planStatus || 'NOT_YET') : 'NOT_YET';
 

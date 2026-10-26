@@ -178,6 +178,9 @@ export function upsertPatient(rawData) {
     onsetDate: normalizeDateString(rawData.onsetDate),
     // 退院予定日（未設定の過去データは空文字で下位互換）
     plannedDischargeDate: normalizeDateString(rawData.plannedDischargeDate || ''),
+    // 終了・退院（中止）確定日（Excel「退」マーク用。ACTIVE 時は空）
+    discontinuedDate: normalizeDateString(rawData.discontinuedDate || ''),
+    endDate: normalizeDateString(rawData.endDate || rawData.discontinuedDate || ''),
     force13Limit: Boolean(rawData.force13Limit),
     defaultUnits: (() => {
       const rawUnits = Number(rawData.defaultUnits);

@@ -7,6 +7,7 @@
 import {
   addDays, calculatePatientDeadlines, evaluateEarlyBonusPhase, getDailyBasePoints
 } from '../../core/deadlineCalc.js';
+import { getPatientById } from '../../store/patientStore.js';
 import {
   STYLES, thinBorder, getEarlyBaseDate,
   setStyledCell, updateSheetRange, appendOrReplaceSheet,
@@ -133,6 +134,33 @@ function normalizeExitDateString(raw) {
 }
 
 /**
+ * スケジュール内スナップショットより患者マスター（最新）を優先して合成
+ * → 台帳で終了・退院日を更新しても、Excel 出力時に確実に反映される
+ * @param {Object} snap
+ * @returns {Object}
+ */
+function resolveLivePatient(snap) {
+  if (!snap || typeof snap !== 'object') return {};
+  const id = snap.id;
+  const live = id ? getPatientById(id) : null;
+  if (!live) return { ...snap };
+  // マスター側のステータス・終了/退院日フィールドを優先
+  return {
+    ...snap,
+    ...live,
+    // スナップにしか無い運用メモ等は残しつつ、日付系はマスター優先で上書き済み
+    plannedDischargeDate: live.plannedDischargeDate || snap.plannedDischargeDate || '',
+    discontinuedDate: live.discontinuedDate || snap.discontinuedDate || '',
+    endDate: live.endDate || snap.endDate || live.discontinuedDate || '',
+    dischargeDate: live.dischargeDate || snap.dischargeDate || '',
+    finishDate: live.finishDate || snap.finishDate || '',
+    stoppedDate: live.stoppedDate || snap.stoppedDate || '',
+    exitDate: live.exitDate || snap.exitDate || '',
+    status: live.status || snap.status
+  };
+}
+
+/**
  * 終了系ステータスか（患者台帳の DISCONTINUED / 退院・終了・中止 等）
  * @param {Object} patient
  * @returns {boolean}
@@ -156,31 +184,36 @@ function isPatientExitStatus(patient) {
 
 /**
  * 患者台帳から終了・退院（中止）日を網羅的に取得
- * ※新規フィールドを増やさず、既存日付・ステータスを直接走査する
+ * ※ getPatientById で最新マスターを引き直してから候補フィールドを走査
  * @param {Object} patient
  * @returns {string} YYYY-MM-DD（未設定は空文字）
  */
 function extractPatientExitDate(patient) {
-  if (!patient) return '';
+  const p = resolveLivePatient(patient);
+  if (!p || !p.id) {
+    // id 無しでも渡されたオブジェクトから走査
+    if (!patient) return '';
+  }
+  const src = p.id ? p : (patient || {});
 
-  // 1. 各種日付フィールドから最初に有効なものを採用
+  // 退院予定 → 確定退院 → 終了 → 互換 endDate 系の順で最初の有効日を採用
   const candidates = [
-    patient.dischargeDate,
-    patient.endDate,
-    patient.finishDate,
-    patient.stoppedDate,
-    patient.discontinuedDate,
-    patient.exitDate,
-    patient.plannedDischargeDate
+    src.plannedDischargeDate,
+    src.dischargeDate,
+    src.discontinuedDate,
+    src.endDate,
+    src.finishDate,
+    src.stoppedDate,
+    src.exitDate
   ];
   for (let i = 0; i < candidates.length; i += 1) {
     const normalized = normalizeExitDateString(candidates[i]);
     if (normalized) return normalized;
   }
 
-  // 2. 終了系ステータスだが日付フィールドが空の場合は印字日を特定できない
-  //    （誤って全日に「退」を付けないよう空を返す）
-  if (isPatientExitStatus(patient)) {
+  // 終了系ステータスだが日付フィールドが空の場合は印字日を特定できない
+  // （誤って全日に「退」を付けないよう空を返す）
+  if (isPatientExitStatus(src)) {
     return '';
   }
 
@@ -260,9 +293,10 @@ function isDateInSheetPeriod(dateStr, mode, limitDateStr) {
 
 /**
  * 患者スロット解析＋日割り用メタ
+ * ★患者マスターを getPatientById で引き直し、最新の退院・終了日を反映
  */
 function analyzePatientItem(item, year, month, daysInMonth) {
-  const p = item.patient;
+  const p = resolveLivePatient(item.patient);
   const isIn = p.category === 'INPATIENT';
   const baseEarlyDate = getEarlyBaseDate(p);
   const { monthStart, monthEnd } = getMonthBounds(year, month);
@@ -315,7 +349,7 @@ function analyzePatientItem(item, year, month, daysInMonth) {
     ? (formatAdmissionShort(baseEarlyDate || p.admissionDate || p.onsetDate) || '-')
     : '-';
 
-  // 終了・退院（中止）日: 患者台帳の既存フィールドを網羅走査（二重入力不要）
+  // 終了・退院（中止）日: 最新マスターの候補フィールドを網羅走査
   const dischargeDateStr = extractPatientExitDate(p);
 
   return {
@@ -329,7 +363,8 @@ function analyzePatientItem(item, year, month, daysInMonth) {
     planByDay,
     isMaintDay,
     admissionLabel,
-    careType: p.careInsuranceType || 'NONE'
+    careType: p.careInsuranceType || 'NONE',
+    livePatient: p
   };
 }
 
@@ -435,14 +470,15 @@ function collectSheetRows(aggregated) {
 
   Object.values(patientMap || {}).forEach((item) => {
     if (!item?.patient) return;
-    if (item.patient.diseaseType === 'ANALGESIA') return;
+    const livePeek = resolveLivePatient(item.patient);
+    if (livePeek.diseaseType === 'ANALGESIA') return;
     const rehaUnits = item.rehaTotalUnits !== undefined
       ? item.rehaTotalUnits
       : (item.hasRehaSlots ? (item.totalUnits || 0) : 0);
     if (!(rehaUnits > 0 || item.hasRehaSlots)) return;
 
     const analysis = analyzePatientItem(item, year, month, daysInMonth);
-    const p = item.patient;
+    const p = analysis.livePatient || resolveLivePatient(item.patient);
     const base = {
       item,
       analysis,
@@ -538,7 +574,8 @@ function writeTwoRowHeader(ws, rowH1, rowH2, year, month, daysInMonth, merges) {
 
 function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraBg) {
   const { item, rowView } = row;
-  const p = item.patient;
+  // 最新マスター優先（退マーク・グレーアウト判定と氏名表示の整合）
+  const p = row.analysis?.livePatient || resolveLivePatient(item.patient);
   const {
     periodTotal, early1, early2, planDateStr, visibleUnits,
     careLabel, careStyleBase, admissionLabel, mode,
