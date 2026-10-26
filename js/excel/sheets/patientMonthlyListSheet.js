@@ -1,5 +1,5 @@
 // js/excel/sheets/patientMonthlyListSheet.js
-// 当月実施患者一覧（入院/外来 × 疾患区分 × 算定ステータス【維持期減算／当月切替／医療のみ／通常】）
+// 当月実施患者一覧（【入院→外来→消炎鎮痛】× 疾患 × 算定区分【通常→医療のみ→当月切替→維持期減算】）
 // ★受付・医事課提出用。単位・点数・収益は扱わず、診断名・起算日・算定期限・算定区分のみ。
 
 import { REHA_RULES } from '../../config/rules.js';
@@ -10,53 +10,53 @@ import {
 
 export const PATIENT_MONTHLY_LIST_SHEET = '実施患者一覧';
 
-/** 第1階層: 外来 → 入院（医事課の点検順） */
-const CATEGORY_ORDER = ['OUTPATIENT', 'INPATIENT'];
+/** 第1階層: 入院 → 外来 → 消炎鎮痛 */
+const SECTION_ORDER = ['INPATIENT', 'OUTPATIENT', 'ANALGESIA'];
 
-/** 第2階層: 制度疾患区分 */
-const DISEASE_ORDER = ['LOCOMOTIVE', 'CEREBROVASCULAR', 'DISUSE', 'ANALGESIA'];
+/** 第2階層（入院・外来内）: 運動器 → 脳血管 → 廃用 */
+const DISEASE_ORDER = ['LOCOMOTIVE', 'CEREBROVASCULAR', 'DISUSE'];
 
 /**
- * 第3階層: 算定ステータス（数値が小さいほど上）
- * 1=維持期減算 / 2=当月中切替 / 3=医療のみ継続 / 4=通常 / 5=消炎鎮痛
+ * 第3階層: 通常算定 → 医療のみ継続 → 当月中切替 → 維持期減算
+ * （数値が小さいほど上。消炎鎮痛セクションは 0_ANALGESIA のみ）
  */
 const STATUS_ORDER = [
-  '1_MAINTENANCE_REDUCED',
-  '2_MONTH_SWITCH',
-  '3_MEDICAL_ONLY_EXPIRED',
-  '4_NORMAL',
-  '5_ANALGESIA'
+  '0_ANALGESIA',
+  '1_NORMAL',
+  '2_MEDICAL_ONLY_EXPIRED',
+  '3_MONTH_SWITCH',
+  '4_MAINTENANCE_REDUCED'
 ];
 
 const STATUS_META = {
-  '1_MAINTENANCE_REDUCED': {
-    title: '① 【維持期減算】（要介護・要支援 / 算定期限超過）',
-    fill: 'FEF3C7',
-    font: '92400E'
-  },
-  '2_MONTH_SWITCH': {
-    title: '② 【当月中切替】（当月に算定期限満了 → 通常から減算へ）',
-    fill: 'FFEDD5',
-    font: '9A3412'
-  },
-  '3_MEDICAL_ONLY_EXPIRED': {
-    title: '③ 【医療保険のみ継続】（算定期限超過 / 介護認定なし・正規満額維持）',
-    fill: 'E0E7FF',
-    font: '3730A3'
-  },
-  '4_NORMAL': {
-    title: '④ 【通常算定】（標準算定日数以内）',
-    fill: 'DCFCE7',
-    font: '166534'
-  },
-  '5_ANALGESIA': {
+  '0_ANALGESIA': {
     title: '【消炎鎮痛等処置】（算定日数制限なし）',
     fill: 'F1F5F9',
     font: '334155'
+  },
+  '1_NORMAL': {
+    title: '① 【通常算定】（標準算定日数以内）',
+    fill: 'DCFCE7',
+    font: '166534'
+  },
+  '2_MEDICAL_ONLY_EXPIRED': {
+    title: '② 【医療保険のみ継続】（算定期限超過 / 介護認定なし・正規満額維持）',
+    fill: 'F1F5F9',
+    font: '075985'
+  },
+  '3_MONTH_SWITCH': {
+    title: '③ 【当月中切替】（当月に算定期限満了 → 満了日翌日以降減算）',
+    fill: 'FEF3C7',
+    font: '92400E'
+  },
+  '4_MAINTENANCE_REDUCED': {
+    title: '④ 【維持期減算】（要介護・要支援 / 算定期限超過）',
+    fill: 'FEE2E2',
+    font: '991B1B'
   }
 };
 
-const COL_COUNT = 7; // No.〜算定区分
+const COL_COUNT = 7;
 
 const STYLE_TITLE = {
   font: { name: 'Meiryo UI', sz: 13, bold: true, color: { rgb: '0F172A' } },
@@ -189,12 +189,14 @@ function resolveSpecificDiagnosis(patient) {
 }
 
 /**
+ * 制度疾患区分（消炎鎮痛以外）
  * @param {Object} patient
  * @returns {string}
  */
 function resolveDiseaseKey(patient) {
   const key = patient?.diseaseType;
   if (DISEASE_ORDER.includes(key)) return key;
+  if (key === 'ANALGESIA') return 'ANALGESIA';
   return 'LOCOMOTIVE';
 }
 
@@ -204,9 +206,6 @@ function resolveDiseaseKey(patient) {
  */
 function buildDiseaseSectionTitle(diseaseKey) {
   const rule = REHA_RULES.LIMIT_DAYS[diseaseKey] || REHA_RULES.LIMIT_DAYS.LOCOMOTIVE;
-  if (diseaseKey === 'ANALGESIA' || rule.days >= 9000) {
-    return `● ${rule.fullName}（標準算定日数: 制限なし）`;
-  }
   return `● ${rule.fullName}（標準算定日数: ${rule.days}日）`;
 }
 
@@ -224,12 +223,11 @@ function careTypeLabel(patient) {
  * @param {Object} patient
  * @returns {boolean}
  */
-function isCareInsured(patient) {
+function isCareInsuredPatient(patient) {
   return patient?.careInsuranceType === 'CARE' || patient?.careInsuranceType === 'SUPPORT';
 }
 
 /**
- * 対象月の起末日（YYYY-MM-DD）
  * @param {number} year
  * @param {number} month
  * @returns {{ monthStart: string, monthEnd: string }}
@@ -244,12 +242,62 @@ function getMonthBounds(year, month) {
 }
 
 /**
+ * 算定ステータス別ソート優先度（通常算定が先頭、維持期減算が末尾）
+ * @param {Object} patient
+ * @param {string} limitDateStr
+ * @param {boolean} careInsured
+ * @param {boolean} isLimitExceededBeforeMonth 満了日が当月開始より前
+ * @param {boolean} isMidMonth 満了日が当月内
+ * @returns {number} 0=消炎 / 1=通常 / 2=医療のみ / 3=当月切替 / 4=維持期減算
+ */
+function getStatusOrder(patient, limitDateStr, careInsured, isLimitExceededBeforeMonth, isMidMonth) {
+  if (patient?.diseaseType === 'ANALGESIA') return 0;
+
+  // 1. 通常算定（期限内・当月切替でもない）
+  if (!isLimitExceededBeforeMonth && !isMidMonth) {
+    return 1;
+  }
+  // 2. 医療保険のみ継続（前月以前に超過・介護なし）
+  if (isLimitExceededBeforeMonth && !careInsured) {
+    return 2;
+  }
+  // 3. 当月中切替（当月に期限満了）※介護は減算切替、医療のみも当月満了としてここに寄せない（下で分岐）
+  if (isMidMonth && careInsured) {
+    return 3;
+  }
+  // 医療のみ＋当月満了 → 医療保険のみ継続側（点数切替なし）
+  if (isMidMonth && !careInsured) {
+    return 2;
+  }
+  // 4. 維持期減算（要介護・超過）
+  if (isLimitExceededBeforeMonth && careInsured) {
+    return 4;
+  }
+  return 1;
+}
+
+/**
+ * ソート優先度 → statusKey
+ * @param {number} order
+ * @returns {string}
+ */
+function statusKeyFromOrder(order) {
+  switch (order) {
+    case 0: return '0_ANALGESIA';
+    case 2: return '2_MEDICAL_ONLY_EXPIRED';
+    case 3: return '3_MONTH_SWITCH';
+    case 4: return '4_MAINTENANCE_REDUCED';
+    case 1:
+    default: return '1_NORMAL';
+  }
+}
+
+/**
  * 算定ステータス区分と明細表示ラベルを判定する
- * 優先順: 消炎鎮痛 → 前月以前超過(介護=維持期 / 医療=正規維持) → 当月満了(介護=切替) → 通常
  * @param {Object} patient
  * @param {string} monthStart
  * @param {string} monthEnd
- * @returns {{ statusKey: string, statusLabel: string, startLabel: string, endLabel: string, startSortKey: string }}
+ * @returns {{ statusKey: string, statusLabel: string, startLabel: string, endLabel: string, startSortKey: string, sectionKey: string, diseaseKey: string }}
  */
 function resolveBillingStatus(patient, monthStart, monthEnd) {
   const diseaseKey = resolveDiseaseKey(patient);
@@ -261,9 +309,12 @@ function resolveBillingStatus(patient, monthStart, monthEnd) {
     ? '-'
     : formatSlashDate(limitDateStr);
 
+  // 大項目「消炎鎮痛」: diseaseType=ANALGESIA、または消炎実績のみの物療扱い
   if (diseaseKey === 'ANALGESIA' || (deadlines.standardDays || 0) >= 9000) {
     return {
-      statusKey: '5_ANALGESIA',
+      sectionKey: 'ANALGESIA',
+      diseaseKey: 'ANALGESIA',
+      statusKey: '0_ANALGESIA',
       statusLabel: '消炎鎮痛',
       startLabel,
       endLabel: '-',
@@ -271,14 +322,18 @@ function resolveBillingStatus(patient, monthStart, monthEnd) {
     };
   }
 
-  const care = isCareInsured(patient);
+  const care = isCareInsuredPatient(patient);
   const careLbl = careTypeLabel(patient);
   const force13 = patient?.force13Limit === true || patient?.force13UnitsLimit === true;
+  const isLimitExceededBeforeMonth = !!(limitDateStr && limitDateStr < monthStart);
+  const isMidMonth = !!(limitDateStr && limitDateStr >= monthStart && limitDateStr <= monthEnd);
 
-  // 強制13単位制限（要介護・要支援）は維持期減算扱い
+  // 強制13単位制限（要介護）は維持期減算
   if (force13 && care) {
     return {
-      statusKey: '1_MAINTENANCE_REDUCED',
+      sectionKey: patient?.category === 'INPATIENT' ? 'INPATIENT' : 'OUTPATIENT',
+      diseaseKey,
+      statusKey: '4_MAINTENANCE_REDUCED',
       statusLabel: `維持期減算 (${careLbl}・13単位制限)`,
       startLabel,
       endLabel,
@@ -286,51 +341,31 @@ function resolveBillingStatus(patient, monthStart, monthEnd) {
     };
   }
 
-  if (limitDateStr && limitDateStr < monthStart) {
-    if (care) {
-      return {
-        statusKey: '1_MAINTENANCE_REDUCED',
-        statusLabel: `維持期減算 (${careLbl})`,
-        startLabel,
-        endLabel,
-        startSortKey
-      };
-    }
-    return {
-      statusKey: '3_MEDICAL_ONLY_EXPIRED',
-      statusLabel: '正規維持 (医療のみ)',
-      startLabel,
-      endLabel,
-      startSortKey
-    };
-  }
+  const order = getStatusOrder(patient, limitDateStr, care, isLimitExceededBeforeMonth, isMidMonth);
+  const statusKey = statusKeyFromOrder(order);
 
-  // 満了日が当月内 → 翌日以降が減算開始（介護のみ切替ブロック）
-  if (limitDateStr && limitDateStr >= monthStart && limitDateStr <= monthEnd) {
-    const switchDateStr = addDays(limitDateStr, 1);
+  let statusLabel = '通常算定';
+  if (statusKey === '4_MAINTENANCE_REDUCED') {
+    statusLabel = `維持期減算 (${careLbl})`;
+  } else if (statusKey === '3_MONTH_SWITCH') {
+    const switchDateStr = limitDateStr ? addDays(limitDateStr, 1) : '';
     const switchMd = formatShortMd(switchDateStr) || formatShortMd(limitDateStr);
-    if (care) {
-      return {
-        statusKey: '2_MONTH_SWITCH',
-        statusLabel: `${switchMd}〜維持期減算 (${careLbl})`,
-        startLabel,
-        endLabel,
-        startSortKey
-      };
+    statusLabel = `${switchMd}〜維持期減算 (${careLbl})`;
+  } else if (statusKey === '2_MEDICAL_ONLY_EXPIRED') {
+    if (isMidMonth) {
+      const switchDateStr = limitDateStr ? addDays(limitDateStr, 1) : '';
+      const switchMd = formatShortMd(switchDateStr) || formatShortMd(limitDateStr);
+      statusLabel = `${switchMd}〜正規維持 (医療のみ)`;
+    } else {
+      statusLabel = '正規維持 (医療のみ)';
     }
-    // 医療のみは点数切替なし。当月内に超過へ入る旨を③で明示
-    return {
-      statusKey: '3_MEDICAL_ONLY_EXPIRED',
-      statusLabel: `${switchMd}〜正規維持 (医療のみ)`,
-      startLabel,
-      endLabel,
-      startSortKey
-    };
   }
 
   return {
-    statusKey: '4_NORMAL',
-    statusLabel: '通常算定',
+    sectionKey: patient?.category === 'INPATIENT' ? 'INPATIENT' : 'OUTPATIENT',
+    diseaseKey,
+    statusKey,
+    statusLabel,
     startLabel,
     endLabel,
     startSortKey
@@ -338,7 +373,7 @@ function resolveBillingStatus(patient, monthStart, monthEnd) {
 }
 
 /**
- * 当月実績患者を 区分 × 疾患 × 算定ステータス の3段にグループ化
+ * 当月実績患者を 【入院→外来→消炎鎮痛】× 疾患 × 算定区分 でグループ化
  * @param {Object} aggregated
  * @returns {object[]}
  */
@@ -363,12 +398,26 @@ function collectGroupedPatients(aggregated) {
     })
     .map((item) => {
       const p = item.patient;
-      const billing = resolveBillingStatus(p, monthStart, monthEnd);
+      // 消炎鎮痛疾患、または個別リハなしで消炎のみ → 大項目「消炎鎮痛」
+      const isAnaDisease = p.diseaseType === 'ANALGESIA';
+      const rehaUnits = item.rehaTotalUnits || 0;
+      const hasReha = (item.hasRehaSlots === true) || rehaUnits > 0;
+      const hasAna = (item.hasAnalgesiaSlots === true) || (item.totalAnalgesiaDays || 0) > 0;
+      const forceAnalgesiaSection = isAnaDisease || (!hasReha && hasAna);
+
+      const billing = forceAnalgesiaSection
+        ? {
+            ...resolveBillingStatus({ ...p, diseaseType: 'ANALGESIA' }, monthStart, monthEnd),
+            sectionKey: 'ANALGESIA',
+            diseaseKey: 'ANALGESIA'
+          }
+        : resolveBillingStatus(p, monthStart, monthEnd);
+
       return {
         id: String(p.id || ''),
         name: String(p.name || ''),
-        category: p.category === 'INPATIENT' ? 'INPATIENT' : 'OUTPATIENT',
-        diseaseKey: resolveDiseaseKey(p),
+        sectionKey: billing.sectionKey,
+        diseaseKey: billing.diseaseKey,
         diagnosis: resolveSpecificDiagnosis(p),
         startLabel: billing.startLabel,
         endLabel: billing.endLabel,
@@ -379,10 +428,12 @@ function collectGroupedPatients(aggregated) {
     });
 
   rows.sort((a, b) => {
-    const catDiff = CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category);
-    if (catDiff !== 0) return catDiff;
-    const disDiff = DISEASE_ORDER.indexOf(a.diseaseKey) - DISEASE_ORDER.indexOf(b.diseaseKey);
-    if (disDiff !== 0) return disDiff;
+    const secDiff = SECTION_ORDER.indexOf(a.sectionKey) - SECTION_ORDER.indexOf(b.sectionKey);
+    if (secDiff !== 0) return secDiff;
+    if (a.sectionKey !== 'ANALGESIA') {
+      const disDiff = DISEASE_ORDER.indexOf(a.diseaseKey) - DISEASE_ORDER.indexOf(b.diseaseKey);
+      if (disDiff !== 0) return disDiff;
+    }
     const stDiff = STATUS_ORDER.indexOf(a.statusKey) - STATUS_ORDER.indexOf(b.statusKey);
     if (stDiff !== 0) return stDiff;
     if (a.startSortKey !== b.startSortKey) return a.startSortKey.localeCompare(b.startSortKey);
@@ -390,21 +441,19 @@ function collectGroupedPatients(aggregated) {
   });
 
   const sections = [];
-  CATEGORY_ORDER.forEach((cat) => {
-    const catRows = rows.filter((r) => r.category === cat);
-    if (catRows.length === 0) return;
+
+  // 【入院】【外来】
+  ['INPATIENT', 'OUTPATIENT'].forEach((sec) => {
+    const secRows = rows.filter((r) => r.sectionKey === sec);
+    if (secRows.length === 0) return;
 
     const diseaseGroups = [];
     DISEASE_ORDER.forEach((diseaseKey) => {
-      const diseaseRows = catRows.filter((r) => r.diseaseKey === diseaseKey);
+      const diseaseRows = secRows.filter((r) => r.diseaseKey === diseaseKey);
       if (diseaseRows.length === 0) return;
 
       const statusBlocks = [];
-      STATUS_ORDER.forEach((statusKey) => {
-        // 消炎鎮痛疾患は 5_ANALGESIA のみ。他疾患は 5 を出さない
-        if (diseaseKey === 'ANALGESIA' && statusKey !== '5_ANALGESIA') return;
-        if (diseaseKey !== 'ANALGESIA' && statusKey === '5_ANALGESIA') return;
-
+      ['1_NORMAL', '2_MEDICAL_ONLY_EXPIRED', '3_MONTH_SWITCH', '4_MAINTENANCE_REDUCED'].forEach((statusKey) => {
         const blockRows = diseaseRows.filter((r) => r.statusKey === statusKey);
         if (blockRows.length === 0) return;
         statusBlocks.push({
@@ -425,11 +474,32 @@ function collectGroupedPatients(aggregated) {
 
     if (diseaseGroups.length === 0) return;
     sections.push({
-      category: cat,
-      categoryLabel: cat === 'INPATIENT' ? '【 入 院 】' : '【 外 来 】',
-      diseaseGroups
+      sectionKey: sec,
+      categoryLabel: sec === 'INPATIENT' ? '【 入 院 】' : '【 外 来 】',
+      diseaseGroups,
+      isAnalgesiaSection: false
     });
   });
+
+  // 【消炎鎮痛等処置（物療）】
+  const anaRows = rows.filter((r) => r.sectionKey === 'ANALGESIA');
+  if (anaRows.length > 0) {
+    sections.push({
+      sectionKey: 'ANALGESIA',
+      categoryLabel: '【 消炎鎮痛等処置（物療） 】',
+      diseaseGroups: [{
+        diseaseKey: 'ANALGESIA',
+        title: '● 消炎鎮痛等処置（標準算定日数: 制限なし）',
+        statusBlocks: [{
+          statusKey: '0_ANALGESIA',
+          title: STATUS_META['0_ANALGESIA'].title,
+          meta: STATUS_META['0_ANALGESIA'],
+          rows: anaRows
+        }]
+      }],
+      isAnalgesiaSection: true
+    });
+  }
 
   return sections;
 }
@@ -451,7 +521,6 @@ function writeMergedBand(ws, row, text, style, merges) {
 }
 
 /**
- * 算定ステータス小見出しスタイル
  * @param {{ fill: string, font: string }} meta
  * @returns {Object}
  */
@@ -491,7 +560,7 @@ export function buildPatientMonthlyListSheet(wb, aggregated) {
     ws,
     1,
     0,
-    `対象年月: ${year}年${month}月  |  出力日: ${outDate}  |  作成: リハビリテーション科  |  並び: 区分→疾患→算定区分(維持期減算→当月切替→医療のみ→通常)`,
+    `対象年月: ${year}年${month}月  |  出力日: ${outDate}  |  作成: リハビリテーション科  |  並び: 入院→外来→消炎鎮痛／通常算定→医療のみ→当月切替→維持期減算`,
     STYLE_SUB
   );
   merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: COL_COUNT - 1 } });
@@ -544,16 +613,15 @@ export function buildPatientMonthlyListSheet(wb, aggregated) {
           curRow += 1;
         });
 
-        curRow += 1; // ステータスブロック間余白
+        curRow += 1;
       });
 
-      curRow += 1; // 疾患グループ間余白
+      curRow += 1;
     });
 
-    curRow += 1; // 区分間余白
+    curRow += 1;
   });
 
-  // No / ID / 氏名 / 疾患名 / 起算日 / 終了日 / 算定区分
   setSheetCols(ws, [5, 10, 14, 26, 12, 13, 22]);
   ws['!merges'] = merges;
   ws['!rows'] = [{ hpt: 22 }, { hpt: 16 }];
