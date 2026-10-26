@@ -6,6 +6,7 @@ import { writeExecutiveSummarySheet } from './sheets/summarySheet.js';
 import { writeYearlyTrendSheet } from './sheets/yearlyTrendSheet.js';
 import { writeRehaPatientSheet } from './sheets/rehaPatientSheet.js';
 import { writeAnalgesiaDedicatedSheet } from './sheets/analgesiaSheet.js';
+import { buildPatientMonthlyListSheet } from './sheets/patientMonthlyListSheet.js';
 
 export function generateUketsukeWorkbook(aggregated) {
   if (!window.XLSX) throw new Error('SheetJS (xlsx-js-style) が読み込まれていません。');
@@ -58,6 +59,9 @@ export function generateUketsukeWorkbook(aggregated) {
 
   // 5. 消炎鎮痛 専用シート
   writeAnalgesiaDedicatedSheet(wb, aggregated, ANALGESIA_SHEET);
+
+  // 6. 当月実施患者一覧（入院/外来・疾患別グループ / 個人台帳の診断名）※受付提出用
+  buildPatientMonthlyListSheet(wb, aggregated);
 
   return wb;
 }

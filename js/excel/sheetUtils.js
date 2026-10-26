@@ -239,12 +239,20 @@ function stringFromU8(u8) {
  * @param {boolean} fitHeight
  * @returns {string}
  */
-export function injectA4LandscapeIntoSheetXml(xml, fitHeight = false) {
+/**
+ * worksheet XML に A4 の pageSetup / sheetPr を注入・上書きする
+ * @param {string} xml
+ * @param {boolean} [fitHeight=false]
+ * @param {'landscape'|'portrait'} [orientation='landscape']
+ * @returns {string}
+ */
+export function injectA4LandscapeIntoSheetXml(xml, fitHeight = false, orientation = 'landscape') {
   if (!xml || typeof xml !== 'string') return xml;
   let out = xml;
   const fitH = fitHeight ? 1 : 0;
+  const orient = orientation === 'portrait' ? 'portrait' : 'landscape';
   const pageSetupTag =
-    `<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="${fitH}" scale="100"/>`;
+    `<pageSetup paperSize="9" orientation="${orient}" fitToWidth="1" fitToHeight="${fitH}" scale="100"/>`;
 
   // sheetPr / pageSetUpPr（fitToPage）
   if (/<sheetPr\b[^>]*\/>/.test(out)) {
@@ -407,9 +415,11 @@ export function patchXlsxUint8ForA4Landscape(u8, wb) {
   sheetFiles.forEach((entry, idx) => {
     const sheetName = wb && Array.isArray(wb.SheetNames) ? wb.SheetNames[idx] : null;
     const ws = (sheetName && wb.Sheets) ? wb.Sheets[sheetName] : null;
-    const fitHeight = !!(ws && ws['!rehaPrintSetup'] && ws['!rehaPrintSetup'].fitHeight);
+    const printSetup = (ws && ws['!rehaPrintSetup']) ? ws['!rehaPrintSetup'] : {};
+    const fitHeight = !!printSetup.fitHeight;
+    const orientation = printSetup.orientation === 'portrait' ? 'portrait' : 'landscape';
     const xml = stringFromU8(entry.data);
-    const patched = injectA4LandscapeIntoSheetXml(xml, fitHeight);
+    const patched = injectA4LandscapeIntoSheetXml(xml, fitHeight, orientation);
     entry.data = u8FromString(patched);
     entry.method = 0;
   });
