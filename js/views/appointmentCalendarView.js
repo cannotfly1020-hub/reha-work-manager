@@ -1,12 +1,11 @@
 // js/views/appointmentCalendarView.js
 // 外来予約カレンダーの初期化・週/月の切り替え
-// ★手書き受付用 A4横印刷ボタンは DOM 動的追加（index.html 非改変）・画面グリッド描画には非干渉
+// ★A4横印刷は「週間予約受付簿」へ一本化（旧週間表印刷ボタンは非表示）。画面マス目描画には非干渉。
 
 import { getJapaneseHolidayName } from '../core/holidayCalc.js';
 import { formatDateYMD } from '../core/dateUtils.js';
 import { openAppointmentModal } from './modals/appointmentModal.js';
 import { showToast } from '../ui/toast.js';
-import { printWeeklyAppointmentTable } from '../print/weeklyTablePrint.js';
 import { printDailyAppointmentChecklist } from '../print/dailyChecklistPrint.js';
 import { printHandwritingWeeklySheet } from '../print/handwritingWeeklyPrint.js';
 import { calendarState } from './appointment/calendarState.js';
@@ -15,7 +14,7 @@ import { renderWeeklyTimetable } from './appointment/weeklyTimetable.js';
 import { renderMonthlyCalendar } from './appointment/monthlyCalendar.js';
 
 /**
- * 手書き受付専用印刷（予約受付簿モード）
+ * 週間予約受付簿（A4横・手書き余白完備）印刷
  * 画面の週間マス目描画には一切触れず、印刷ポップアップのみ生成する。
  */
 export function handlePrintHandwritingWeeklySheet() {
@@ -23,44 +22,58 @@ export function handlePrintHandwritingWeeklySheet() {
 }
 
 /**
- * 「📝 手書き受付用印刷 (A4横)」ボタンを既存「週間表」ボタンの隣へ動的配置
+ * 旧「🖨 週間表 (A4横)」を非表示にし、主要ボタン「📝 週間予約受付簿 (A4横)」を配置する。
+ * index.html は改変せず DOM 操作のみでツールバーを整理する。
  */
-function ensureHandwritingPrintButton() {
-  if (document.getElementById('btnAptPrintHandwritingWeekly')) return;
-
+function ensureReceptionBookPrintToolbar() {
   const weeklyBtn = document.getElementById('btnAptPrintWeekly');
-  if (!weeklyBtn || !weeklyBtn.parentElement) return;
+  const dailyBtn = document.getElementById('btnAptPrintDaily');
+  const parent = weeklyBtn?.parentElement || dailyBtn?.parentElement;
+  if (!parent) return;
 
-  const btn = document.createElement('button');
-  btn.id = 'btnAptPrintHandwritingWeekly';
-  btn.type = 'button';
-  btn.title = '次週案内・対面受付用。全時間枠を残したA4横の手書き受付簿を印刷します（画面表示は変わりません）';
-  btn.style.cssText = [
-    'display:flex',
-    'align-items:center',
-    'gap:4px',
-    'padding:6px 12px',
-    'background:#059669',
-    'color:#fff',
-    'border:1px solid #047857',
-    'border-radius:6px',
-    'font-size:0.82rem',
-    'font-weight:700',
-    'cursor:pointer',
-    'white-space:nowrap'
-  ].join(';');
-  btn.innerHTML = '<span>📝</span><span>手書き受付用印刷 (A4横)</span>';
-
-  btn.addEventListener('click', () => {
-    handlePrintHandwritingWeeklySheet();
-  });
-
-  // 既存「週間表 (A4横)」の直後へ挿入
-  if (weeklyBtn.nextSibling) {
-    weeklyBtn.parentElement.insertBefore(btn, weeklyBtn.nextSibling);
-  } else {
-    weeklyBtn.parentElement.appendChild(btn);
+  // 旧週間表印刷（空き行圧縮版）は受付簿へ一本化したためツールバーから外す
+  if (weeklyBtn) {
+    weeklyBtn.style.display = 'none';
+    weeklyBtn.setAttribute('aria-hidden', 'true');
+    weeklyBtn.tabIndex = -1;
   }
+
+  let btn = document.getElementById('btnAptPrintHandwritingWeekly');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.id = 'btnAptPrintHandwritingWeekly';
+    btn.type = 'button';
+    btn.title = '対面受付・次週案内用。全時間枠を残したA4横の予約受付簿を印刷します（空き枠は手書き可／画面表示は変わりません）';
+    btn.style.cssText = [
+      'display:flex',
+      'align-items:center',
+      'gap:4px',
+      'padding:6px 12px',
+      'background:#059669',
+      'color:#fff',
+      'border:1px solid #047857',
+      'border-radius:6px',
+      'font-size:0.82rem',
+      'font-weight:700',
+      'cursor:pointer',
+      'white-space:nowrap'
+    ].join(';');
+    btn.addEventListener('click', () => {
+      handlePrintHandwritingWeeklySheet();
+    });
+
+    // デイリー印刷の直前＝2大印刷ボタンの左側に配置
+    if (dailyBtn) {
+      parent.insertBefore(btn, dailyBtn);
+    } else if (weeklyBtn) {
+      parent.insertBefore(btn, weeklyBtn);
+    } else {
+      parent.appendChild(btn);
+    }
+  }
+
+  btn.innerHTML = '<span>📝</span><span>週間予約受付簿 (A4横)</span>';
+  btn.style.display = 'flex';
 }
 
 /**
@@ -74,11 +87,10 @@ export function initAppointmentCalendarView() {
   const btnNew = document.getElementById('btnAptCalNew');
   const btnModeWeek = document.getElementById('btnAptViewModeWeek');
   const btnModeMonth = document.getElementById('btnAptViewModeMonth');
-  const btnPrintWeekly = document.getElementById('btnAptPrintWeekly');
   const btnPrintDaily = document.getElementById('btnAptPrintDaily');
 
   syncDateInput();
-  ensureHandwritingPrintButton();
+  ensureReceptionBookPrintToolbar();
 
   dateInput?.addEventListener('change', (e) => {
     if (!e.target.value) return;
@@ -128,12 +140,7 @@ export function initAppointmentCalendarView() {
   btnModeWeek?.addEventListener('click', () => switchViewMode('WEEK'));
   btnModeMonth?.addEventListener('click', () => switchViewMode('MONTH'));
 
-  // ★印刷ボタン 1: 週間タイムテーブル (A4横・空き行圧縮の閲覧用)
-  btnPrintWeekly?.addEventListener('click', () => {
-    printWeeklyAppointmentTable(calendarState.baseDate);
-  });
-
-  // ★印刷ボタン 2: 本日デイリー予約チェックリスト (A4縦1枚・30名以上対応)
+  // ★印刷: 本日デイリー予約チェックリスト (A4縦) ※受付簿と並ぶ2大印刷
   btnPrintDaily?.addEventListener('click', () => {
     printDailyAppointmentChecklist(calendarState.baseDate);
   });
@@ -182,7 +189,7 @@ export function switchViewMode(mode) {
  * 画面全体の再描画
  */
 export function renderAppointmentCalendarView() {
-  ensureHandwritingPrintButton();
+  ensureReceptionBookPrintToolbar();
   renderAptPalette();
 
   if (calendarState.viewMode === 'WEEK') {
