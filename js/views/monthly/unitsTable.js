@@ -8,6 +8,48 @@ import { monthlyState, MONTHLY_QUICK_FILTERS } from './monthlyState.js';
 import { printPatientMonthlyReport } from '../../print/patientMonthlyReportPrint.js';
 import { showToast } from '../../ui/toast.js';
 
+/**
+ * 疾患別ソート用ランク（運動器 → 脳血管 → 廃用 → その他個別 → 消炎 → 未設定）
+ * diseaseType コードを最優先し、病名テキストからもフォールバック判定する。
+ * @param {object} patient
+ * @returns {number}
+ */
+function getDiseaseSortRank(patient) {
+  const type = String(patient?.diseaseType || '').toUpperCase();
+  if (type === 'LOCOMOTIVE') return 1;
+  if (type === 'CEREBROVASCULAR') return 2;
+  if (type === 'DISUSE') return 3;
+  if (type === 'RESPIRATORY' || type === 'CARDIOVASCULAR' || type === 'CANCER') return 4;
+  if (type === 'ANALGESIA') return 8;
+
+  const text = (
+    `${patient?.diseaseType || ''} ${patient?.disease || ''} ${patient?.diagnosis || ''} ${patient?.diseaseName || ''} ${patient?.diseaseLabel || ''}`
+  ).toLowerCase();
+
+  // 1. 運動器
+  if (text.includes('運動') || text.includes('loco') || text.includes('ortho')) {
+    return 1;
+  }
+  // 2. 脳血管等
+  if (text.includes('脳') || text.includes('cerebro') || text.includes('neuro')) {
+    return 2;
+  }
+  // 3. 廃用症候群
+  if (text.includes('廃用') || text.includes('disuse')) {
+    return 3;
+  }
+  // 4. 呼吸器・心大血管・がん等（その他個別リハ）
+  if (text.includes('呼吸') || text.includes('心大') || text.includes('心大血管') || text.includes('がん') || text.includes('癌')) {
+    return 4;
+  }
+  // 5. 消炎鎮痛のみ
+  if (patient?.isInflammation || patient?.isInflammationOnly || text.includes('消炎') || text.includes('analges')) {
+    return 8;
+  }
+  // 6. 未設定・その他
+  return 9;
+}
+
 function sortPatients(patients, sortKey) {
   return [...patients].sort((a, b) => {
     const pA = a.patient;
@@ -20,6 +62,17 @@ function sortPatients(patients, sortKey) {
     }
 
     if (sortKey === 'ID') {
+      return (pA.id || '').localeCompare(pB.id || '', undefined, { numeric: true });
+    }
+
+    // 疾患別 (運動器 → 脳血管 → 廃用 → その他 → 消炎)
+    if (sortKey === 'DISEASE' || sortKey === 'disease') {
+      const rankDiff = getDiseaseSortRank(pA) - getDiseaseSortRank(pB);
+      if (rankDiff !== 0) return rankDiff;
+      // 同疾患内は区分（入院→外来）→ ID で安定ソート
+      const catA = pA.category === 'INPATIENT' ? 0 : 1;
+      const catB = pB.category === 'INPATIENT' ? 0 : 1;
+      if (catA !== catB) return catA - catB;
       return (pA.id || '').localeCompare(pB.id || '', undefined, { numeric: true });
     }
 
