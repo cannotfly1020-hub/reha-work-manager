@@ -1,5 +1,6 @@
 // js/ui/sharedFolderUi.js
-// 院内LAN共有フォルダー（NAS等）選択・ステータス表示 UI
+// 院内LAN共有フォルダー UI
+// ★ヘッダー: 状態ランプのみ / Excel・バックアップ画面: 選択・変更・開く操作を一本化
 
 import { showToast } from './toast.js';
 
@@ -32,7 +33,7 @@ function shortenPath(fullPath, maxLen = 48) {
 }
 
 /**
- * ヘッダー／Excel画面の共有先ステータスを更新
+ * ヘッダーランプ＋Excel画面の共有先ステータスを更新
  * @param {{ path?: string, configuredPath?: string, masterPath?: string, masterExists?: boolean, success?: boolean }|null} info
  */
 export function applySharedFolderStatusToUi(info) {
@@ -44,15 +45,15 @@ export function applySharedFolderStatusToUi(info) {
 
   const bridge = getSharedFolderBridge();
   if (!bridge) {
-    const offlineMsg = '共有先: デスクトップアプリ版で設定可';
-    if (textEl) textEl.textContent = offlineMsg;
-    if (iconEl) iconEl.textContent = '📂';
+    if (textEl) textEl.textContent = '院内LAN アプリ版のみ';
+    if (iconEl) iconEl.textContent = '⚪';
     if (badgeEl) {
-      badgeEl.style.background = '#f1f5f9';
-      badgeEl.title = offlineMsg;
+      badgeEl.classList.remove('is-syncing', 'is-pending', 'is-local');
+      badgeEl.classList.add('is-offline');
+      badgeEl.title = '共有フォルダ設定はデスクトップアプリ版の「Excel出力」画面で行えます';
     }
     if (exportBadge) {
-      exportBadge.textContent = offlineMsg;
+      exportBadge.textContent = '共有先: デスクトップアプリ版で設定可';
       exportBadge.style.color = '#64748b';
     }
     if (masterHint) masterHint.textContent = '';
@@ -65,43 +66,58 @@ export function applySharedFolderStatusToUi(info) {
   const masterExists = Boolean(info && info.masterExists);
   const isUserConfigured = Boolean(configured);
 
-  let label = '共有先: 未設定 (ローカル)';
-  let icon = '📁';
-  let bg = '#e2e8f0';
-  let color = '#475569';
+  // --- ヘッダー: コンパクトな状態ランプのみ ---
+  let lampLabel = '院内LAN 未設定';
+  let lampIcon = '⚪';
+  let lampClass = 'is-local';
+  let lampTitle = '共有フォルダ未設定。設定は「Excel出力」画面から行えます。';
 
   if (path) {
-    if (isUserConfigured) {
-      label = `共有先: ${shortenPath(path)}`;
-      icon = masterExists ? '🟢' : '🟡';
-      bg = masterExists ? '#dcfce7' : '#fef9c3';
-      color = masterExists ? '#166534' : '#854d0e';
+    if (isUserConfigured && masterExists) {
+      lampLabel = '院内LAN同期中';
+      lampIcon = '🟢';
+      lampClass = 'is-syncing';
+      lampTitle = `院内LAN同期中\n${path}\nマスター: ${masterPath || '(あり)'}\n※設定変更は Excel出力画面`;
+    } else if (isUserConfigured) {
+      lampLabel = '院内LAN 待機中';
+      lampIcon = '🟡';
+      lampClass = 'is-pending';
+      lampTitle = `共有先設定済（マスター未作成）\n${path}\n次回保存で生成されます\n※設定変更は Excel出力画面`;
+    } else if (masterExists) {
+      lampLabel = '院内LAN同期中';
+      lampIcon = '🟢';
+      lampClass = 'is-syncing';
+      lampTitle = `自動解決の共有先で同期中\n${path}\n※設定変更は Excel出力画面`;
     } else {
-      label = `共有先: 自動 (${shortenPath(path)})`;
-      icon = masterExists ? '🟢' : '📁';
-      bg = masterExists ? '#e0f2fe' : '#e2e8f0';
-      color = masterExists ? '#0369a1' : '#475569';
+      lampLabel = '院内LAN ローカル';
+      lampIcon = '📁';
+      lampClass = 'is-local';
+      lampTitle = `自動解決先: ${path}\n※NAS等の指定は Excel出力画面`;
     }
   }
 
-  if (textEl) textEl.textContent = label;
-  if (iconEl) iconEl.textContent = icon;
+  if (textEl) textEl.textContent = lampLabel;
+  if (iconEl) iconEl.textContent = lampIcon;
   if (badgeEl) {
-    badgeEl.style.background = bg;
-    badgeEl.title = path
-      ? `${path}${masterPath ? `\nマスター: ${masterPath}` : ''}${masterExists ? '\n(マスターファイルあり)' : '\n(マスター未作成・次回保存で生成)'}`
-      : '共有フォルダ未設定';
+    badgeEl.classList.remove('is-syncing', 'is-pending', 'is-local', 'is-offline');
+    badgeEl.classList.add(lampClass);
+    badgeEl.title = lampTitle;
   }
+
+  // --- Excel画面: 詳細パス＋操作パネル ---
+  const exportColor = lampClass === 'is-syncing'
+    ? '#166534'
+    : (lampClass === 'is-pending' ? '#854d0e' : '#475569');
   if (exportBadge) {
     exportBadge.textContent = path
       ? `${isUserConfigured ? '🟢 設定済' : '📁 自動解決'}: ${path}${masterExists ? ' （マスターあり）' : ' （マスター未作成）'}`
       : '共有先: 未設定 (ローカル日次バックアップ先を利用)';
-    exportBadge.style.color = color;
+    exportBadge.style.color = exportColor;
   }
   if (masterHint) {
     masterHint.textContent = masterPath
       ? `マスターファイル: ${masterPath}`
-      : '';
+      : (path ? `短縮表示: ${shortenPath(path, 64)}` : '');
   }
 }
 
@@ -160,17 +176,58 @@ export async function handleSelectSharedFolder() {
 }
 
 /**
- * ヘッダー／Excel画面の選択ボタンを初期化
+ * 共有フォルダをエクスプローラーで開く
+ * @returns {Promise<boolean>}
+ */
+export async function handleOpenSharedFolder() {
+  const bridge = getSharedFolderBridge();
+  if (!bridge) {
+    showToast('共有フォルダを開く機能はデスクトップアプリ版でのみ利用できます', 'warn');
+    return false;
+  }
+  try {
+    if (typeof bridge.openSharedFolder === 'function') {
+      const res = await bridge.openSharedFolder();
+      if (res?.success) {
+        showToast(`📂 共有フォルダを開きました${res.path ? `: ${res.path}` : ''}`, 'success');
+        return true;
+      }
+      showToast(res?.message || '共有フォルダを開けませんでした', 'warn');
+      return false;
+    }
+    // フォールバック: パス取得のみ
+    const info = await bridge.getSharedFolderPath();
+    showToast(info?.path
+      ? `共有先パス: ${info.path}`
+      : '共有フォルダが未設定です', 'info');
+    return false;
+  } catch (e) {
+    console.error('[sharedFolderUi] open error:', e);
+    showToast(e?.message || '共有フォルダを開けませんでした', 'error');
+    return false;
+  }
+}
+
+/**
+ * Excel画面の操作ボタンを初期化（ヘッダーには設定ボタンを置かない）
  */
 export function initSharedFolderUi() {
-  const btnHeader = document.getElementById('btnSelectSharedFolderHeader');
   const btnExport = document.getElementById('btnSelectSharedFolderExport');
+  const btnOpen = document.getElementById('btnOpenSharedFolderExport');
 
-  btnHeader?.addEventListener('click', () => {
-    handleSelectSharedFolder();
-  });
   btnExport?.addEventListener('click', () => {
     handleSelectSharedFolder();
+  });
+  btnOpen?.addEventListener('click', () => {
+    handleOpenSharedFolder();
+  });
+
+  // ヘッダーランプをクリックしたら Excel 画面へ誘導（設定操作は一本化）
+  const lamp = document.getElementById('sharedFolderHeaderBadge');
+  lamp?.addEventListener('click', () => {
+    const tab = document.querySelector('.nav-tab[data-target="viewExport"]');
+    if (tab) tab.click();
+    showToast('共有フォルダの設定・変更はこちらで行えます', 'info');
   });
 
   refreshSharedFolderStatusUi().catch(() => { /* ignore */ });

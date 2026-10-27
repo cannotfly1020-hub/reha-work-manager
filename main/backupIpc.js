@@ -447,6 +447,21 @@ function setupIpcHandlers() {
       return { success: false, path: '', message: error.message };
     }
   });
+
+  // 8. 共有フォルダをエクスプローラーで開く
+  ipcMain.handle('open-shared-folder', async () => {
+    try {
+      const sharedDir = getSharedDataDirectoryPath();
+      if (!fs.existsSync(sharedDir)) {
+        fs.mkdirSync(sharedDir, { recursive: true });
+      }
+      await shell.openPath(sharedDir);
+      return { success: true, path: sharedDir };
+    } catch (error) {
+      console.error('open-shared-folder error:', error);
+      return { success: false, message: error.message || '共有フォルダを開けませんでした。' };
+    }
+  });
 }
 
 module.exports = {

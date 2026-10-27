@@ -196,9 +196,15 @@
   color: #cbd5e1;
 }
 
-/* 端末操作者バッジ・共有フォルダバッジ・監査ログタイムライン */
-.operator-badge,
-.shared-folder-badge {
+/* 端末操作者バッジ・共有状態ランプ・監査ログタイムライン */
+.header-status-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0 !important;
+  white-space: nowrap !important;
+}
+.operator-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -211,8 +217,6 @@
   min-width: max-content;
   height: 38px;
   box-sizing: border-box;
-}
-.operator-badge {
   background: #f0fdf4;
   border: 1px solid #86efac;
   color: #166534;
@@ -222,22 +226,7 @@
   border-color: #fdba74;
   color: #9a3412;
 }
-.shared-folder-badge {
-  background: #e2e8f0;
-  border: 1px solid #cbd5e1;
-  color: #334155;
-  font-size: 12px;
-  padding: 4px 10px;
-}
-.shared-folder-badge #sharedFolderStatusText {
-  display: inline-block;
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap !important;
-}
-.operator-badge .btn-xs,
-.shared-folder-badge .btn-xs {
+.operator-badge .btn-xs {
   padding: 2px 7px;
   font-size: 0.7rem;
   font-weight: 700;
@@ -250,6 +239,45 @@
   flex-shrink: 0 !important;
   height: auto;
   min-height: 24px;
+}
+/* ヘッダー: 共有状態ランプのみ（設定ボタンなし・クリックでExcel画面へ） */
+.shared-folder-lamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  height: 32px;
+  box-sizing: border-box;
+  cursor: pointer;
+  border: 1px solid #cbd5e1;
+  background: #f1f5f9;
+  color: #475569;
+  user-select: none;
+}
+.shared-folder-lamp.is-syncing {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #166534;
+}
+.shared-folder-lamp.is-pending {
+  background: #fef9c3;
+  border-color: #fde047;
+  color: #854d0e;
+}
+.shared-folder-lamp.is-local,
+.shared-folder-lamp.is-offline {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #64748b;
+}
+.shared-folder-lamp:hover {
+  filter: brightness(0.97);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 .header-action-btn {
   display: inline-flex !important;

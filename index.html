@@ -38,16 +38,16 @@
         <button class="nav-tab" data-target="viewLoan">物品貸出</button>
         <button class="nav-tab" data-target="viewExport">Excel出力</button>
       </nav>
-      <!-- 端末別操作者バッジ（レベル3監査ログ用・PC固定） -->
-      <div class="operator-badge operator-badge-unset" id="operatorBadge" title="このPCの操作者">
-        👤 操作者: <span id="currentOperatorName">未設定</span>
-        <button type="button" id="btnChangeOperator" class="btn-xs">変更</button>
-      </div>
-      <!-- 院内LAN共有フォルダー状態・選択 -->
-      <div class="shared-folder-badge" id="sharedFolderHeaderBadge" title="院内共有マスターの保存先">
-        <span id="sharedFolderStatusIcon">📁</span>
-        <span id="sharedFolderStatusText">共有先: 未設定 (ローカル)</span>
-        <button type="button" id="btnSelectSharedFolderHeader" class="btn btn-xs">フォルダ設定</button>
+      <!-- 操作者＋共有状態ランプ（設定操作は Excel・バックアップ画面へ一本化） -->
+      <div class="header-status-group">
+        <div class="operator-badge operator-badge-unset" id="operatorBadge" title="このPCの操作者">
+          👤 操作者: <span id="currentOperatorName">未設定</span>
+          <button type="button" id="btnChangeOperator" class="btn-xs">変更</button>
+        </div>
+        <div class="shared-folder-lamp" id="sharedFolderHeaderBadge" title="共有フォルダの設定・変更は「Excel出力」画面から行えます">
+          <span id="sharedFolderStatusIcon">⚪</span>
+          <span id="sharedFolderStatusText">院内LAN 未設定</span>
+        </div>
       </div>
       <!-- ヘッダー更新ボタン -->
       <button id="btnRefreshHeader" type="button" class="header-action-btn header-action-btn-primary">
@@ -325,9 +325,9 @@
           </p>
         </div>
 
-        <!-- 院内LAN共有フォルダー（NAS等）設定 -->
+        <!-- 院内LAN共有フォルダー設定（選択・変更・開く操作は本画面に一本化） -->
         <div id="sharedFolderPanel" style="margin-bottom:16px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:14px 16px;">
-          <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
+          <div style="display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:8px;">
             <div style="min-width:0; flex:1;">
               <div style="font-weight:800; font-size:0.85rem; color:#166534; margin-bottom:4px;">🌐 院内LAN共有フォルダー（複数PC同期）</div>
               <div id="sharedFolderExportStatusBadge" style="font-size:0.75rem; color:#15803d; font-weight:600; word-break:break-all;">共有先: 未設定 (ローカル)</div>
@@ -335,12 +335,15 @@
             </div>
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
               <button id="btnSelectSharedFolderExport" type="button" style="padding:8px 14px; background:#16a34a; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer; white-space:nowrap;">
-                📁 共有フォルダを選択
+                📁 共有フォルダを選択・変更
+              </button>
+              <button id="btnOpenSharedFolderExport" type="button" style="padding:8px 14px; background:#fff; color:#166534; border:1px solid #86efac; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer; white-space:nowrap;">
+                📂 エクスプローラーで開く
               </button>
             </div>
           </div>
           <p style="font-size:0.68rem; color:#64748b; margin:0; line-height:1.4;">
-            NAS等の共有フォルダを指定すると、全PCが同じ <code style="background:#dcfce7; padding:0 3px; border-radius:3px;">reha_shared_master.json</code> を自動読み書きします。各PCで同じフォルダを選択してください。
+            NAS等の共有フォルダを指定すると、全PCが同じ <code style="background:#dcfce7; padding:0 3px; border-radius:3px;">reha_shared_master.json</code> を自動読み書きします。設定・変更はこの画面のみで行います（ヘッダーは同期状態ランプのみ表示）。
           </p>
         </div>
 

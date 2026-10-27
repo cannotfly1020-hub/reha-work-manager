@@ -70,6 +70,14 @@ const backupBridge = {
    */
   getSharedFolderPath: () => {
     return ipcRenderer.invoke('get-shared-folder-path');
+  },
+
+  /**
+   * 共有フォルダをエクスプローラーで開く
+   * @returns {Promise<{ success: boolean, path?: string, message?: string }>}
+   */
+  openSharedFolder: () => {
+    return ipcRenderer.invoke('open-shared-folder');
   }
 };
 
