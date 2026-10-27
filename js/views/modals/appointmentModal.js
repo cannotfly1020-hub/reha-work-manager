@@ -11,6 +11,28 @@ import {
 import { showToast } from '../../ui/toast.js';
 import { getJapaneseHolidayName } from '../../core/holidayCalc.js';
 import { printAppointmentTicket } from '../../print/appointmentTicketPrint.js';
+import { APPOINTMENT_TIME_STRINGS } from '../../config/rules.js';
+import {
+  snapToNearestAppointmentSlot,
+  normalizeTimeHHmm
+} from '../../core/timeSlotUtil.js';
+
+/**
+ * 開始時刻セレクトを正本20分スロットで埋める
+ * @param {HTMLSelectElement|null} selectEl
+ * @param {string} [selectedTime]
+ */
+function populateAppointmentStartTimeSelect(selectEl, selectedTime = '09:00') {
+  if (!selectEl) return;
+  const slots = (APPOINTMENT_TIME_STRINGS && APPOINTMENT_TIME_STRINGS.length)
+    ? [...APPOINTMENT_TIME_STRINGS]
+    : ['09:00', '09:20', '09:40', '10:00'];
+  const snapped = snapToNearestAppointmentSlot(selectedTime || slots[0], slots);
+  selectEl.innerHTML = slots
+    .map((t) => `<option value="${t}"${t === snapped ? ' selected' : ''}>${t}</option>`)
+    .join('');
+  selectEl.value = snapped;
+}
 
 let activeAppointmentId = null;
 let onAppointmentUpdatedCallback = null;
@@ -102,6 +124,7 @@ export function setupAppointmentModalListeners(onUpdate) {
     if (endTimeDisplay) endTimeDisplay.textContent = `〜 ${end} 終了`;
   };
 
+  startTimeInput?.addEventListener('change', updateEndTime);
   startTimeInput?.addEventListener('input', updateEndTime);
   durationSelect?.addEventListener('change', updateEndTime);
 
@@ -181,11 +204,14 @@ function handleAppointmentFormSubmit() {
     return;
   }
 
+  const rawStart = normalizeTimeHHmm(startTime) || startTime;
+  const snappedStart = snapToNearestAppointmentSlot(rawStart);
+
   const res = upsertAppointment({
     id: activeAppointmentId,
     patientId,
     date,
-    startTime,
+    startTime: snappedStart,
     durationMinutes,
     therapistId,
     treatmentType,
@@ -198,7 +224,11 @@ function handleAppointmentFormSubmit() {
   }
 
   modal?.classList.remove('active');
-  showToast(activeAppointmentId ? '予約を更新しました' : '新規予約を登録しました', 'success');
+  if (rawStart !== snappedStart) {
+    showToast(`開始時刻 ${rawStart} を正本枠 ${snappedStart} に合わせて保存しました`, 'success');
+  } else {
+    showToast(activeAppointmentId ? '予約を更新しました' : '新規予約を登録しました', 'success');
+  }
 
   // 患者用予約票の即時印刷要求がある場合
   if (shouldPrintTicket && res.appointment) {
@@ -251,12 +281,13 @@ export function openAppointmentModal(appointment = null, defaultDate = null, def
   }
 
   const targetDate = appointment?.date || defaultDate || new Date().toISOString().slice(0, 10);
-  const targetTime = appointment?.startTime || defaultTime || '09:00';
+  const rawTargetTime = appointment?.startTime || defaultTime || '09:00';
+  const targetTime = snapToNearestAppointmentSlot(rawTargetTime);
   const targetDuration = appointment?.durationMinutes || 30;
   const pId = appointment?.patientId || '';
 
   if (dateInput) dateInput.value = targetDate;
-  if (startTimeInput) startTimeInput.value = targetTime;
+  populateAppointmentStartTimeSelect(startTimeInput, targetTime);
   if (durationSelect) durationSelect.value = String(targetDuration);
   if (therapistSelect) therapistSelect.value = appointment?.therapistId || 'A';
   if (treatmentTypeSelect) treatmentTypeSelect.value = appointment?.treatmentType || 'INDIVIDUAL';

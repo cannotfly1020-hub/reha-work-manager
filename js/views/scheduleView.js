@@ -2,6 +2,7 @@
 // 当日時間割の初期化と再描画、外来予約の自動吸着・一括反映
 
 import { TIME_SLOTS } from '../config/rules.js';
+import { snapToNearestScheduleSlotId } from '../core/timeSlotUtil.js';
 import { getLocalDateStr } from '../core/dateUtils.js';
 import { showToast } from '../ui/toast.js';
 import { getAppointmentsByDate } from '../store/appointmentStore.js';
@@ -56,27 +57,7 @@ function updateSyncAppointmentBadge() {
  * @returns {string}
  */
 export function findNearestTimeSlot(startTimeStr) {
-  if (!TIME_SLOTS.length) return '';
-  if (!startTimeStr || !String(startTimeStr).includes(':')) return TIME_SLOTS[0].id;
-
-  const [hStr, mStr] = String(startTimeStr).split(':');
-  const targetMinutes = (parseInt(hStr, 10) || 0) * 60 + (parseInt(mStr, 10) || 0);
-  let bestSlotId = TIME_SLOTS[0].id;
-  let bestMinutes = 0;
-  let minDiff = Infinity;
-
-  TIME_SLOTS.forEach((slot) => {
-    const [sh, sm] = String(slot.start || '00:00').split(':');
-    const slotMinutes = (parseInt(sh, 10) || 0) * 60 + (parseInt(sm, 10) || 0);
-    const diff = Math.abs(targetMinutes - slotMinutes);
-    if (diff < minDiff || (diff === minDiff && slotMinutes > bestMinutes)) {
-      minDiff = diff;
-      bestMinutes = slotMinutes;
-      bestSlotId = slot.id;
-    }
-  });
-
-  return bestSlotId;
+  return snapToNearestScheduleSlotId(startTimeStr);
 }
 
 /**

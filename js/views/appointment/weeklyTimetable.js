@@ -12,6 +12,10 @@ import { openAppointmentModal } from '../modals/appointmentModal.js';
 import { showToast } from '../../ui/toast.js';
 import { calendarState } from './calendarState.js';
 import { renderAppointmentCalendarView } from '../appointmentCalendarView.js';
+import {
+  snapToNearestAppointmentSlot,
+  formatOffSlotHint
+} from '../../core/timeSlotUtil.js';
 
 export function renderWeeklyTimetable() {
   const gridEl = document.getElementById('aptWeeklyGrid');
@@ -39,10 +43,12 @@ export function renderWeeklyTimetable() {
     countBadge.textContent = `週間予約: 計 ${weekAptList.length} 件`;
   }
 
-  // 予約マップ [日付][時間帯] -> Appointment[]
+  // 予約マップ [日付][吸着後スロット] -> Appointment[]
+  // ★端数時刻（10:30等）も最寄り正本スロットへ吸着し、画面から絶対に脱落させない
   const slotAptMap = {};
   weekAptList.forEach((apt) => {
-    const k = `${apt.date}_${apt.startTime}`;
+    const snapped = snapToNearestAppointmentSlot(apt.startTime, TIME_SLOTS);
+    const k = `${apt.date}_${snapped}`;
     if (!slotAptMap[k]) slotAptMap[k] = [];
     slotAptMap[k].push(apt);
   });
@@ -135,10 +141,12 @@ export function renderWeeklyTimetable() {
         const staffCol = staffColorMap[apt.therapistId] || '#0284c7';
         const isAnalgesia = apt.treatmentType === 'ANALGESIA' || apt.therapistId === 'ANALGESIA';
         const cardCls = isAnalgesia ? 'apt-weekly-card apt-card-analgesia' : 'apt-weekly-card';
+        const offHint = formatOffSlotHint(apt.startTime, slotTime);
+        const titleExtra = offHint ? ` / ${offHint}` : '';
 
         html += `
-          <div class="${cardCls}" draggable="true" data-apt-id="${apt.id}" style="border-left:4px solid ${staffCol};">
-            <span class="apt-weekly-card-name" title="${sanitizeHtml(pName)} (${apt.patientId})">${sanitizeHtml(pName)}</span>
+          <div class="${cardCls}" draggable="true" data-apt-id="${apt.id}" style="border-left:4px solid ${staffCol};" title="${sanitizeHtml(pName)} (${apt.patientId}) ${apt.startTime || ''}${titleExtra}">
+            <span class="apt-weekly-card-name">${sanitizeHtml(pName)}${offHint ? `<span style="font-size:0.58rem;color:#b45309;font-weight:800;margin-left:2px;">⚠</span>` : ''}</span>
             <span class="apt-weekly-card-tag" style="background:${staffCol};">${sanitizeHtml(staffLabel)}</span>
           </div>
         `;

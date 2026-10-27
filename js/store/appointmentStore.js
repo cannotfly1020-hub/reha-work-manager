@@ -7,6 +7,7 @@ import { storageGet } from '../core/storageAdapter.js';
 import { writeStorageItem } from './storageWrite.js';
 import { getPatientById } from './patientStore.js';
 import { appendAuditLog, AUDIT_CATEGORY, AUDIT_ACTION } from './auditLogStore.js';
+import { snapToNearestAppointmentSlot, normalizeTimeHHmm } from '../core/timeSlotUtil.js';
 
 const APPOINTMENT_STORAGE_KEY = 'reha_outpatient_appointments';
 
@@ -169,12 +170,15 @@ export function upsertAppointment(rawData) {
 
   const targetId = rawData.id || null;
   const targetDuration = Number(rawData.durationMinutes) || 30;
+  // ★端数時刻は正本20分スロットへ強制吸着（画面脱落・医療安全インシデント防止）
+  const rawStart = normalizeTimeHHmm(rawData.startTime) || String(rawData.startTime || '');
+  const startTime = snapToNearestAppointmentSlot(rawStart);
 
   // ★同一患者の重複予約チェック（ヒューマンエラー物理遮断）
   const conflictCheck = checkPatientAppointmentConflict(
     rawData.patientId,
     rawData.date,
-    rawData.startTime,
+    startTime,
     targetDuration,
     targetId
   );
@@ -196,7 +200,7 @@ export function upsertAppointment(rawData) {
   const appointment = {
     id,
     date: rawData.date,
-    startTime: rawData.startTime,
+    startTime,
     durationMinutes: targetDuration,
     patientId: rawData.patientId,
     therapistId: rawData.therapistId || 'A',
@@ -217,15 +221,18 @@ export function upsertAppointment(rawData) {
     const patientName = patient?.name || appointment.patientId;
     let description = '';
     let action = AUDIT_ACTION.CREATE;
+    const snapNote = (rawStart && rawStart !== startTime)
+      ? ` ※入力${rawStart}→${startTime}へ吸着`
+      : '';
     if (existing) {
       action = AUDIT_ACTION.UPDATE;
       if (existing.startTime !== appointment.startTime || existing.date !== appointment.date) {
-        description = `外来予約を ${existing.date} ${existing.startTime} → ${appointment.date} ${appointment.startTime} へ変更`;
+        description = `外来予約を ${existing.date} ${existing.startTime} → ${appointment.date} ${appointment.startTime} へ変更${snapNote}`;
       } else {
-        description = `外来予約を更新（${appointment.date} ${appointment.startTime}）`;
+        description = `外来予約を更新（${appointment.date} ${appointment.startTime}）${snapNote}`;
       }
     } else {
-      description = `外来予約を登録（${appointment.date} ${appointment.startTime}）`;
+      description = `外来予約を登録（${appointment.date} ${appointment.startTime}）${snapNote}`;
     }
     appendAuditLog({
       category: AUDIT_CATEGORY.APPOINTMENT,

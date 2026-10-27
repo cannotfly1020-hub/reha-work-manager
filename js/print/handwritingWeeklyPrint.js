@@ -4,6 +4,7 @@
 
 import { formatDateYMD, getWeekDates } from '../core/dateUtils.js';
 import { TIME_SLOTS } from '../config/appointmentSlots.js';
+import { snapToNearestAppointmentSlot } from '../core/timeSlotUtil.js';
 import { FACILITY_HOURS, REHA_RULES } from '../config/rules.js';
 import { sanitizeHtml } from '../core/dataNormalizer.js';
 import { getJapaneseHolidayName } from '../core/holidayCalc.js';
@@ -136,7 +137,8 @@ export function printHandwritingWeeklySheet(baseDate) {
 
   const slotAptMap = {};
   weekAptList.forEach((apt) => {
-    const k = `${apt.date}_${apt.startTime}`;
+    const snapped = snapToNearestAppointmentSlot(apt.startTime, allSlotTimes);
+    const k = `${apt.date}_${snapped}`;
     if (!slotAptMap[k]) slotAptMap[k] = [];
     slotAptMap[k].push(apt);
   });

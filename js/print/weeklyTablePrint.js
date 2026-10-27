@@ -10,15 +10,17 @@ import { getPatientById } from '../store/patientStore.js';
 import { getAllTherapists } from '../store/therapistStore.js';
 import { getAllAppointments } from '../store/appointmentStore.js';
 import { showToast } from '../ui/toast.js';
+import { snapToNearestAppointmentSlot } from '../core/timeSlotUtil.js';
 
 /**
  * 予約の所要時間が覆う開始時刻スロット列（20分刻み）。印刷用の途中欠落防止。
+ * ★端数開始時刻は最寄り正本スロットへ吸着してから覆う範囲を算出
  * @param {string[]} allSlotTimes
  * @param {{ startTime?: string, durationMinutes?: number }} apt
  * @returns {string[]}
  */
 function getCoveredSlotTimesForPrint(allSlotTimes, apt) {
-  const start = String(apt?.startTime || '');
+  const start = snapToNearestAppointmentSlot(apt?.startTime || '', allSlotTimes);
   if (!start) return [];
   const startIdx = allSlotTimes.indexOf(start);
   const duration = Math.max(1, Number(apt?.durationMinutes) || 20);
@@ -59,7 +61,8 @@ export function printWeeklyAppointmentTable(baseDate) {
 
   const slotAptMap = {};
   weekAptList.forEach((apt) => {
-    const k = `${apt.date}_${apt.startTime}`;
+    const snapped = snapToNearestAppointmentSlot(apt.startTime, TIME_SLOTS);
+    const k = `${apt.date}_${snapped}`;
     if (!slotAptMap[k]) slotAptMap[k] = [];
     slotAptMap[k].push(apt);
   });
