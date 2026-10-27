@@ -3,7 +3,7 @@
 
 const now = new Date();
 
-/** @typedef {'ALL'|'PLAN_MISSING'|'INPATIENT'|'OUT_ANALGESIA'|'OUT_DISEASE'} MonthlyQuickFilter */
+/** @typedef {'ALL'|'PLAN_MISSING'|'INPATIENT'|'OUT_ANALGESIA'|'OUT_DISEASE'|'MAINTENANCE'} MonthlyQuickFilter */
 
 export const MONTHLY_QUICK_FILTERS = Object.freeze({
   ALL: 'ALL',
@@ -11,6 +11,7 @@ export const MONTHLY_QUICK_FILTERS = Object.freeze({
   INPATIENT: 'INPATIENT',
   OUT_ANALGESIA: 'OUT_ANALGESIA',
   OUT_DISEASE: 'OUT_DISEASE',
+  MAINTENANCE: 'MAINTENANCE',
 });
 
 export const monthlyState = {

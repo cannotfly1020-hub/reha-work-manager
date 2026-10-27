@@ -3,7 +3,7 @@
 
 import { REHA_RULES } from '../../config/rules.js';
 import { sanitizeHtml, normalizeToKatakana } from '../../core/dataNormalizer.js';
-import { checkMonth13UnitsViolation } from '../../core/deadlineCalc.js';
+import { calculatePatientDeadlines, checkMonth13UnitsViolation } from '../../core/deadlineCalc.js';
 import { monthlyState, MONTHLY_QUICK_FILTERS } from './monthlyState.js';
 import { printPatientMonthlyReport } from '../../print/patientMonthlyReportPrint.js';
 import { showToast } from '../../ui/toast.js';
@@ -118,6 +118,59 @@ function resolveDischargeInMonth(patient, year, month) {
 }
 
 /**
+ * 維持期・要介護移行期・月13単位制限の管理対象か
+ * （算定日数上限超過／当月満了による移行／個別13単位指定）
+ * @param {object} item aggregate patientMap entry
+ * @param {number} [year]
+ * @param {number} [month]
+ * @returns {boolean}
+ */
+export function isMaintenanceTransitionTarget(item, year = monthlyState.year, month = monthlyState.month) {
+  const p = item?.patient;
+  if (!p || p.diseaseType === 'ANALGESIA') return false;
+
+  const rehaUnits = Number(item?.rehaTotalUnits || 0);
+  const hasReha = Boolean(item?.hasRehaSlots) || rehaUnits >= 1;
+  if (!hasReha) return false;
+
+  const y = Number(year);
+  const m = Number(month);
+  if (!y || !m) return false;
+
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const monthStart = `${y}-${String(m).padStart(2, '0')}-01`;
+  const monthEnd = `${y}-${String(m).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
+
+  if (p.force13Limit === true || p.force13UnitsLimit === true) {
+    return true;
+  }
+
+  const dailyUnitsMap = {};
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    dailyUnitsMap[day] = item.dailyRehaUnits?.[day] || 0;
+  }
+  const violation = checkMonth13UnitsViolation(p, y, m, dailyUnitsMap);
+  if (
+    violation.reason === 'FORCE_13_LIMIT'
+    || violation.reason === 'EXPIRED_BEFORE_MONTH'
+    || violation.reason === 'EXPIRED_DURING_MONTH'
+  ) {
+    return true;
+  }
+
+  // 当月末時点で期限超過、または当月内に満了日がある（移行期・月末満了含む）
+  const deadlines = calculatePatientDeadlines(p, monthEnd);
+  if (deadlines?.isLimitExceeded) return true;
+  if (deadlines?.limitDateStr
+    && deadlines.limitDateStr >= monthStart
+    && deadlines.limitDateStr <= monthEnd) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * 集計エントリがクイックフィルター条件に合致するか
  * @param {object} item aggregate patientMap entry
  * @param {string} filterKey
@@ -146,6 +199,9 @@ export function matchesMonthlyQuickFilter(item, filterKey) {
     case MONTHLY_QUICK_FILTERS.OUT_DISEASE:
       // 外来・疾患別個別リハ（消炎専任を除外）
       return isOut && !isAnalgesiaType && !hasAnalgesiaOnly;
+    case MONTHLY_QUICK_FILTERS.MAINTENANCE:
+      // 算定日数超過・要介護移行期・月13単位制限の管理対象
+      return isMaintenanceTransitionTarget(item, monthlyState.year, monthlyState.month);
     case MONTHLY_QUICK_FILTERS.ALL:
     default:
       return true;
@@ -164,6 +220,7 @@ export function countMonthlyQuickFilters(rawPatients) {
     [MONTHLY_QUICK_FILTERS.INPATIENT]: 0,
     [MONTHLY_QUICK_FILTERS.OUT_ANALGESIA]: 0,
     [MONTHLY_QUICK_FILTERS.OUT_DISEASE]: 0,
+    [MONTHLY_QUICK_FILTERS.MAINTENANCE]: 0,
   };
   rawPatients.forEach((item) => {
     if (matchesMonthlyQuickFilter(item, MONTHLY_QUICK_FILTERS.PLAN_MISSING)) {
@@ -177,6 +234,9 @@ export function countMonthlyQuickFilters(rawPatients) {
     }
     if (matchesMonthlyQuickFilter(item, MONTHLY_QUICK_FILTERS.OUT_DISEASE)) {
       counts[MONTHLY_QUICK_FILTERS.OUT_DISEASE] += 1;
+    }
+    if (matchesMonthlyQuickFilter(item, MONTHLY_QUICK_FILTERS.MAINTENANCE)) {
+      counts[MONTHLY_QUICK_FILTERS.MAINTENANCE] += 1;
     }
   });
   return counts;
@@ -227,6 +287,7 @@ export function renderMonthlyUnitsTable(aggregated) {
       [MONTHLY_QUICK_FILTERS.INPATIENT]: '入院患者の該当はありません',
       [MONTHLY_QUICK_FILTERS.OUT_ANALGESIA]: '外来・消炎鎮痛のみの該当はありません',
       [MONTHLY_QUICK_FILTERS.OUT_DISEASE]: '外来・疾患別リハの該当はありません',
+      [MONTHLY_QUICK_FILTERS.MAINTENANCE]: '維持期・移行対象の該当患者はいません',
       [MONTHLY_QUICK_FILTERS.ALL]: '対象月のデータはありません',
     };
     container.innerHTML = `<div style="padding:24px; text-align:center; color:#94a3b8; font-size:0.85rem;">${sanitizeHtml(labels[filterKey] || labels.ALL)}</div>`;
