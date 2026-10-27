@@ -198,27 +198,33 @@
       </div>
     </div>
     <div id="dailyDiaryPreviewContainer" style="margin-bottom:16px;"></div>
-    <!-- 臨床最重要・患者区分クイックフィルター（月末点検／病棟／医事課） -->
+    <!-- 臨床動線順クイックフィルター（入院/外来 × 疾患別/消炎 分離） -->
     <div id="monthlyQuickFilterBar" class="monthly-quick-filter-bar" role="toolbar" aria-label="月間単位表クイックフィルター">
-      <span class="monthly-qf-label">絞り込み</span>
+      <span class="monthly-qf-label">絞り込み:</span>
       <button type="button" class="monthly-qf-btn is-active" data-monthly-filter="ALL" title="全患者を表示">
         🌐 全員 <span class="monthly-qf-count" data-count-for="ALL">0</span>
       </button>
-      <button type="button" class="monthly-qf-btn monthly-qf-alert" data-monthly-filter="PLAN_MISSING" title="当月リハ実績あり・計画評価料未算定（算定漏れ防止）">
-        ⚠️ 計画書未算定 <span class="monthly-qf-count" data-count-for="PLAN_MISSING">0</span>
+      <button type="button" class="monthly-qf-btn monthly-qf-in-disease" data-monthly-filter="IN_DISEASE" title="入院・疾患別個別リハ（退院・退院予定を含む）">
+        🏥 入院疾患別 <span class="monthly-qf-count" data-count-for="IN_DISEASE">0</span>
       </button>
-      <button type="button" class="monthly-qf-btn" data-monthly-filter="INPATIENT" title="入院患者（当月退院・退院予定を含む）">
-        🏥 入院 (退院含む) <span class="monthly-qf-count" data-count-for="INPATIENT">0</span>
+      <button type="button" class="monthly-qf-btn monthly-qf-in-analg" data-monthly-filter="IN_ANALGESIA" title="入院・消炎鎮痛等処置">
+        ⚡ 入院消炎鎮痛 <span class="monthly-qf-count" data-count-for="IN_ANALGESIA">0</span>
       </button>
-      <button type="button" class="monthly-qf-btn" data-monthly-filter="OUT_ANALGESIA" title="外来・消炎鎮痛等処置のみ">
-        ⚡ 外来 (消炎鎮痛のみ) <span class="monthly-qf-count" data-count-for="OUT_ANALGESIA">0</span>
+      <button type="button" class="monthly-qf-btn monthly-qf-out-disease" data-monthly-filter="OUT_DISEASE" title="外来・疾患別個別リハのみ">
+        🚶 外来疾患別 <span class="monthly-qf-count" data-count-for="OUT_DISEASE">0</span>
+      </button>
+      <button type="button" class="monthly-qf-btn monthly-qf-out-analg" data-monthly-filter="OUT_ANALGESIA" title="外来・消炎鎮痛等処置のみ">
+        ⚡ 外来消炎鎮痛 <span class="monthly-qf-count" data-count-for="OUT_ANALGESIA">0</span>
       </button>
       <button type="button" class="monthly-qf-btn monthly-qf-maint" data-monthly-filter="MAINTENANCE" title="算定日数上限超過・要介護移行期・月13単位制限の管理対象">
         ⏳ 維持期・移行対象 <span class="monthly-qf-count" data-count-for="MAINTENANCE">0</span>
       </button>
-      <button type="button" class="monthly-qf-btn" data-monthly-filter="OUT_DISEASE" title="外来・疾患別個別リハのみ">
-        🚶 外来 (疾患別) <span class="monthly-qf-count" data-count-for="OUT_DISEASE">0</span>
+      <button type="button" class="monthly-qf-btn monthly-qf-alert" data-monthly-filter="PLAN_MISSING" title="当月リハ実績あり・計画評価料未算定（算定漏れ防止）">
+        ⚠️ 計画書未算定 <span class="monthly-qf-count" data-count-for="PLAN_MISSING">0</span>
       </button>
+      <span id="filteredCountBadge" class="monthly-qf-shown">
+        表示中: <strong id="currentShownCount">0</strong> 名
+      </span>
     </div>
     <div class="table-container" id="monthlyTableContainer"></div>
   </section>

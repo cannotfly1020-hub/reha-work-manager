@@ -184,24 +184,31 @@ export function matchesMonthlyQuickFilter(item, filterKey) {
   const rehaUnits = Number(item?.rehaTotalUnits || 0);
   const hasReha = Boolean(item?.hasRehaSlots) || rehaUnits >= 1;
   const hasAnalgesiaOnly = Boolean(item?.hasAnalgesiaSlots) && !hasReha;
+  const isAnalgesia = isAnalgesiaType || hasAnalgesiaOnly;
   const planCount = Number(item?.planCount || 0);
 
-  switch (filterKey) {
-    case MONTHLY_QUICK_FILTERS.PLAN_MISSING:
-      // 当月個別リハ実績あり・計画評価料未算定（消炎専任は対象外）
-      return hasReha && planCount === 0;
-    case MONTHLY_QUICK_FILTERS.INPATIENT:
-      // 入院区分（当月退院・退院予定バッジ付き患者も含む。区分は入院のまま）
-      return isIn;
-    case MONTHLY_QUICK_FILTERS.OUT_ANALGESIA:
-      // 外来かつ消炎鎮痛のみ（疾患タイプ or 月内消炎専任実績）
-      return isOut && (isAnalgesiaType || hasAnalgesiaOnly);
+  // 旧キー互換（セッション中の残骸）
+  const key = filterKey === 'INPATIENT' ? MONTHLY_QUICK_FILTERS.IN_DISEASE : filterKey;
+
+  switch (key) {
+    case MONTHLY_QUICK_FILTERS.IN_DISEASE:
+      // 入院・疾患別個別リハ（退院・退院予定含む／消炎は除外）
+      return isIn && !isAnalgesia;
+    case MONTHLY_QUICK_FILTERS.IN_ANALGESIA:
+      // 入院・消炎鎮痛
+      return isIn && isAnalgesia;
     case MONTHLY_QUICK_FILTERS.OUT_DISEASE:
       // 外来・疾患別個別リハ（消炎専任を除外）
-      return isOut && !isAnalgesiaType && !hasAnalgesiaOnly;
+      return isOut && !isAnalgesia;
+    case MONTHLY_QUICK_FILTERS.OUT_ANALGESIA:
+      // 外来・消炎鎮痛のみ
+      return isOut && isAnalgesia;
     case MONTHLY_QUICK_FILTERS.MAINTENANCE:
       // 算定日数超過・要介護移行期・月13単位制限の管理対象
       return isMaintenanceTransitionTarget(item, monthlyState.year, monthlyState.month);
+    case MONTHLY_QUICK_FILTERS.PLAN_MISSING:
+      // 当月個別リハ実績あり・計画評価料未算定（消炎専任は対象外）
+      return hasReha && planCount === 0;
     case MONTHLY_QUICK_FILTERS.ALL:
     default:
       return true;
@@ -216,40 +223,34 @@ export function matchesMonthlyQuickFilter(item, filterKey) {
 export function countMonthlyQuickFilters(rawPatients) {
   const counts = {
     [MONTHLY_QUICK_FILTERS.ALL]: rawPatients.length,
-    [MONTHLY_QUICK_FILTERS.PLAN_MISSING]: 0,
-    [MONTHLY_QUICK_FILTERS.INPATIENT]: 0,
-    [MONTHLY_QUICK_FILTERS.OUT_ANALGESIA]: 0,
+    [MONTHLY_QUICK_FILTERS.IN_DISEASE]: 0,
+    [MONTHLY_QUICK_FILTERS.IN_ANALGESIA]: 0,
     [MONTHLY_QUICK_FILTERS.OUT_DISEASE]: 0,
+    [MONTHLY_QUICK_FILTERS.OUT_ANALGESIA]: 0,
     [MONTHLY_QUICK_FILTERS.MAINTENANCE]: 0,
+    [MONTHLY_QUICK_FILTERS.PLAN_MISSING]: 0,
   };
-  rawPatients.forEach((item) => {
-    if (matchesMonthlyQuickFilter(item, MONTHLY_QUICK_FILTERS.PLAN_MISSING)) {
-      counts[MONTHLY_QUICK_FILTERS.PLAN_MISSING] += 1;
-    }
-    if (matchesMonthlyQuickFilter(item, MONTHLY_QUICK_FILTERS.INPATIENT)) {
-      counts[MONTHLY_QUICK_FILTERS.INPATIENT] += 1;
-    }
-    if (matchesMonthlyQuickFilter(item, MONTHLY_QUICK_FILTERS.OUT_ANALGESIA)) {
-      counts[MONTHLY_QUICK_FILTERS.OUT_ANALGESIA] += 1;
-    }
-    if (matchesMonthlyQuickFilter(item, MONTHLY_QUICK_FILTERS.OUT_DISEASE)) {
-      counts[MONTHLY_QUICK_FILTERS.OUT_DISEASE] += 1;
-    }
-    if (matchesMonthlyQuickFilter(item, MONTHLY_QUICK_FILTERS.MAINTENANCE)) {
-      counts[MONTHLY_QUICK_FILTERS.MAINTENANCE] += 1;
-    }
+  Object.keys(counts).forEach((key) => {
+    if (key === MONTHLY_QUICK_FILTERS.ALL) return;
+    counts[key] = rawPatients.filter((item) => matchesMonthlyQuickFilter(item, key)).length;
   });
   return counts;
 }
 
 /**
- * フィルターバーの件数・アクティブ状態を同期
+ * フィルターバーの件数・アクティブ状態・表示件数を同期
  * @param {Record<string, number>} counts
+ * @param {number} [shownCount]
  */
-export function syncMonthlyQuickFilterBar(counts) {
+export function syncMonthlyQuickFilterBar(counts, shownCount) {
   const bar = document.getElementById('monthlyQuickFilterBar');
   if (!bar) return;
-  const active = monthlyState.quickFilter || MONTHLY_QUICK_FILTERS.ALL;
+
+  let active = monthlyState.quickFilter || MONTHLY_QUICK_FILTERS.ALL;
+  if (!Object.prototype.hasOwnProperty.call(counts, active)) {
+    active = MONTHLY_QUICK_FILTERS.ALL;
+    monthlyState.quickFilter = active;
+  }
 
   bar.querySelectorAll('.monthly-qf-btn').forEach((btn) => {
     const key = btn.getAttribute('data-monthly-filter') || MONTHLY_QUICK_FILTERS.ALL;
@@ -259,6 +260,12 @@ export function syncMonthlyQuickFilterBar(counts) {
     const badge = btn.querySelector(`[data-count-for="${key}"]`) || btn.querySelector('.monthly-qf-count');
     if (badge) badge.textContent = String(n);
   });
+
+  const shownEl = document.getElementById('currentShownCount');
+  if (shownEl) {
+    const n = typeof shownCount === 'number' ? shownCount : (counts[active] ?? 0);
+    shownEl.textContent = String(n);
+  }
 }
 
 export function renderMonthlyUnitsTable(aggregated) {
@@ -268,9 +275,9 @@ export function renderMonthlyUnitsTable(aggregated) {
   const { daysInMonth, patientMap } = aggregated;
   const rawPatients = Object.values(patientMap);
   const counts = countMonthlyQuickFilters(rawPatients);
-  syncMonthlyQuickFilterBar(counts);
 
   if (rawPatients.length === 0) {
+    syncMonthlyQuickFilterBar(counts, 0);
     container.innerHTML = '<div style="padding:24px; text-align:center; color:#94a3b8; font-size:0.85rem;">対象月のデータはありません</div>';
     return;
   }
@@ -278,16 +285,18 @@ export function renderMonthlyUnitsTable(aggregated) {
   const filterKey = monthlyState.quickFilter || MONTHLY_QUICK_FILTERS.ALL;
   const filtered = rawPatients.filter((item) => matchesMonthlyQuickFilter(item, filterKey));
   const patients = sortPatients(filtered, monthlyState.sortKey);
+  syncMonthlyQuickFilterBar(counts, patients.length);
   const year = monthlyState.year;
   const month = monthlyState.month;
 
   if (patients.length === 0) {
     const labels = {
-      [MONTHLY_QUICK_FILTERS.PLAN_MISSING]: '計画書未算定の該当患者はいません（算定漏れなし）',
-      [MONTHLY_QUICK_FILTERS.INPATIENT]: '入院患者の該当はありません',
-      [MONTHLY_QUICK_FILTERS.OUT_ANALGESIA]: '外来・消炎鎮痛のみの該当はありません',
+      [MONTHLY_QUICK_FILTERS.IN_DISEASE]: '入院・疾患別リハの該当はありません',
+      [MONTHLY_QUICK_FILTERS.IN_ANALGESIA]: '入院・消炎鎮痛の該当はありません',
       [MONTHLY_QUICK_FILTERS.OUT_DISEASE]: '外来・疾患別リハの該当はありません',
+      [MONTHLY_QUICK_FILTERS.OUT_ANALGESIA]: '外来・消炎鎮痛の該当はありません',
       [MONTHLY_QUICK_FILTERS.MAINTENANCE]: '維持期・移行対象の該当患者はいません',
+      [MONTHLY_QUICK_FILTERS.PLAN_MISSING]: '計画書未算定の該当患者はいません（算定漏れなし）',
       [MONTHLY_QUICK_FILTERS.ALL]: '対象月のデータはありません',
     };
     container.innerHTML = `<div style="padding:24px; text-align:center; color:#94a3b8; font-size:0.85rem;">${sanitizeHtml(labels[filterKey] || labels.ALL)}</div>`;

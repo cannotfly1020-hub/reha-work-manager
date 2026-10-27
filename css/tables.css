@@ -27,7 +27,7 @@ color: var(--color-text-muted);
 background-color: #f1f5f9;
 }
 
-/* 月間単位・収益：臨床最重要クイックフィルター */
+/* 月間単位・収益：臨床動線順クイックフィルター */
 .monthly-quick-filter-bar {
   display: flex;
   flex-wrap: wrap;
@@ -50,12 +50,12 @@ background-color: #f1f5f9;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 5px 10px;
+  padding: 4px 10px;
   border: 1px solid #cbd5e1;
-  border-radius: 6px;
+  border-radius: 20px;
   background: #fff;
   color: #334155;
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   font-weight: 700;
   cursor: pointer;
   line-height: 1.2;
@@ -63,46 +63,67 @@ background-color: #f1f5f9;
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 .monthly-qf-btn:hover {
-  background: #f1f5f9;
-  border-color: #94a3b8;
+  filter: brightness(0.97);
 }
 .monthly-qf-btn.is-active {
-  background: #0f172a;
-  border-color: #0f172a;
-  color: #fff;
+  background: #0f172a !important;
+  border-color: #0f172a !important;
+  color: #fff !important;
 }
-.monthly-qf-btn.monthly-qf-alert {
-  border-color: #fbbf24;
-  color: #92400e;
-  background: #fffbeb;
+.monthly-qf-btn.monthly-qf-in-disease {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
 }
-.monthly-qf-btn.monthly-qf-alert:hover {
-  background: #fef3c7;
-  border-color: #f59e0b;
+.monthly-qf-btn.monthly-qf-in-analg {
+  background: #f0fdfa;
+  color: #0f766e;
+  border-color: #99f6e4;
 }
-.monthly-qf-btn.monthly-qf-alert.is-active {
-  background: #b45309;
-  border-color: #b45309;
-  color: #fff;
+.monthly-qf-btn.monthly-qf-out-disease {
+  background: #f0fdf4;
+  color: #15803d;
+  border-color: #bbf7d0;
+}
+.monthly-qf-btn.monthly-qf-out-analg {
+  background: #fefce8;
+  color: #a16207;
+  border-color: #fef08a;
 }
 .monthly-qf-btn.monthly-qf-maint {
-  border-color: #fde68a;
-  color: #b45309;
   background: #fffbeb;
-  border-radius: 20px;
+  color: #b45309;
+  border-color: #fde68a;
 }
-.monthly-qf-btn.monthly-qf-maint:hover {
-  background: #fef3c7;
-  border-color: #fbbf24;
+.monthly-qf-btn.monthly-qf-alert {
+  background: #fff1f2;
+  color: #e11d48;
+  border-color: #fecdd3;
+  font-weight: 800;
 }
-.monthly-qf-btn.monthly-qf-maint.is-active {
-  background: #b45309;
-  border-color: #b45309;
-  color: #fff;
+.monthly-qf-btn.monthly-qf-in-disease:not(.is-active) .monthly-qf-count {
+  background: #bfdbfe;
+  color: #1e40af;
+}
+.monthly-qf-btn.monthly-qf-in-analg:not(.is-active) .monthly-qf-count {
+  background: #99f6e4;
+  color: #0f766e;
+}
+.monthly-qf-btn.monthly-qf-out-disease:not(.is-active) .monthly-qf-count {
+  background: #bbf7d0;
+  color: #166534;
+}
+.monthly-qf-btn.monthly-qf-out-analg:not(.is-active) .monthly-qf-count {
+  background: #fef08a;
+  color: #a16207;
 }
 .monthly-qf-btn.monthly-qf-maint:not(.is-active) .monthly-qf-count {
   background: #fde68a;
   color: #92400e;
+}
+.monthly-qf-btn.monthly-qf-alert:not(.is-active) .monthly-qf-count {
+  background: #fecdd3;
+  color: #be123c;
 }
 .monthly-qf-count {
   display: inline-block;
@@ -119,12 +140,18 @@ background-color: #f1f5f9;
   background: rgba(255, 255, 255, 0.22);
   color: #fff;
 }
-.monthly-qf-btn.monthly-qf-alert:not(.is-active) .monthly-qf-count {
-  background: #fde68a;
-  color: #92400e;
-}
 .monthly-qf-btn[data-count-zero="1"]:not(.is-active):not([data-monthly-filter="ALL"]) {
   opacity: 0.72;
+}
+.monthly-qf-shown {
+  font-size: 0.68rem;
+  color: #64748b;
+  margin-left: auto;
+  font-weight: 600;
+}
+.monthly-qf-shown strong {
+  color: #0f172a;
+  font-weight: 800;
 }
 
 /* 月間単位表専用のタイトな設計（31日まで横スクロールなしで収めるためのスタイル） */
