@@ -4,12 +4,14 @@
 import { safeParseInt } from '../core/dataNormalizer.js';
 import { aggregateFromAppSchedule } from '../store/scheduleStore.js';
 import { loadMonthOnDemand } from '../store/archiveManager.js';
-import { monthlyState } from './monthly/monthlyState.js';
+import { monthlyState, MONTHLY_QUICK_FILTERS } from './monthly/monthlyState.js';
 import {
   renderRevenueDashboard, setupRevenueBreakdownModalListeners, openRevenueBreakdownModal
 } from './monthly/revenueDashboard.js';
 import { renderMonthlyUnitsTable } from './monthly/unitsTable.js';
 import { renderDailyDiaryPreview } from './monthly/diaryPreview.js';
+
+const VALID_QUICK_FILTERS = new Set(Object.values(MONTHLY_QUICK_FILTERS));
 
 export function initMonthlyView() {
   const monthInput = document.getElementById('monthlyMonthInput');
@@ -17,6 +19,7 @@ export function initMonthlyView() {
   const btnNext = document.getElementById('btnNextMonth');
   const sortSelect = document.getElementById('monthlySortSelect');
   const todayCard = document.getElementById('kpiTodayRevenueCard');
+  const quickFilterBar = document.getElementById('monthlyQuickFilterBar');
 
   if (monthInput) {
     monthInput.value = `${monthlyState.year}-${String(monthlyState.month).padStart(2, '0')}`;
@@ -46,11 +49,31 @@ export function initMonthlyView() {
 
   sortSelect?.addEventListener('change', (e) => {
     monthlyState.sortKey = e.target.value;
-    renderMonthlyView();
+    // 並び替えのみ：再集計不要、テーブルだけ再描画
+    if (monthlyState.lastAggregated) {
+      renderMonthlyUnitsTable(monthlyState.lastAggregated);
+    } else {
+      renderMonthlyView();
+    }
   });
 
   todayCard?.addEventListener('click', () => {
     openRevenueBreakdownModal();
+  });
+
+  // 臨床最重要クイックフィルター（ワンクリック切替・再集計なし）
+  quickFilterBar?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.monthly-qf-btn');
+    if (!btn || !quickFilterBar.contains(btn)) return;
+    const key = btn.getAttribute('data-monthly-filter');
+    if (!key || !VALID_QUICK_FILTERS.has(key)) return;
+    if (monthlyState.quickFilter === key) return;
+    monthlyState.quickFilter = key;
+    if (monthlyState.lastAggregated) {
+      renderMonthlyUnitsTable(monthlyState.lastAggregated);
+    } else {
+      renderMonthlyView();
+    }
   });
 
   setupRevenueBreakdownModalListeners();

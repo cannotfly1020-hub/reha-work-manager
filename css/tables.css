@@ -27,6 +27,87 @@ color: var(--color-text-muted);
 background-color: #f1f5f9;
 }
 
+/* 月間単位・収益：臨床最重要クイックフィルター */
+.monthly-quick-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+.monthly-qf-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #64748b;
+  margin-right: 4px;
+  letter-spacing: 0.02em;
+}
+.monthly-qf-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1.2;
+  white-space: nowrap;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.monthly-qf-btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+.monthly-qf-btn.is-active {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #fff;
+}
+.monthly-qf-btn.monthly-qf-alert {
+  border-color: #fbbf24;
+  color: #92400e;
+  background: #fffbeb;
+}
+.monthly-qf-btn.monthly-qf-alert:hover {
+  background: #fef3c7;
+  border-color: #f59e0b;
+}
+.monthly-qf-btn.monthly-qf-alert.is-active {
+  background: #b45309;
+  border-color: #b45309;
+  color: #fff;
+}
+.monthly-qf-count {
+  display: inline-block;
+  min-width: 1.4em;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  background: #e2e8f0;
+  color: #475569;
+  text-align: center;
+}
+.monthly-qf-btn.is-active .monthly-qf-count {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+.monthly-qf-btn.monthly-qf-alert:not(.is-active) .monthly-qf-count {
+  background: #fde68a;
+  color: #92400e;
+}
+.monthly-qf-btn[data-count-zero="1"]:not(.is-active):not([data-monthly-filter="ALL"]) {
+  opacity: 0.72;
+}
+
 /* 月間単位表専用のタイトな設計（31日まで横スクロールなしで収めるためのスタイル） */
 .table-monthly {
 table-layout: fixed;
