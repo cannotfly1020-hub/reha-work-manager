@@ -5,6 +5,8 @@ import { REHA_RULES } from '../../config/rules.js';
 import { sanitizeHtml, normalizeToKatakana } from '../../core/dataNormalizer.js';
 import { checkMonth13UnitsViolation } from '../../core/deadlineCalc.js';
 import { monthlyState } from './monthlyState.js';
+import { printPatientMonthlyReport } from '../../print/patientMonthlyReportPrint.js';
+import { showToast } from '../../ui/toast.js';
 
 function sortPatients(patients, sortKey) {
   return [...patients].sort((a, b) => {
@@ -82,10 +84,11 @@ export function renderMonthlyUnitsTable(aggregated) {
     <table class="modern-table table-monthly">
       <thead>
         <tr>
-          <th class="col-fixed" style="width:110px;">氏名</th>
+          <th class="col-fixed" style="width:128px;">氏名</th>
           <th style="width:32px;">区分</th>
           <th style="width:44px;">当月計</th>
           <th style="width:42px;">計画書</th>
+          <th style="width:52px;">提出用</th>
   `;
   for (let d = 1; d <= daysInMonth; d++) {
     html += `<th>${d}</th>`;
@@ -153,6 +156,14 @@ export function renderMonthlyUnitsTable(aggregated) {
         <td>${catBadge}</td>
         <td>${totalBadge}</td>
         <td>${planBadge}</td>
+        <td style="text-align:center; vertical-align:middle;">
+          <button type="button" class="btn btn-xs btn-outline-primary btn-print-patient"
+            data-patient-id="${sanitizeHtml(p.id)}"
+            title="退院・医事課提出用A4印刷"
+            style="padding:2px 6px; font-size:0.68rem; font-weight:800; border:1px solid #0284c7; background:#fff; color:#0369a1; border-radius:4px; cursor:pointer; white-space:nowrap;">
+            🖨️ 印刷
+          </button>
+        </td>
     `;
     for (let d = 1; d <= daysInMonth; d++) {
       const u = item.dailyUnits[d] || 0;
@@ -179,6 +190,7 @@ export function renderMonthlyUnitsTable(aggregated) {
           <td style="font-size:0.7rem; color:#7c3aed;">加</td>
           <td style="font-weight:700; color:#7c3aed;">${item.totalEarlyUnits}</td>
           <td style="color:#cbd5e1;">-</td>
+          <td style="color:#cbd5e1;">-</td>
       `;
       for (let d = 1; d <= daysInMonth; d++) {
         const eu = item.dailyEarlyUnits[d] || 0;
@@ -203,6 +215,28 @@ export function renderMonthlyUnitsTable(aggregated) {
         subRow.style.display = isHidden ? 'table-row' : 'none';
         if (btn) btn.textContent = isHidden ? '早▲' : '早▼';
       }
+    });
+  });
+
+  // 医事課提出用・患者個人月間実績 A4縦印刷
+  container.querySelectorAll('.btn-print-patient').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const pid = btn.getAttribute('data-patient-id');
+      if (!pid) {
+        showToast('患者IDが取得できません', 'warn');
+        return;
+      }
+      printPatientMonthlyReport(
+        pid,
+        monthlyState.year,
+        monthlyState.month,
+        aggregated
+      ).catch((err) => {
+        console.error('[unitsTable] printPatientMonthlyReport error:', err);
+        showToast('印刷の起動に失敗しました', 'error');
+      });
     });
   });
 }
