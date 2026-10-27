@@ -32,20 +32,47 @@ line-height: 1.5;
 .app-header {
 background: var(--color-surface);
 border-bottom: 1px solid var(--color-border);
-padding: 12px 24px;
+padding: 10px 16px;
 display: flex;
 justify-content: space-between;
 align-items: center;
+flex-wrap: wrap;
+gap: 10px 12px;
 position: sticky;
 top: 0;
 z-index: 40;
+min-height: 56px;
+}
+.app-header > div {
+display: flex;
+align-items: center;
+flex-wrap: wrap;
+gap: 8px 10px;
+min-width: 0;
+}
+/* 右側ツール群（タブ・バッジ・ボタン）: 行としては折り返可、文字は縦潰れ禁止 */
+.app-header-tools {
+display: flex !important;
+align-items: center;
+flex-wrap: wrap;
+gap: 8px;
+min-width: 0;
+flex: 1 1 auto;
+justify-content: flex-end;
 }
 .nav-tab-group {
-display: flex;
-gap: 8px;
+display: inline-flex;
+flex-wrap: nowrap;
+align-items: center;
+gap: 6px;
+flex-shrink: 0;
+overflow-x: auto;
+max-width: 100%;
+-webkit-overflow-scrolling: touch;
+scrollbar-width: thin;
 }
 .nav-tab {
-padding: 8px 16px;
+padding: 8px 14px;
 border-radius: var(--radius-sm);
 border: 1px solid transparent;
 background: transparent;
@@ -53,6 +80,14 @@ font-weight: 600;
 color: var(--color-text-muted);
 cursor: pointer;
 transition: all 0.2s ease;
+white-space: nowrap !important;
+flex-shrink: 0 !important;
+min-width: max-content;
+height: 38px;
+display: inline-flex;
+align-items: center;
+justify-content: center;
+box-sizing: border-box;
 }
 .nav-tab:hover {
 background: #f1f5f9;
@@ -62,6 +97,23 @@ color: var(--color-text-main);
 background: #e0f2fe;
 color: #0369a1;
 border-color: #bae6fd;
+}
+/* ヘッダー内アクションボタンの縦潰れ防止 */
+.app-header button {
+white-space: nowrap !important;
+flex-shrink: 0 !important;
+min-width: max-content;
+height: 38px;
+display: inline-flex;
+align-items: center;
+justify-content: center;
+box-sizing: border-box;
+}
+.app-header .btn-xs,
+.app-header button.btn-xs {
+height: auto;
+min-height: 24px;
+padding: 2px 7px;
 }
 .view-panel {
 display: none;

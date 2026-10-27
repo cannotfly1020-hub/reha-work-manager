@@ -196,26 +196,48 @@
   color: #cbd5e1;
 }
 
-/* 端末操作者バッジ・監査ログタイムライン */
-.operator-badge {
+/* 端末操作者バッジ・共有フォルダバッジ・監査ログタイムライン */
+.operator-badge,
+.shared-folder-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 5px 10px;
-  background: #f0fdf4;
-  border: 1px solid #86efac;
   border-radius: 6px;
   font-size: 0.78rem;
   font-weight: 700;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  min-width: max-content;
+  height: 38px;
+  box-sizing: border-box;
+}
+.operator-badge {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
   color: #166534;
-  white-space: nowrap;
 }
 .operator-badge.operator-badge-unset {
   background: #fff7ed;
   border-color: #fdba74;
   color: #9a3412;
 }
-.operator-badge .btn-xs {
+.shared-folder-badge {
+  background: #e2e8f0;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+.shared-folder-badge #sharedFolderStatusText {
+  display: inline-block;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap !important;
+}
+.operator-badge .btn-xs,
+.shared-folder-badge .btn-xs {
   padding: 2px 7px;
   font-size: 0.7rem;
   font-weight: 700;
@@ -224,6 +246,32 @@
   border-radius: 4px;
   cursor: pointer;
   color: #334155;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  height: auto;
+  min-height: 24px;
+}
+.header-action-btn {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 12px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #334155;
+  cursor: pointer;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  min-width: max-content;
+  height: 38px;
+  box-sizing: border-box;
+}
+.header-action-btn-primary {
+  color: #0369a1;
 }
 .audit-timeline {
   padding: 8px;

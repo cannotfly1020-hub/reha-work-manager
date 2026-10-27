@@ -29,8 +29,8 @@
       <h1 style="font-size:1.15rem; font-weight:800; color:#0f172a; margin:0;">reha-work-manager</h1>
       <span style="font-size:0.75rem; background:#e0f2fe; color:#0369a1; padding:2px 8px; border-radius:9999px; font-weight:700;">令和8年度改定準拠</span>
     </div>
-    <div style="display:flex; align-items:center; gap:12px;">
-      <nav class="nav-tab-group">
+    <div class="app-header-tools">
+      <nav class="nav-tab-group" aria-label="メインナビゲーション">
         <button class="nav-tab active" data-target="viewSchedule">本日時間割</button>
         <button class="nav-tab" data-target="viewAppointmentCalendar">外来予約カレンダー</button>
         <button class="nav-tab" data-target="viewMonthly">月間単位・収益</button>
@@ -44,18 +44,18 @@
         <button type="button" id="btnChangeOperator" class="btn-xs">変更</button>
       </div>
       <!-- 院内LAN共有フォルダー状態・選択 -->
-      <div class="shared-folder-badge" id="sharedFolderHeaderBadge" style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; background: #e2e8f0; padding: 4px 10px; border-radius: 6px;" title="院内共有マスターの保存先">
+      <div class="shared-folder-badge" id="sharedFolderHeaderBadge" title="院内共有マスターの保存先">
         <span id="sharedFolderStatusIcon">📁</span>
-        <span id="sharedFolderStatusText" style="max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">共有先: 未設定 (ローカル)</span>
-        <button type="button" id="btnSelectSharedFolderHeader" class="btn btn-xs" style="padding: 2px 6px; font-size: 11px; border: 1px solid #94a3b8; background: #fff; border-radius: 4px; cursor: pointer; font-weight: 700; color: #334155;">フォルダ設定</button>
+        <span id="sharedFolderStatusText">共有先: 未設定 (ローカル)</span>
+        <button type="button" id="btnSelectSharedFolderHeader" class="btn btn-xs">フォルダ設定</button>
       </div>
       <!-- ヘッダー更新ボタン -->
-      <button id="btnRefreshHeader" type="button" style="display:flex; align-items:center; gap:5px; padding:6px 12px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; font-size:0.82rem; font-weight:700; color:#0369a1; cursor:pointer;">
+      <button id="btnRefreshHeader" type="button" class="header-action-btn header-action-btn-primary">
         <span>🔄</span>
         <span>最新に更新</span>
       </button>
       <!-- スタッフ設定ボタン -->
-      <button id="btnOpenStaffSettings" type="button" style="display:flex; align-items:center; gap:5px; padding:6px 12px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; font-size:0.82rem; font-weight:700; color:#334155; cursor:pointer;">
+      <button id="btnOpenStaffSettings" type="button" class="header-action-btn">
         <span>⚙</span>
         <span>スタッフ設定</span>
       </button>
