@@ -5,6 +5,8 @@
 
 import { storageGet } from '../core/storageAdapter.js';
 import { writeStorageItem } from './storageWrite.js';
+import { getPatientById } from './patientStore.js';
+import { appendAuditLog, AUDIT_CATEGORY, AUDIT_ACTION } from './auditLogStore.js';
 
 const APPOINTMENT_STORAGE_KEY = 'reha_outpatient_appointments';
 
@@ -190,7 +192,7 @@ export function upsertAppointment(rawData) {
   const nowStr = new Date().toISOString();
   const id = targetId || `apt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
-  const existing = all[id] || {};
+  const existing = all[id] || null;
   const appointment = {
     id,
     date: rawData.date,
@@ -201,7 +203,7 @@ export function upsertAppointment(rawData) {
     treatmentType: rawData.treatmentType || 'INDIVIDUAL',
     status: rawData.status || 'CONFIRMED',
     notes: (rawData.notes || '').trim(),
-    createdAt: existing.createdAt || nowStr,
+    createdAt: existing?.createdAt || nowStr,
     updatedAt: nowStr
   };
 
@@ -209,6 +211,30 @@ export function upsertAppointment(rawData) {
   if (!saveAllAppointments(all)) {
     return { success: false, storageFailed: true };
   }
+
+  try {
+    const patient = getPatientById(appointment.patientId);
+    const patientName = patient?.name || appointment.patientId;
+    let description = '';
+    let action = AUDIT_ACTION.CREATE;
+    if (existing) {
+      action = AUDIT_ACTION.UPDATE;
+      if (existing.startTime !== appointment.startTime || existing.date !== appointment.date) {
+        description = `外来予約を ${existing.date} ${existing.startTime} → ${appointment.date} ${appointment.startTime} へ変更`;
+      } else {
+        description = `外来予約を更新（${appointment.date} ${appointment.startTime}）`;
+      }
+    } else {
+      description = `外来予約を登録（${appointment.date} ${appointment.startTime}）`;
+    }
+    appendAuditLog({
+      category: AUDIT_CATEGORY.APPOINTMENT,
+      action,
+      targetPatientId: appointment.patientId,
+      targetPatientName: patientName,
+      description
+    });
+  } catch (_) { /* ignore */ }
 
   return { success: true, appointment, message: '予約を保存しました。' };
 }
@@ -220,9 +246,23 @@ export function upsertAppointment(rawData) {
  */
 export function deleteAppointment(appointmentId) {
   const all = getAllAppointments();
-  if (!all[appointmentId]) return false;
+  const existing = all[appointmentId];
+  if (!existing) return false;
   delete all[appointmentId];
-  return saveAllAppointments(all);
+  const ok = saveAllAppointments(all);
+  if (ok) {
+    try {
+      const patient = getPatientById(existing.patientId);
+      appendAuditLog({
+        category: AUDIT_CATEGORY.APPOINTMENT,
+        action: AUDIT_ACTION.DELETE,
+        targetPatientId: existing.patientId || '',
+        targetPatientName: patient?.name || '',
+        description: `外来予約を削除（${existing.date || ''} ${existing.startTime || ''}）`
+      });
+    } catch (_) { /* ignore */ }
+  }
+  return ok;
 }
 
 /**

@@ -27,6 +27,8 @@ import {
 } from './views/exportView.js';
 import { showToast } from './ui/toast.js';
 import { setupAppointmentModalListeners } from './views/modals/appointmentModal.js';
+import { initAuditLogView, renderAuditTimeline, refreshOperatorBadge } from './views/auditLogView.js';
+import { mergeAuditLogs } from './store/auditLogStore.js';
 
 /** @type {ReturnType<typeof setTimeout>|null} */
 let sharedMasterSaveTimer = null;
@@ -56,7 +58,18 @@ function applySharedMasterDump(dump) {
     return { applied: 0 };
   }
 
+  // 監査ログは他端末分をマージ（クリア前にリモート分を退避）
+  let remoteAuditLogs = [];
+  try {
+    const rawAudit = dump.storage.reha_audit_logs;
+    if (typeof rawAudit === 'string') {
+      const parsed = JSON.parse(rawAudit);
+      if (Array.isArray(parsed)) remoteAuditLogs = parsed;
+    }
+  } catch (_) { /* ignore */ }
+
   // 共有正本でローカルを上書き（reha_ 系を一旦クリアしてから投入）
+  // ※操作者 (reha_local_operator) は localStorage 直書きのため影響なし
   storageRemoveByPrefix('reha_');
 
   let applied = 0;
@@ -64,11 +77,18 @@ function applySharedMasterDump(dump) {
     if (typeof v !== 'string') continue;
     if (k.startsWith('reha_autobackup_')) continue;
     if (k.startsWith('reha_backup_folder_')) continue;
+    if (k === 'reha_audit_logs') continue; // 後でマージ
     if (!writeStorageItem(k, v)) {
       storageSet(k, v);
     }
     applied += 1;
   }
+
+  if (remoteAuditLogs.length > 0) {
+    mergeAuditLogs(remoteAuditLogs);
+    applied += 1;
+  }
+
   return { applied };
 }
 
@@ -209,6 +229,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initPatientView();
   initLoanView();
   initExportView();
+  initAuditLogView();
   initNavigationTabs();
   initRefreshButtons();
 
@@ -254,6 +275,8 @@ export function renderAllViews() {
   } catch (e) { console.error('MonthlyView error:', e); }
   try { renderPatientView(); } catch (e) { console.error('PatientView error:', e); }
   try { renderLoanView(); } catch (e) { console.error('LoanView error:', e); }
+  try { refreshOperatorBadge(); } catch (_) { /* ignore */ }
+  try { renderAuditTimeline(); } catch (_) { /* ignore */ }
   try { refreshArchiveStatusUi(); } catch (_) { /* ignore */ }
 }
 

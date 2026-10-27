@@ -38,6 +38,11 @@
         <button class="nav-tab" data-target="viewLoan">物品貸出</button>
         <button class="nav-tab" data-target="viewExport">Excel出力</button>
       </nav>
+      <!-- 端末別操作者バッジ（レベル3監査ログ用・PC固定） -->
+      <div class="operator-badge operator-badge-unset" id="operatorBadge" title="このPCの操作者">
+        👤 操作者: <span id="currentOperatorName">未設定</span>
+        <button type="button" id="btnChangeOperator" class="btn-xs">変更</button>
+      </div>
       <!-- ヘッダー更新ボタン -->
       <button id="btnRefreshHeader" type="button" style="display:flex; align-items:center; gap:5px; padding:6px 12px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; font-size:0.82rem; font-weight:700; color:#0369a1; cursor:pointer;">
         <span>🔄</span>
@@ -358,8 +363,50 @@
           </div>
         </div>
       </div>
+
+      <!-- 4. レベル3監査ログ（操作履歴タイムライン） -->
+      <div style="margin-top:28px; border-top:1px dashed #cbd5e1; padding-top:24px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:1.1rem;">🛡</span>
+            <h3 style="font-size:0.95rem; font-weight:800; color:#0f172a; margin:0;">4. 操作履歴タイムライン（監査ログ）</h3>
+          </div>
+          <button type="button" id="btnRefreshAuditTimeline" style="padding:5px 10px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:4px; font-size:0.75rem; font-weight:700; color:#0369a1; cursor:pointer;">🔄 更新</button>
+        </div>
+        <p style="font-size:0.75rem; color:#64748b; line-height:1.5; margin-bottom:12px;">
+          誰が・いつ・どの患者の・何を操作したかを端末名付きで記録します。操作者はこのPCに固定され、毎回のログインは不要です。
+        </p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+          <select id="auditCategoryFilter" style="padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.78rem; background:#fff;">
+            <option value="ALL">全カテゴリ</option>
+            <option value="SCHEDULE">時間割</option>
+            <option value="APPOINTMENT">外来予約</option>
+            <option value="PATIENT">患者台帳</option>
+            <option value="SYSTEM">システム</option>
+          </select>
+          <input type="text" id="auditSearchInput" placeholder="患者名・操作者・内容で検索..." style="flex:1; min-width:180px; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.78rem;">
+        </div>
+        <div id="auditTimelineContainer" class="audit-timeline" style="max-height:360px; overflow-y:auto; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;"></div>
+      </div>
     </div>
   </section>
+
+  <!-- モーダル: 端末操作者設定（初回 / 変更） -->
+  <div id="modalOperatorSelect" class="modal-overlay">
+    <div class="modal-card" style="max-width:420px;">
+      <h3 id="operatorModalTitle" style="font-size:1rem; font-weight:800; margin-bottom:8px; color:#0f172a;">このPCの主な担当者を設定</h3>
+      <p style="font-size:0.78rem; color:#64748b; line-height:1.5; margin-bottom:14px;">
+        選択した担当者はこのPCに固定保存され、次回以降は自動で適用されます（パスワード不要）。操作履歴には端末名も併記されます。
+      </p>
+      <div style="font-size:0.75rem; color:#475569; margin-bottom:8px;">端末名: <strong id="operatorModalHostname">-</strong></div>
+      <label for="operatorSelectInput" style="font-size:0.78rem; font-weight:700; display:block; margin-bottom:4px;">担当者（PT / OT / ST / 受付）</label>
+      <select id="operatorSelectInput" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.88rem; font-weight:600; margin-bottom:16px; background:#fff;"></select>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button type="button" id="btnCloseOperatorModal" style="padding:7px 14px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; font-size:0.82rem;">閉じる</button>
+        <button type="button" id="btnConfirmOperator" style="padding:7px 16px; background:#0284c7; color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:700; font-size:0.82rem;">このPCに固定する</button>
+      </div>
+    </div>
+  </div>
 
   <!-- モーダル 1: 時間割コマ編集（患者リアルタイム検索・直接選択対応） -->
   <div id="modalSlotEdit" class="modal-overlay">

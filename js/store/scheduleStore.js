@@ -7,6 +7,7 @@ import { storageGet, storageKeys } from '../core/storageAdapter.js';
 import { writeStorageItem } from './storageWrite.js';
 import { getPatientById } from './patientStore.js';
 import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
+import { appendAuditLog, AUDIT_CATEGORY, AUDIT_ACTION } from './auditLogStore.js';
 
 export function isNonPatientBlock(item) {
   return item?.itemType === 'TASK'
@@ -121,15 +122,45 @@ export function setScheduleSlot(dateStr, therapistId, slotId, slotData) {
     record.itemType = 'PATIENT';
   }
 
+  const prev = current[therapistId]?.[slotId] || null;
   current[therapistId][slotId] = record;
-  return saveDailySchedule(dateStr, current);
+  const ok = saveDailySchedule(dateStr, current);
+  if (ok && !isBlock && record.patientId) {
+    try {
+      const patient = getPatientById(record.patientId);
+      appendAuditLog({
+        category: AUDIT_CATEGORY.SCHEDULE,
+        action: prev ? AUDIT_ACTION.UPDATE : AUDIT_ACTION.CREATE,
+        targetPatientId: record.patientId,
+        targetPatientName: patient?.name || '',
+        description: prev
+          ? `時間割コマを更新（${dateStr} ${therapistId}/${slotId}・${record.units}単位）`
+          : `時間割に配置（${dateStr} ${therapistId}/${slotId}・${record.units}単位）`
+      });
+    } catch (_) { /* ignore */ }
+  }
+  return ok;
 }
 
 export function clearScheduleSlot(dateStr, therapistId, slotId) {
   const current = getDailySchedule(dateStr);
   if (current[therapistId]?.[slotId]) {
+    const removed = current[therapistId][slotId];
     delete current[therapistId][slotId];
-    return saveDailySchedule(dateStr, current);
+    const ok = saveDailySchedule(dateStr, current);
+    if (ok && removed?.patientId) {
+      try {
+        const patient = getPatientById(removed.patientId);
+        appendAuditLog({
+          category: AUDIT_CATEGORY.SCHEDULE,
+          action: AUDIT_ACTION.DELETE,
+          targetPatientId: removed.patientId,
+          targetPatientName: patient?.name || '',
+          description: `時間割コマを削除（${dateStr} ${therapistId}/${slotId}）`
+        });
+      } catch (_) { /* ignore */ }
+    }
+    return ok;
   }
   return true;
 }
@@ -144,7 +175,20 @@ export function moveScheduleSlot(dateStr, fromTherapistId, fromSlotId, toTherapi
 
   current[toTherapistId][toSlotId] = { ...sourceSlot, updatedAt: new Date().toISOString() };
   delete current[fromTherapistId][fromSlotId];
-  return saveDailySchedule(dateStr, current);
+  const ok = saveDailySchedule(dateStr, current);
+  if (ok && sourceSlot.patientId) {
+    try {
+      const patient = getPatientById(sourceSlot.patientId);
+      appendAuditLog({
+        category: AUDIT_CATEGORY.SCHEDULE,
+        action: AUDIT_ACTION.MOVE,
+        targetPatientId: sourceSlot.patientId,
+        targetPatientName: patient?.name || '',
+        description: `時間割コマを移動（${dateStr} ${fromTherapistId}/${fromSlotId} → ${toTherapistId}/${toSlotId}）`
+      });
+    } catch (_) { /* ignore */ }
+  }
+  return ok;
 }
 
 export function addAnalgesiaPatient(dateStr, slotId, patientId) {

@@ -7,6 +7,7 @@ import {
 } from '../core/dataNormalizer.js';
 import { storageGet } from '../core/storageAdapter.js';
 import { writeStorageItem } from './storageWrite.js';
+import { appendAuditLog, AUDIT_CATEGORY, AUDIT_ACTION } from './auditLogStore.js';
 
 const STORAGE_KEY = 'reha_patients_master';
 
@@ -267,11 +268,35 @@ export function upsertPatient(rawData) {
 
   const list = getAllPatients(true);
   const existingIndex = list.findIndex((p) => p.id === id);
+  const prev = existingIndex >= 0 ? list[existingIndex] : null;
   if (existingIndex >= 0) list[existingIndex] = cleanPatient;
   else list.push(cleanPatient);
 
   const saved = saveAllPatients(list);
   if (!saved) return { success: false, storageFailed: true };
+
+  try {
+    const becameDisc = cleanPatient.status === PATIENT_STATUS.DISCONTINUED
+      && prev?.status !== PATIENT_STATUS.DISCONTINUED;
+    const exitChanged = Boolean(cleanPatient.exitDate)
+      && cleanPatient.exitDate !== (prev?.exitDate || '');
+    let action = prev ? AUDIT_ACTION.UPDATE : AUDIT_ACTION.CREATE;
+    let description = prev
+      ? `患者台帳を更新（${cleanPatient.name}）`
+      : `患者を新規登録（${cleanPatient.name}）`;
+    if (becameDisc || (exitChanged && cleanPatient.status === PATIENT_STATUS.DISCONTINUED)) {
+      action = AUDIT_ACTION.DISCONTINUE;
+      description = `終了・退院を設定（${cleanPatient.exitDate || '日付なし'}）: ${cleanPatient.name}`;
+    }
+    appendAuditLog({
+      category: AUDIT_CATEGORY.PATIENT,
+      action,
+      targetPatientId: cleanPatient.id,
+      targetPatientName: cleanPatient.name,
+      description
+    });
+  } catch (_) { /* ignore audit failures */ }
+
   return { success: true, patient: cleanPatient };
 }
 
@@ -305,9 +330,20 @@ export function deletePatient(id) {
   if (!id) return false;
   const targetId = normalizePatientId(id);
   const list = getAllPatients(true);
+  const target = list.find((p) => p.id === targetId);
   const filtered = list.filter((p) => p.id !== targetId);
   if (filtered.length === list.length) return false;
-  return saveAllPatients(filtered);
+  const ok = saveAllPatients(filtered);
+  if (ok) {
+    appendAuditLog({
+      category: AUDIT_CATEGORY.PATIENT,
+      action: AUDIT_ACTION.DELETE,
+      targetPatientId: targetId,
+      targetPatientName: target?.name || '',
+      description: `患者レコードを削除（${target?.name || targetId}）`
+    });
+  }
+  return ok;
 }
 
 /**

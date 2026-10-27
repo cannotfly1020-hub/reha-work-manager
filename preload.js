@@ -1,13 +1,26 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const os = require('os');
 
 /**
- * デスクトップ専用 API（日次バックアップ＋院内共有マスター同期）
+ * デスクトップ専用 API（日次バックアップ＋院内共有マスター同期＋端末名）
  * window.desktopApp / window.electronBackup の両方に同一オブジェクトを公開
  */
 const backupBridge = {
   isDesktop: true,
   platform: process.platform,
   version: '1.0.0',
+
+  /**
+   * 端末ホスト名（監査ログ併記用）
+   * @returns {string}
+   */
+  getHostname: () => {
+    try {
+      return os.hostname() || 'UNKNOWN-PC';
+    } catch (_) {
+      return 'UNKNOWN-PC';
+    }
+  },
 
   /**
    * 日次自動バックアップデータをPCの専用フォルダ（ドキュメント/リハ業務管理_自動バックアップ/）へ直接書き出す
