@@ -23,7 +23,8 @@ import { initLoanView, renderLoanView } from './views/loanView.js';
 import {
   initExportView,
   refreshBackupFolderStatusUi,
-  refreshArchiveStatusUi
+  refreshArchiveStatusUi,
+  refreshSharedFolderStatusUi
 } from './views/exportView.js';
 import { showToast } from './ui/toast.js';
 import { setupAppointmentModalListeners } from './views/modals/appointmentModal.js';
@@ -240,6 +241,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     refreshBackupFolderStatusUi();
     refreshArchiveStatusUi();
+    refreshSharedFolderStatusUi();
   } catch (_) { /* ignore */ }
 
   // 3. 画面描画
@@ -306,6 +308,7 @@ function initRefreshButtons() {
     try {
       const syncRes = await pullSharedMasterToLocal({ silent: false });
       renderAllViews();
+      try { await refreshSharedFolderStatusUi(); } catch (_) { /* ignore */ }
       if (syncRes.applied) {
         showToast(`🔄 共有マスターから最新化しました（${syncRes.keyCount}件）`, 'success');
       } else {

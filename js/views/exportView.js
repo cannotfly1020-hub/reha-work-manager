@@ -16,6 +16,7 @@ import {
 } from '../backup/localFileBackup.js';
 import { generateUketsukeWorkbook } from '../excel/uketsukeWriter.js';
 import { generateDiaryWorkbook } from '../excel/diaryWriter.js';
+import { initSharedFolderUi, refreshSharedFolderStatusUi } from '../ui/sharedFolderUi.js';
 
 export function initExportView() {
   const monthInput = document.getElementById('exportMonthInput');
@@ -34,10 +35,14 @@ export function initExportView() {
 
   setupBackupAndRestoreListeners();
   setupLocalBackupFolderUi();
+  initSharedFolderUi();
   refreshArchiveStatusUi();
 
   window.triggerDailyBackup = triggerDailyAutoBackup;
 }
+
+/** 共有フォルダステータス再描画（外部から呼び出し可） */
+export { refreshSharedFolderStatusUi };
 
 /**
  * Electron 自動バックアップ表示＋フォルダを開くボタンのみ

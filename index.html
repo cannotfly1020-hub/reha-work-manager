@@ -43,6 +43,12 @@
         👤 操作者: <span id="currentOperatorName">未設定</span>
         <button type="button" id="btnChangeOperator" class="btn-xs">変更</button>
       </div>
+      <!-- 院内LAN共有フォルダー状態・選択 -->
+      <div class="shared-folder-badge" id="sharedFolderHeaderBadge" style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; background: #e2e8f0; padding: 4px 10px; border-radius: 6px;" title="院内共有マスターの保存先">
+        <span id="sharedFolderStatusIcon">📁</span>
+        <span id="sharedFolderStatusText" style="max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">共有先: 未設定 (ローカル)</span>
+        <button type="button" id="btnSelectSharedFolderHeader" class="btn btn-xs" style="padding: 2px 6px; font-size: 11px; border: 1px solid #94a3b8; background: #fff; border-radius: 4px; cursor: pointer; font-weight: 700; color: #334155;">フォルダ設定</button>
+      </div>
       <!-- ヘッダー更新ボタン -->
       <button id="btnRefreshHeader" type="button" style="display:flex; align-items:center; gap:5px; padding:6px 12px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; font-size:0.82rem; font-weight:700; color:#0369a1; cursor:pointer;">
         <span>🔄</span>
@@ -303,7 +309,7 @@
           </div>
         </div>
 
-        <!-- PC自動バックアップ（Electronネイティブ1本化・フォルダ選択UIなし） -->
+        <!-- PC自動バックアップ（Electronネイティブ1本化） -->
         <div id="localBackupFolderPanel" style="margin-bottom:16px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:14px 16px;">
           <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
             <div>
@@ -315,7 +321,26 @@
             </button>
           </div>
           <p style="font-size:0.68rem; color:#64748b; margin:0; line-height:1.4;">
-            デスクトップアプリ起動時、データ変更に応じて <code style="background:#dbeafe; padding:0 3px; border-radius:3px;">ドキュメント\リハ業務管理_自動バックアップ</code> へ日次JSONを自動上書きします（14日超は自動削除）。フォルダ選択は不要です。手動の「📦 保存」「🏛 確定保存」も従来どおり利用できます。
+            デスクトップアプリ起動時、データ変更に応じて <code style="background:#dbeafe; padding:0 3px; border-radius:3px;">ドキュメント\リハ業務管理_自動バックアップ</code> へ日次JSONを自動上書きします（14日超は自動削除）。手動の「📦 保存」「🏛 確定保存」も従来どおり利用できます。
+          </p>
+        </div>
+
+        <!-- 院内LAN共有フォルダー（NAS等）設定 -->
+        <div id="sharedFolderPanel" style="margin-bottom:16px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:14px 16px;">
+          <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
+            <div style="min-width:0; flex:1;">
+              <div style="font-weight:800; font-size:0.85rem; color:#166534; margin-bottom:4px;">🌐 院内LAN共有フォルダー（複数PC同期）</div>
+              <div id="sharedFolderExportStatusBadge" style="font-size:0.75rem; color:#15803d; font-weight:600; word-break:break-all;">共有先: 未設定 (ローカル)</div>
+              <div id="sharedFolderMasterPathHint" style="font-size:0.68rem; color:#64748b; margin-top:3px; word-break:break-all;"></div>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button id="btnSelectSharedFolderExport" type="button" style="padding:8px 14px; background:#16a34a; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer; white-space:nowrap;">
+                📁 共有フォルダを選択
+              </button>
+            </div>
+          </div>
+          <p style="font-size:0.68rem; color:#64748b; margin:0; line-height:1.4;">
+            NAS等の共有フォルダを指定すると、全PCが同じ <code style="background:#dcfce7; padding:0 3px; border-radius:3px;">reha_shared_master.json</code> を自動読み書きします。各PCで同じフォルダを選択してください。
           </p>
         </div>
 
