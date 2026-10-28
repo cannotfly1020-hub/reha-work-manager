@@ -18,6 +18,11 @@ import {
 import {
   validateTimeConflict, validateDailyLimit, validateTherapistWorkload, validateMonthly13Limit
 } from '../../core/validator.js';
+import {
+  getTherapistWeeklyUnits,
+  getTherapistWeeklyUnitsMeter,
+  buildWeeklyUnitsMeterHtml
+} from '../../core/therapistWeeklyUnits.js';
 import { showToast } from '../../ui/toast.js';
 import { openSlotModal } from '../modals/slotModal.js';
 import { openAnalgesiaModal } from '../modals/analgesiaModal.js';
@@ -140,7 +145,12 @@ export function renderTimetableGrid() {
 
   let html = '<div class="timetable-header">時間帯</div>';
   therapists.forEach((t) => {
-    html += `<div class="timetable-header">${sanitizeHtml(t.name)}</div>`;
+    const meter = getTherapistWeeklyUnitsMeter(t.id, scheduleState.dateStr);
+    html += `
+      <div class="timetable-header therapist-col-header" data-therapist-header="${sanitizeHtml(t.id)}">
+        <div class="therapist-col-name">${sanitizeHtml(t.name)}</div>
+        ${buildWeeklyUnitsMeterHtml(meter)}
+      </div>`;
   });
   html += '<div class="timetable-header" style="background:#f0fdf4; color:#166534;">消炎鎮痛</div>';
 
@@ -246,7 +256,8 @@ function placePatientInstant(targetTId, targetSId, patientId) {
     }
   }
 
-  const workloadCheck = validateTherapistWorkload(dailySchedule, targetTId, units, 0);
+  const weeklyBefore = getTherapistWeeklyUnits(targetTId, dateStr);
+  const workloadCheck = validateTherapistWorkload(dailySchedule, targetTId, units, 0, weeklyBefore);
   if (!workloadCheck.valid) {
     showToast(workloadCheck.message, 'error');
     return false;
@@ -331,7 +342,8 @@ function changeSlotUnitsQuick(therapistId, slotId, newUnitsRaw) {
     }
   }
 
-  const workloadCheck = validateTherapistWorkload(dailySchedule, therapistId, newUnits, currentUnits);
+  const weeklyBefore = getTherapistWeeklyUnits(therapistId, dateStr);
+  const workloadCheck = validateTherapistWorkload(dailySchedule, therapistId, newUnits, currentUnits, weeklyBefore);
   if (!workloadCheck.valid) {
     showToast(workloadCheck.message, 'error');
     return false;

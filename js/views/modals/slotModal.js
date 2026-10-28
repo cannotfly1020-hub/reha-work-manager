@@ -15,6 +15,7 @@ import { evaluateRecommendedPlan, getSuggestedPlacementUnits } from '../../core/
 import {
   validateTimeConflict, validateDailyLimit, validateTherapistWorkload, validateMonthlyPlanLimit
 } from '../../core/validator.js';
+import { getTherapistWeeklyUnits } from '../../core/therapistWeeklyUnits.js';
 import { getLocalDateStr } from '../../core/dateUtils.js';
 import { showToast } from '../../ui/toast.js';
 
@@ -321,7 +322,15 @@ function handleSlotFormSubmit() {
     }
   }
 
-  const workloadCheck = validateTherapistWorkload(dailySchedule, newTherapistId, units, isRelocated ? 0 : currentUnits);
+  // 移動先セラピストの週累計（同一日内移動は currentUnits を差し引く前の週合計を渡す）
+  const weeklyBefore = getTherapistWeeklyUnits(newTherapistId, currentDateStr);
+  const workloadCheck = validateTherapistWorkload(
+    dailySchedule,
+    newTherapistId,
+    units,
+    isRelocated ? 0 : currentUnits,
+    weeklyBefore
+  );
   if (!workloadCheck.valid) {
     showToast(workloadCheck.message, 'error');
     return;
