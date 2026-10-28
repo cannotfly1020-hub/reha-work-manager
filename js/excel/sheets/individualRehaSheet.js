@@ -597,19 +597,44 @@ function collectSheetRows(aggregated) {
   return rows;
 }
 
+/**
+ * 列順序（厳格）:
+ * ID → 患者氏名 → 介 → 入院日 → 職 → 1〜31日 → 総 → 早Ⅰ → 早Ⅱ → 計画
+ */
+const COL_ID = 0;
+const COL_NAME = 1;
+const COL_CARE = 2;
+const COL_ADMISSION = 3;
+const COL_ROLE = 4;
+const DAY_COL_START = 5;
+const COL_TOTAL = DAY_COL_START + DAY_COLS; // 36
+const COL_EARLY1 = COL_TOTAL + 1;           // 37
+const COL_EARLY2 = COL_TOTAL + 2;           // 38
+const COL_PLAN = COL_TOTAL + 3;             // 39
+
 function writeTwoRowHeader(ws, rowH1, rowH2, year, month, daysInMonth, merges) {
-  // ★職種列追加: ID / 職(PT・OT) / 患者氏名 / 入院日 / 介 / 総
-  const fixedLabels = ['ID', '職', '患者氏名', '入院日', '介', '総'];
-  fixedLabels.forEach((label, c) => {
-    const style = c === 5 ? STYLE_HEADER_TOTAL : STYLE_HEADER;
-    setStyledCell(ws, rowH1, c, label, style);
-    setStyledCell(ws, rowH2, c, '', style);
+  // 固定先頭: ID / 患者氏名 / 介 / 入院日 / 職
+  const leftLabels = [
+    { c: COL_ID, label: 'ID', style: STYLE_HEADER },
+    { c: COL_NAME, label: '患者氏名', style: STYLE_HEADER },
+    { c: COL_CARE, label: '介', style: STYLE_HEADER },
+    { c: COL_ADMISSION, label: '入院日', style: STYLE_HEADER },
+    { c: COL_ROLE, label: '職', style: STYLE_HEADER }
+  ];
+  leftLabels.forEach(({ c, label, style }) => {
+    setStyledCell(ws, rowH1, c, label, {
+      ...style,
+      alignment: { horizontal: 'center', vertical: 'center', wrapText: true }
+    });
+    setStyledCell(ws, rowH2, c, '', {
+      ...style,
+      alignment: { horizontal: 'center', vertical: 'center' }
+    });
     merges.push({ s: { r: rowH1, c }, e: { r: rowH2, c } });
   });
 
-  const dayColStart = 6;
   for (let d = 1; d <= DAY_COLS; d += 1) {
-    const col = dayColStart + (d - 1);
+    const col = DAY_COL_START + (d - 1);
     if (d > daysInMonth) {
       const muted = {
         font: { name: 'Meiryo UI', sz: 7, color: { rgb: '94A3B8' } },
@@ -634,34 +659,35 @@ function writeTwoRowHeader(ws, rowH1, rowH2, year, month, daysInMonth, merges) {
     }
     setStyledCell(ws, rowH1, col, String(d), {
       ...dayStyle,
-      font: { ...(dayStyle.font || {}), sz: 8, bold: true }
+      font: { ...(dayStyle.font || {}), sz: 8, bold: true },
+      alignment: { horizontal: 'center', vertical: 'center' }
     });
     setStyledCell(ws, rowH2, col, DAY_OF_WEEK[dow], {
       ...dowStyle,
-      font: { ...(dowStyle.font || {}), sz: 7.5, bold: true }
+      font: { ...(dowStyle.font || {}), sz: 7.5, bold: true },
+      alignment: { horizontal: 'center', vertical: 'center' }
     });
   }
 
-  const extraCol = dayColStart + DAY_COLS;
-  ['早Ⅰ', '早Ⅱ', '計画'].forEach((label, i) => {
-    const c = extraCol + i;
-    setStyledCell(ws, rowH1, c, label, STYLE_HEADER);
-    setStyledCell(ws, rowH2, c, '', STYLE_HEADER);
+  // 右端: 総 / 早Ⅰ / 早Ⅱ / 計画
+  const rightLabels = [
+    { c: COL_TOTAL, label: '総', style: STYLE_HEADER_TOTAL },
+    { c: COL_EARLY1, label: '早Ⅰ', style: STYLE_HEADER },
+    { c: COL_EARLY2, label: '早Ⅱ', style: STYLE_HEADER },
+    { c: COL_PLAN, label: '計画', style: STYLE_HEADER }
+  ];
+  rightLabels.forEach(({ c, label, style }) => {
+    setStyledCell(ws, rowH1, c, label, {
+      ...style,
+      alignment: { horizontal: 'center', vertical: 'center', wrapText: true }
+    });
+    setStyledCell(ws, rowH2, c, '', {
+      ...style,
+      alignment: { horizontal: 'center', vertical: 'center' }
+    });
     merges.push({ s: { r: rowH1, c }, e: { r: rowH2, c } });
   });
 }
-
-/**
- * 患者属性・総・早期・計画の結合対象列（職・日別は結合しない）
- * 列: 0=ID, 1=職, 2=氏名, 3=入院日, 4=介, 5=総, 6..=日, 後尾=早Ⅰ/早Ⅱ/計画
- */
-const COL_ID = 0;
-const COL_ROLE = 1;
-const COL_NAME = 2;
-const COL_ADMISSION = 3;
-const COL_CARE = 4;
-const COL_TOTAL = 5;
-const DAY_COL_START = 6;
 
 /**
  * @param {object} ws
@@ -696,6 +722,7 @@ function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraB
   const planValue = (mergeOpts.mergedPlan !== undefined) ? mergeOpts.mergedPlan : planDateStr;
 
   // 結合セル用: 先頭行に値、下位行は空（マージで上の値が見える）
+  // 順序: ID → 氏名 → 介 → 入院日 → 職 → 日別 → 総 → 早Ⅰ → 早Ⅱ → 計画
   if (writeShared) {
     setStyledCell(ws, curRow, COL_ID, p.id, {
       ...STYLE_DATA_C,
@@ -703,10 +730,23 @@ function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraB
       font: { name: 'Meiryo UI', sz: 8, bold: true },
       alignment: { horizontal: 'center', vertical: 'center' }
     });
+    setStyledCell(ws, curRow, COL_NAME, p.name, {
+      ...STYLE_DATA_L, fill: zebraBg, alignment: { horizontal: 'left', vertical: 'center' }
+    });
+    const careStyle = careStyleBase
+      ? { ...careStyleBase, alignment: { ...(careStyleBase.alignment || {}), vertical: 'center', horizontal: 'center' } }
+      : { ...STYLE_DATA_C, fill: zebraBg, alignment: { horizontal: 'center', vertical: 'center' } };
+    setStyledCell(ws, curRow, COL_CARE, careLabel, careStyle);
+    setStyledCell(ws, curRow, COL_ADMISSION, admissionLabel, {
+      ...STYLE_DATA_C, fill: zebraBg, alignment: { horizontal: 'center', vertical: 'center' }
+    });
   } else {
     setStyledCell(ws, curRow, COL_ID, '', {
       ...STYLE_DATA_C, fill: zebraBg, alignment: { horizontal: 'center', vertical: 'center' }
     });
+    setStyledCell(ws, curRow, COL_NAME, '', { ...STYLE_DATA_L, fill: zebraBg });
+    setStyledCell(ws, curRow, COL_CARE, '', { ...STYLE_DATA_C, fill: zebraBg });
+    setStyledCell(ws, curRow, COL_ADMISSION, '', { ...STYLE_DATA_C, fill: zebraBg });
   }
 
   // 職種別行ラベル（PT=青 / OT=緑 / ST=紫）※結合しない
@@ -724,40 +764,6 @@ function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraB
     fill: roleFill,
     font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: roleColor } }
   });
-
-  if (writeShared) {
-    setStyledCell(ws, curRow, COL_NAME, p.name, {
-      ...STYLE_DATA_L, fill: zebraBg, alignment: { horizontal: 'left', vertical: 'center' }
-    });
-    setStyledCell(ws, curRow, COL_ADMISSION, admissionLabel, {
-      ...STYLE_DATA_C, fill: zebraBg, alignment: { horizontal: 'center', vertical: 'center' }
-    });
-
-    const careStyle = careStyleBase
-      ? { ...careStyleBase, alignment: { ...(careStyleBase.alignment || {}), vertical: 'center', horizontal: 'center' } }
-      : { ...STYLE_DATA_C, fill: zebraBg, alignment: { horizontal: 'center', vertical: 'center' } };
-    setStyledCell(ws, curRow, COL_CARE, careLabel, careStyle);
-
-    // ★「総」= PT+OT(+ST) 合算（縦結合セル）。退・維マークは含めない
-    const isReducedSheet = mode === 'FULL_REDUCED' || mode === 'SPLIT_REDUCED';
-    setStyledCell(ws, curRow, COL_TOTAL, totalValue, {
-      ...STYLE_DATA_C,
-      fill: { fgColor: { rgb: isReducedSheet ? 'FEF3C7' : 'E0F2FE' } },
-      font: {
-        name: 'Meiryo UI',
-        sz: 8.5,
-        bold: true,
-        color: { rgb: isReducedSheet ? 'B45309' : '0369A1' }
-      },
-      alignment: { horizontal: 'center', vertical: 'center' },
-      numFmt: '#,##0'
-    });
-  } else {
-    setStyledCell(ws, curRow, COL_NAME, '', { ...STYLE_DATA_L, fill: zebraBg });
-    setStyledCell(ws, curRow, COL_ADMISSION, '', { ...STYLE_DATA_C, fill: zebraBg });
-    setStyledCell(ws, curRow, COL_CARE, '', { ...STYLE_DATA_C, fill: zebraBg });
-    setStyledCell(ws, curRow, COL_TOTAL, '', { ...STYLE_DATA_C, fill: zebraBg });
-  }
 
   const dayColStart = DAY_COL_START;
   for (let d = 1; d <= DAY_COLS; d += 1) {
@@ -845,51 +851,65 @@ function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraB
     }
   }
 
-  const extraCol = dayColStart + DAY_COLS;
+  // 日別の右側: 総（合算）→ 早Ⅰ → 早Ⅱ → 計画
   if (writeShared) {
-    setStyledCell(ws, curRow, extraCol, early1Value > 0 ? early1Value : '-', {
+    const isReducedSheet = mode === 'FULL_REDUCED' || mode === 'SPLIT_REDUCED';
+    setStyledCell(ws, curRow, COL_TOTAL, totalValue, {
+      ...STYLE_DATA_C,
+      fill: { fgColor: { rgb: isReducedSheet ? 'FEF3C7' : 'E0F2FE' } },
+      font: {
+        name: 'Meiryo UI',
+        sz: 8.5,
+        bold: true,
+        color: { rgb: isReducedSheet ? 'B45309' : '0369A1' }
+      },
+      alignment: { horizontal: 'center', vertical: 'center' },
+      numFmt: '#,##0'
+    });
+    setStyledCell(ws, curRow, COL_EARLY1, early1Value > 0 ? early1Value : '-', {
       ...STYLE_DATA_C,
       fill: early1Value > 0 ? { fgColor: { rgb: 'D1FAE5' } } : zebraBg,
       font: { name: 'Meiryo UI', sz: 8, bold: early1Value > 0 },
       alignment: { horizontal: 'center', vertical: 'center' }
     });
-    setStyledCell(ws, curRow, extraCol + 1, early2Value > 0 ? early2Value : '-', {
+    setStyledCell(ws, curRow, COL_EARLY2, early2Value > 0 ? early2Value : '-', {
       ...STYLE_DATA_C,
       fill: early2Value > 0 ? { fgColor: { rgb: 'DBEAFE' } } : zebraBg,
       font: { name: 'Meiryo UI', sz: 8, bold: early2Value > 0 },
       alignment: { horizontal: 'center', vertical: 'center' }
     });
-    setStyledCell(ws, curRow, extraCol + 2, planValue || '-', {
+    setStyledCell(ws, curRow, COL_PLAN, planValue || '-', {
       ...STYLE_DATA_C,
       fill: zebraBg,
       font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: 'B45309' } },
       alignment: { horizontal: 'center', vertical: 'center' }
     });
   } else {
-    setStyledCell(ws, curRow, extraCol, '', { ...STYLE_DATA_C, fill: zebraBg });
-    setStyledCell(ws, curRow, extraCol + 1, '', { ...STYLE_DATA_C, fill: zebraBg });
-    setStyledCell(ws, curRow, extraCol + 2, '', { ...STYLE_DATA_C, fill: zebraBg });
+    setStyledCell(ws, curRow, COL_TOTAL, '', { ...STYLE_DATA_C, fill: zebraBg });
+    setStyledCell(ws, curRow, COL_EARLY1, '', { ...STYLE_DATA_C, fill: zebraBg });
+    setStyledCell(ws, curRow, COL_EARLY2, '', { ...STYLE_DATA_C, fill: zebraBg });
+    setStyledCell(ws, curRow, COL_PLAN, '', { ...STYLE_DATA_C, fill: zebraBg });
   }
 }
 
 /**
  * 同一患者×同一算定区分の職種行グループについて、結合対象列のマージを追加
+ * （職・1〜31日は結合しない）
  * @param {Array} merges
  * @param {number} rowStart 先頭行（0始まり）
  * @param {number} rowEnd 末尾行（含む）
  */
 function pushPatientRoleMerges(merges, rowStart, rowEnd) {
   if (!(rowEnd > rowStart)) return;
-  const extraCol = DAY_COL_START + DAY_COLS;
   const mergeCols = [
     COL_ID,
     COL_NAME,
-    COL_ADMISSION,
     COL_CARE,
+    COL_ADMISSION,
     COL_TOTAL,
-    extraCol,       // 早Ⅰ
-    extraCol + 1,   // 早Ⅱ
-    extraCol + 2    // 計画
+    COL_EARLY1,
+    COL_EARLY2,
+    COL_PLAN
   ];
   mergeCols.forEach((c) => {
     merges.push({ s: { r: rowStart, c }, e: { r: rowEnd, c } });
@@ -971,19 +991,52 @@ function buildSingleGroupWorksheet(aggregated, groupRows, def) {
   ws['!rows'] = rHeights;
   ws['!merges'] = merges;
 
+  // 列幅: A4横 fitToWidth=1 で右端（総・早Ⅰ・早Ⅱ・計画）がハミ出さないよう詰める
+  // 順序: ID / 氏名 / 介 / 入院日 / 職 / 1〜31 / 総 / 早Ⅰ / 早Ⅱ / 計画
   const colProps = [
-    { wch: 7 }, { wch: 4.5 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 5.5 }
+    { wch: 6.5 },  // ID
+    { wch: 11 },   // 患者氏名
+    { wch: 7 },    // 介
+    { wch: 7 },    // 入院日
+    { wch: 3.8 }   // 職
   ];
-  for (let d = 0; d < DAY_COLS; d += 1) colProps.push({ wch: 3.1 });
-  colProps.push({ wch: 5 }, { wch: 5 }, { wch: 7 });
+  for (let d = 0; d < DAY_COLS; d += 1) colProps.push({ wch: 2.85 });
+  colProps.push(
+    { wch: 4.5 },  // 総
+    { wch: 4.2 },  // 早Ⅰ
+    { wch: 4.2 },  // 早Ⅱ
+    { wch: 5.5 }   // 計画
+  );
   ws['!cols'] = colProps;
 
   ws['!views'] = [{ showGridLines: true }];
-  ws['!freeze'] = { xSplit: 6, ySplit: 3, topLeftCell: 'G4', activePane: 'bottomRight', state: 'frozen' };
+  // 職列まで固定（日列開始 = col 5 → F列）
+  ws['!freeze'] = { xSplit: 5, ySplit: 3, topLeftCell: 'F4', activePane: 'bottomRight', state: 'frozen' };
 
+  // ★A4横・横幅1ページ絶対収容（fitToWidth:1 / orientation:landscape）
   applyA4LandscapePrintSetup(ws, false);
   ws['!margins'] = {
-    left: 0.2, right: 0.2, top: 0.3, bottom: 0.3, header: 0.1, footer: 0.1
+    left: 0.15, right: 0.15, top: 0.25, bottom: 0.25, header: 0.08, footer: 0.08
+  };
+  // applyA4 後も fitToWidth を明示上書き（他処理による上書き防止）
+  ws['!pageSetup'] = {
+    ...(ws['!pageSetup'] || {}),
+    paperSize: 9,
+    orientation: 'landscape',
+    fitToWidth: 1,
+    fitToHeight: 0,
+    scale: 100,
+    fitToPage: true
+  };
+  ws['!sheetPr'] = { pageSetUpPr: { fitToPage: true } };
+  ws['!rehaPrintSetup'] = {
+    ...(ws['!rehaPrintSetup'] || {}),
+    paperSize: 9,
+    orientation: 'landscape',
+    fitToWidth: 1,
+    fitToHeight: 0,
+    fitHeight: false,
+    scale: 100
   };
 
   updateSheetRange(ws);
