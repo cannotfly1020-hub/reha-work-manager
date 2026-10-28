@@ -92,7 +92,7 @@ export function getTherapistWeeklyUnitsMeter(therapistId, currentDateStr) {
     remain,
     over,
     level,
-    labelMain: `${used}/${max}u`,
+    labelMain: `${used}/${max}単位`,
     labelSub: over > 0 ? `超過+${over}` : `残${remain}`,
     weekStart,
     weekEnd,
@@ -113,8 +113,8 @@ export function buildDailyUnitsBadgeHtml(dailyUnits, dateStr = '') {
     : '選択日';
   return `
     <div class="daily-units-badge" title="本日（${dateHint}）の個別リハ取得単位（表示のみ・配置制限なし）">
-      <span class="dum-label">本日</span>
-      <span class="dum-main">${n}u</span>
+      <span class="dum-label">本日:</span>
+      <span class="dum-main">${n}単位</span>
     </div>`;
 }
 
@@ -135,15 +135,15 @@ export function buildWeeklyUnitsMeterHtml(meter, dateStr = '') {
     <div class="therapist-units-meters">
       ${buildDailyUnitsBadgeHtml(daily, dateStr)}
       <div class="weekly-units-meter ${levelClass}" title="${title}">
-        <span class="wum-label">週</span>
+        <span class="wum-label">週:</span>
         <span class="wum-main">${meter.labelMain}</span>
-        <span class="wum-sub">${meter.labelSub}</span>
+        <span class="wum-sub">(${meter.labelSub})</span>
       </div>
     </div>`;
 }
 
 /**
- * 幅狭時コンパクトバッジ（例: 📊 18/84）
+ * 幅狭時コンパクトバッジ（例: 📊 18/84単位）
  * @param {object} meter
  * @returns {string}
  */
@@ -158,7 +158,7 @@ export function buildCompactUnitsBadgeHtml(meter) {
       aria-expanded="false" aria-haspopup="true"
       title="クリックで本日・週間単位の詳細を表示">
       <span class="tuc-ico" aria-hidden="true">📊</span>
-      <span class="tuc-text">${daily}/${meter.used}</span>
+      <span class="tuc-text">${daily}/${meter.used}単位</span>
     </button>`;
 }
 
@@ -176,22 +176,24 @@ export function buildUnitsDropdownHtml(meter, dateStr = '', therapistName = '') 
   const barClass = meter.level === 'OVER' ? 'is-over' : (meter.level === 'WARN' ? 'is-warn' : 'is-ok');
   const dateHint = dateStr ? String(dateStr).replace(/-/g, '/') : '選択日';
   const weekRange = `${String(meter.weekStart).replace(/-/g, '/')}〜${String(meter.weekEnd).replace(/-/g, '/')}`;
+  const remainLine = meter.over > 0
+    ? `(超過! ${meter.over} 単位)`
+    : `(週上限まで 残り ${meter.remain} 単位)`;
+  const remainClass = meter.over > 0 ? 'is-over-text' : 'is-remain-text';
   return `
-    <div class="therapist-units-dropdown" role="dialog" aria-label="単位内訳">
-      <div class="tud-title">${therapistName ? `<strong>${therapistName}</strong> · ` : ''}単位内訳</div>
+    <div class="therapist-units-dropdown" role="dialog" aria-label="単位詳細">
+      <div class="tud-title">${therapistName ? `<strong>${therapistName}</strong> ` : ''}単位詳細</div>
       <div class="tud-row">
-        <span class="tud-k">本日（${dateHint}）</span>
-        <span class="tud-v">${daily}u</span>
+        <span class="tud-line">・本日実施: <strong>${daily}</strong> 単位</span>
       </div>
-      <div class="tud-note">※本日単位は表示のみ（配置制限なし）</div>
+      <div class="tud-note">※本日単位は表示のみ（配置制限なし）／${dateHint}</div>
       <div class="tud-row">
-        <span class="tud-k">今週（${weekRange}）</span>
-        <span class="tud-v">${meter.used}/${meter.max}u</span>
+        <span class="tud-line">・今週累計: <strong>${meter.used}</strong> / ${meter.max} 単位</span>
       </div>
       <div class="tud-row">
-        <span class="tud-k">${meter.over > 0 ? '超過' : '残枠'}</span>
-        <span class="tud-v">${meter.over > 0 ? `+${meter.over}u` : `${meter.remain}u`}</span>
+        <span class="tud-line ${remainClass}">${remainLine}</span>
       </div>
+      <div class="tud-week-range">対象週: ${weekRange}</div>
       <div class="tud-bar" aria-hidden="true">
         <div class="tud-bar-fill ${barClass}" style="width:${pct}%;"></div>
       </div>
