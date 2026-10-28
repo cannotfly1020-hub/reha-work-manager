@@ -585,13 +585,14 @@ function collectSheetRows(aggregated) {
     });
   });
 
+  // ★同一患者×同一算定区分で PT→OT（→ST）が連続するよう並べ、縦結合の対象にする
   rows.sort((a, b) => {
     const idCmp = a.id.localeCompare(b.id, 'ja', { numeric: true });
     if (idCmp !== 0) return idCmp;
+    const redCmp = Number(a.reduced) - Number(b.reduced);
+    if (redCmp !== 0) return redCmp;
     const roleOrder = { PT: 0, OT: 1, ST: 2 };
-    const rCmp = (roleOrder[a.role] ?? 9) - (roleOrder[b.role] ?? 9);
-    if (rCmp !== 0) return rCmp;
-    return Number(a.reduced) - Number(b.reduced);
+    return (roleOrder[a.role] ?? 9) - (roleOrder[b.role] ?? 9);
   });
   return rows;
 }
@@ -650,7 +651,35 @@ function writeTwoRowHeader(ws, rowH1, rowH2, year, month, daysInMonth, merges) {
   });
 }
 
-function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraBg) {
+/**
+ * 患者属性・総・早期・計画の結合対象列（職・日別は結合しない）
+ * 列: 0=ID, 1=職, 2=氏名, 3=入院日, 4=介, 5=総, 6..=日, 後尾=早Ⅰ/早Ⅱ/計画
+ */
+const COL_ID = 0;
+const COL_ROLE = 1;
+const COL_NAME = 2;
+const COL_ADMISSION = 3;
+const COL_CARE = 4;
+const COL_TOTAL = 5;
+const DAY_COL_START = 6;
+
+/**
+ * @param {object} ws
+ * @param {number} curRow
+ * @param {object} row
+ * @param {number} year
+ * @param {number} month
+ * @param {number} daysInMonth
+ * @param {object} zebraBg
+ * @param {{
+ *   writeShared?: boolean,
+ *   mergedTotal?: number,
+ *   mergedEarly1?: number,
+ *   mergedEarly2?: number,
+ *   mergedPlan?: string
+ * }} [mergeOpts] 同一患者PT/OT縦結合用。writeShared=true の先頭行に合算値を書く
+ */
+function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraBg, mergeOpts = {}) {
   const { item, rowView } = row;
   // 最新マスター優先（退マーク・グレーアウト判定と氏名表示の整合）
   const p = row.analysis?.livePatient || resolveLivePatient(item.patient);
@@ -660,12 +689,27 @@ function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraB
     dischargeDateStr, maintenanceStartDateStr, role
   } = rowView;
   const roleLabel = role || row.role || 'PT';
+  const writeShared = mergeOpts.writeShared !== false;
+  const totalValue = Number.isFinite(mergeOpts.mergedTotal) ? mergeOpts.mergedTotal : periodTotal;
+  const early1Value = Number.isFinite(mergeOpts.mergedEarly1) ? mergeOpts.mergedEarly1 : early1;
+  const early2Value = Number.isFinite(mergeOpts.mergedEarly2) ? mergeOpts.mergedEarly2 : early2;
+  const planValue = (mergeOpts.mergedPlan !== undefined) ? mergeOpts.mergedPlan : planDateStr;
 
-  setStyledCell(ws, curRow, 0, p.id, {
-    ...STYLE_DATA_C, fill: zebraBg, font: { name: 'Meiryo UI', sz: 8, bold: true }
-  });
+  // 結合セル用: 先頭行に値、下位行は空（マージで上の値が見える）
+  if (writeShared) {
+    setStyledCell(ws, curRow, COL_ID, p.id, {
+      ...STYLE_DATA_C,
+      fill: zebraBg,
+      font: { name: 'Meiryo UI', sz: 8, bold: true },
+      alignment: { horizontal: 'center', vertical: 'center' }
+    });
+  } else {
+    setStyledCell(ws, curRow, COL_ID, '', {
+      ...STYLE_DATA_C, fill: zebraBg, alignment: { horizontal: 'center', vertical: 'center' }
+    });
+  }
 
-  // 職種別行ラベル（PT=青 / OT=緑 / ST=紫）
+  // 職種別行ラベル（PT=青 / OT=緑 / ST=紫）※結合しない
   let roleFill = { fgColor: { rgb: 'DBEAFE' } };
   let roleColor = '1D4ED8';
   if (roleLabel === 'OT') {
@@ -675,35 +719,47 @@ function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraB
     roleFill = { fgColor: { rgb: 'EDE9FE' } };
     roleColor = '6D28D9';
   }
-  setStyledCell(ws, curRow, 1, roleLabel, {
+  setStyledCell(ws, curRow, COL_ROLE, roleLabel, {
     ...STYLE_DATA_C,
     fill: roleFill,
     font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: roleColor } }
   });
 
-  setStyledCell(ws, curRow, 2, p.name, { ...STYLE_DATA_L, fill: zebraBg });
-  setStyledCell(ws, curRow, 3, admissionLabel, { ...STYLE_DATA_C, fill: zebraBg });
+  if (writeShared) {
+    setStyledCell(ws, curRow, COL_NAME, p.name, {
+      ...STYLE_DATA_L, fill: zebraBg, alignment: { horizontal: 'left', vertical: 'center' }
+    });
+    setStyledCell(ws, curRow, COL_ADMISSION, admissionLabel, {
+      ...STYLE_DATA_C, fill: zebraBg, alignment: { horizontal: 'center', vertical: 'center' }
+    });
 
-  const careStyle = careStyleBase
-    ? { ...careStyleBase }
-    : { ...STYLE_DATA_C, fill: zebraBg };
-  setStyledCell(ws, curRow, 4, careLabel, careStyle);
+    const careStyle = careStyleBase
+      ? { ...careStyleBase, alignment: { ...(careStyleBase.alignment || {}), vertical: 'center', horizontal: 'center' } }
+      : { ...STYLE_DATA_C, fill: zebraBg, alignment: { horizontal: 'center', vertical: 'center' } };
+    setStyledCell(ws, curRow, COL_CARE, careLabel, careStyle);
 
-  // ★「総」は期間内の純粋な数値単位のみ（退・維マークは一切含めない）／職種別合計
-  const isReducedSheet = mode === 'FULL_REDUCED' || mode === 'SPLIT_REDUCED';
-  setStyledCell(ws, curRow, 5, periodTotal, {
-    ...STYLE_DATA_C,
-    fill: { fgColor: { rgb: isReducedSheet ? 'FEF3C7' : 'E0F2FE' } },
-    font: {
-      name: 'Meiryo UI',
-      sz: 8.5,
-      bold: true,
-      color: { rgb: isReducedSheet ? 'B45309' : '0369A1' }
-    },
-    numFmt: '#,##0'
-  });
+    // ★「総」= PT+OT(+ST) 合算（縦結合セル）。退・維マークは含めない
+    const isReducedSheet = mode === 'FULL_REDUCED' || mode === 'SPLIT_REDUCED';
+    setStyledCell(ws, curRow, COL_TOTAL, totalValue, {
+      ...STYLE_DATA_C,
+      fill: { fgColor: { rgb: isReducedSheet ? 'FEF3C7' : 'E0F2FE' } },
+      font: {
+        name: 'Meiryo UI',
+        sz: 8.5,
+        bold: true,
+        color: { rgb: isReducedSheet ? 'B45309' : '0369A1' }
+      },
+      alignment: { horizontal: 'center', vertical: 'center' },
+      numFmt: '#,##0'
+    });
+  } else {
+    setStyledCell(ws, curRow, COL_NAME, '', { ...STYLE_DATA_L, fill: zebraBg });
+    setStyledCell(ws, curRow, COL_ADMISSION, '', { ...STYLE_DATA_C, fill: zebraBg });
+    setStyledCell(ws, curRow, COL_CARE, '', { ...STYLE_DATA_C, fill: zebraBg });
+    setStyledCell(ws, curRow, COL_TOTAL, '', { ...STYLE_DATA_C, fill: zebraBg });
+  }
 
-  const dayColStart = 6;
+  const dayColStart = DAY_COL_START;
   for (let d = 1; d <= DAY_COLS; d += 1) {
     const col = dayColStart + (d - 1);
     if (d > daysInMonth) {
@@ -790,20 +846,53 @@ function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraB
   }
 
   const extraCol = dayColStart + DAY_COLS;
-  setStyledCell(ws, curRow, extraCol, early1 > 0 ? early1 : '-', {
-    ...STYLE_DATA_C,
-    fill: early1 > 0 ? { fgColor: { rgb: 'D1FAE5' } } : zebraBg,
-    font: { name: 'Meiryo UI', sz: 8, bold: early1 > 0 }
-  });
-  setStyledCell(ws, curRow, extraCol + 1, early2 > 0 ? early2 : '-', {
-    ...STYLE_DATA_C,
-    fill: early2 > 0 ? { fgColor: { rgb: 'DBEAFE' } } : zebraBg,
-    font: { name: 'Meiryo UI', sz: 8, bold: early2 > 0 }
-  });
-  setStyledCell(ws, curRow, extraCol + 2, planDateStr || '-', {
-    ...STYLE_DATA_C,
-    fill: zebraBg,
-    font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: 'B45309' } }
+  if (writeShared) {
+    setStyledCell(ws, curRow, extraCol, early1Value > 0 ? early1Value : '-', {
+      ...STYLE_DATA_C,
+      fill: early1Value > 0 ? { fgColor: { rgb: 'D1FAE5' } } : zebraBg,
+      font: { name: 'Meiryo UI', sz: 8, bold: early1Value > 0 },
+      alignment: { horizontal: 'center', vertical: 'center' }
+    });
+    setStyledCell(ws, curRow, extraCol + 1, early2Value > 0 ? early2Value : '-', {
+      ...STYLE_DATA_C,
+      fill: early2Value > 0 ? { fgColor: { rgb: 'DBEAFE' } } : zebraBg,
+      font: { name: 'Meiryo UI', sz: 8, bold: early2Value > 0 },
+      alignment: { horizontal: 'center', vertical: 'center' }
+    });
+    setStyledCell(ws, curRow, extraCol + 2, planValue || '-', {
+      ...STYLE_DATA_C,
+      fill: zebraBg,
+      font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: 'B45309' } },
+      alignment: { horizontal: 'center', vertical: 'center' }
+    });
+  } else {
+    setStyledCell(ws, curRow, extraCol, '', { ...STYLE_DATA_C, fill: zebraBg });
+    setStyledCell(ws, curRow, extraCol + 1, '', { ...STYLE_DATA_C, fill: zebraBg });
+    setStyledCell(ws, curRow, extraCol + 2, '', { ...STYLE_DATA_C, fill: zebraBg });
+  }
+}
+
+/**
+ * 同一患者×同一算定区分の職種行グループについて、結合対象列のマージを追加
+ * @param {Array} merges
+ * @param {number} rowStart 先頭行（0始まり）
+ * @param {number} rowEnd 末尾行（含む）
+ */
+function pushPatientRoleMerges(merges, rowStart, rowEnd) {
+  if (!(rowEnd > rowStart)) return;
+  const extraCol = DAY_COL_START + DAY_COLS;
+  const mergeCols = [
+    COL_ID,
+    COL_NAME,
+    COL_ADMISSION,
+    COL_CARE,
+    COL_TOTAL,
+    extraCol,       // 早Ⅰ
+    extraCol + 1,   // 早Ⅱ
+    extraCol + 2    // 計画
+  ];
+  mergeCols.forEach((c) => {
+    merges.push({ s: { r: rowStart, c }, e: { r: rowEnd, c } });
   });
 }
 
@@ -827,18 +916,55 @@ function buildSingleGroupWorksheet(aggregated, groupRows, def) {
   writeTwoRowHeader(ws, rowH1, rowH2, year, month, daysInMonth, merges);
   curRow = rowH2 + 1;
 
-  // 同一患者の PT/OT を同じゼブラ帯にまとめ、職種行を視認しやすくする
+  // 同一患者の PT/OT(/ST) をグループ化し、属性列を縦結合＋総は合算表示
   let patientBand = 0;
   let prevId = '';
-  groupRows.forEach((row) => {
-    if (row.id !== prevId) {
+  let i = 0;
+  while (i < groupRows.length) {
+    const lead = groupRows[i];
+    if (lead.id !== prevId) {
       if (prevId) patientBand += 1;
-      prevId = row.id;
+      prevId = lead.id;
     }
+    // 同一 id × 同一 reduced の連続職種行を1ブロックにまとめる
+    let j = i + 1;
+    while (
+      j < groupRows.length
+      && groupRows[j].id === lead.id
+      && Boolean(groupRows[j].reduced) === Boolean(lead.reduced)
+    ) {
+      j += 1;
+    }
+    const block = groupRows.slice(i, j);
     const zebraBg = (patientBand % 2 === 1) ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } };
-    writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraBg);
-    curRow += 1;
-  });
+
+    let mergedTotal = 0;
+    let mergedEarly1 = 0;
+    let mergedEarly2 = 0;
+    let mergedPlan = '';
+    block.forEach((r) => {
+      mergedTotal += Number(r.rowView?.periodTotal) || 0;
+      mergedEarly1 += Number(r.rowView?.early1) || 0;
+      mergedEarly2 += Number(r.rowView?.early2) || 0;
+      if (!mergedPlan && r.rowView?.planDateStr) mergedPlan = r.rowView.planDateStr;
+    });
+
+    const blockStartRow = curRow;
+    block.forEach((r, idx) => {
+      writePatientMatrixRow(ws, curRow, r, year, month, daysInMonth, zebraBg, {
+        writeShared: idx === 0,
+        mergedTotal,
+        mergedEarly1,
+        mergedEarly2,
+        mergedPlan
+      });
+      curRow += 1;
+    });
+    const blockEndRow = curRow - 1;
+    pushPatientRoleMerges(merges, blockStartRow, blockEndRow);
+
+    i = j;
+  }
 
   const rHeights = [{ hpt: 22 }, { hpt: 16 }, { hpt: 14 }];
   for (let r = 3; r < curRow; r += 1) rHeights.push({ hpt: 16 });
