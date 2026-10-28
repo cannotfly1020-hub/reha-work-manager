@@ -318,32 +318,44 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
   <meta charset="UTF-8">
   <title>月間リハ実施実績_${sanitizeHtml(patient.name)}_${y}-${String(m).padStart(2, '0')}</title>
   <style>
+    /* 1. ブラウザ印刷ダイアログへの横向き絶対強制 */
     @page {
       size: A4 landscape;
+      size: 297mm 210mm;
       margin: 8mm 10mm;
     }
+
     @media print {
-      html, body {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-        padding: 0;
-        background: #ffffff !important;
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
+      @page {
+        size: A4 landscape;
+        size: 297mm 210mm;
+        margin: 8mm 10mm;
       }
+      html, body {
+        width: 297mm !important;
+        height: 210mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #ffffff !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        overflow: hidden !important;
+      }
+      .sheet,
       .patient-monthly-report-container {
-        width: 100% !important;
-        max-width: 100% !important;
-        box-sizing: border-box;
-        page-break-inside: avoid;
-        break-inside: avoid;
+        width: 277mm !important;
+        max-width: 277mm !important;
+        max-height: 190mm !important;
+        overflow: hidden !important;
+        box-sizing: border-box !important;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
       }
     }
+
+    /* 2. プレビュー画面・共通スタイル */
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
-      width: 100%;
-      height: 100%;
       font-family: "Meiryo UI", "Hiragino Sans", "Segoe UI", sans-serif;
       color: #0f172a;
       background: #fff;
@@ -355,9 +367,9 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
     .sheet,
     .patient-monthly-report-container {
       width: 100%;
-      max-width: 100%;
-      /* A4横 210mm − 上下余白16mm ≈ 194mm に収める */
-      max-height: 194mm;
+      max-width: 277mm;
+      max-height: 190mm;
+      margin: 0 auto;
       overflow: hidden;
       display: flex;
       flex-direction: column;
