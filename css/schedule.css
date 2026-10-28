@@ -40,6 +40,37 @@ overflow: hidden;
 text-overflow: ellipsis;
 max-width: 100%;
 }
+.therapist-units-meters {
+display: flex;
+flex-wrap: wrap;
+align-items: center;
+justify-content: center;
+gap: 4px;
+}
+/* 本日単位（表示のみ・制限なし・中立色） */
+.daily-units-badge {
+display: inline-flex;
+align-items: center;
+gap: 3px;
+padding: 2px 6px;
+border-radius: 999px;
+font-size: 0.65rem;
+font-weight: 800;
+line-height: 1.2;
+border: 1px solid #cbd5e1;
+background: #f1f5f9;
+color: #334155;
+white-space: nowrap;
+cursor: default;
+user-select: none;
+}
+.daily-units-badge .dum-label {
+font-size: 0.58rem;
+opacity: 0.85;
+}
+.daily-units-badge .dum-main {
+letter-spacing: 0.01em;
+}
 /* 週108単位安全メーター */
 .weekly-units-meter {
 display: inline-flex;

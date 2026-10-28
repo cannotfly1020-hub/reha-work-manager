@@ -164,28 +164,14 @@ export function validateMonthlyPlanLimit(billingPlan, existingPlanDate) {
 
 /**
  * 5. セラピスト人員基準ガード
- * 1日最大特例24単位（24超は完全遮断）、週108単位超過警告（18単位警告は撤廃）
+ * ★本日単位（18/21/24超含む）による配置ブロック・警告は行わない（現場の代行・繁忙運用）。
+ * ★週108単位超過時のみ WARN（配置は許可）。
+ * @param {object} _dailySchedule 互換のため残置（日次制限には未使用）
  */
-export function validateTherapistWorkload(dailySchedule, therapistId, newUnits, currentSlotUnits = 0, weeklyTotalBefore = 0) {
-  let therapistDaily = 0;
-  const tSchedule = dailySchedule[therapistId] || {};
-  Object.values(tSchedule).forEach((item) => {
-    if (item && item.patientId) therapistDaily += Number(item.units) || 0;
-  });
-
-  const nextDaily = therapistDaily - currentSlotUnits + newUnits;
+export function validateTherapistWorkload(_dailySchedule, therapistId, newUnits, currentSlotUnits = 0, weeklyTotalBefore = 0) {
   const nextWeekly = weeklyTotalBefore - currentSlotUnits + newUnits;
 
-  // 1日特例上限（24単位）を超過した場合は物理的に遮断
-  if (nextDaily > REHA_RULES.LIMITS.THERAPIST_DAILY_MAX) {
-    return {
-      valid: false,
-      level: 'BLOCK',
-      message: `セラピスト(${therapistId})の1日特例上限（${REHA_RULES.LIMITS.THERAPIST_DAILY_MAX}単位）を超過するため配置できません。（変更後: ${nextDaily}単位）`
-    };
-  }
-
-  // 週累計が108単位を超過した場合のみ警告ポップアップを出す
+  // 週累計が108単位を超過した場合のみ警告（配置自体は許可）
   if (nextWeekly > REHA_RULES.LIMITS.THERAPIST_WEEKLY_MAX) {
     return {
       valid: true,
@@ -193,8 +179,6 @@ export function validateTherapistWorkload(dailySchedule, therapistId, newUnits, 
       message: `【人員基準注意】セラピスト(${therapistId})の週累計が基準（${REHA_RULES.LIMITS.THERAPIST_WEEKLY_MAX}単位）を超過します。（変更後: ${nextWeekly}単位）`
     };
   }
-
-  // ★18単位超過での警告（ポップアップ）は不要のため完全撤廃
 
   return { valid: true, level: 'OK', message: '' };
 }

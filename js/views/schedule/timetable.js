@@ -149,7 +149,7 @@ export function renderTimetableGrid() {
     html += `
       <div class="timetable-header therapist-col-header" data-therapist-header="${sanitizeHtml(t.id)}">
         <div class="therapist-col-name">${sanitizeHtml(t.name)}</div>
-        ${buildWeeklyUnitsMeterHtml(meter)}
+        ${buildWeeklyUnitsMeterHtml(meter, scheduleState.dateStr)}
       </div>`;
   });
   html += '<div class="timetable-header" style="background:#f0fdf4; color:#166534;">消炎鎮痛</div>';
