@@ -119,7 +119,7 @@ export function buildDailyUnitsBadgeHtml(dailyUnits, dateStr = '') {
 }
 
 /**
- * ヘッダー用: 本日単位 ＋ 週108メーター
+ * ヘッダー用フル表示: 本日単位 ＋ 週108メーター
  * @param {object} meter getTherapistWeeklyUnitsMeter の戻り
  * @param {string} [dateStr]
  * @returns {string}
@@ -130,9 +130,7 @@ export function buildWeeklyUnitsMeterHtml(meter, dateStr = '') {
     ? 'is-over'
     : (meter.level === 'WARN' ? 'is-warn' : 'is-ok');
   const title = `今週（${String(meter.weekStart).replace(/-/g, '/')}〜${String(meter.weekEnd).replace(/-/g, '/')}）累計 ${meter.used} 単位 / 上限 ${meter.max}（診療報酬: 従事者1人週108単位）`;
-  const daily = Number.isFinite(meter.dailyUnits)
-    ? meter.dailyUnits
-    : 0;
+  const daily = Number.isFinite(meter.dailyUnits) ? meter.dailyUnits : 0;
   return `
     <div class="therapist-units-meters">
       ${buildDailyUnitsBadgeHtml(daily, dateStr)}
@@ -142,6 +140,84 @@ export function buildWeeklyUnitsMeterHtml(meter, dateStr = '') {
         <span class="wum-sub">${meter.labelSub}</span>
       </div>
     </div>`;
+}
+
+/**
+ * 幅狭時コンパクトバッジ（例: 📊 18/84）
+ * @param {object} meter
+ * @returns {string}
+ */
+export function buildCompactUnitsBadgeHtml(meter) {
+  if (!meter) return '';
+  const daily = Number.isFinite(meter.dailyUnits) ? meter.dailyUnits : 0;
+  const levelClass = meter.level === 'OVER'
+    ? 'is-over'
+    : (meter.level === 'WARN' ? 'is-warn' : 'is-ok');
+  return `
+    <button type="button" class="therapist-units-compact-btn ${levelClass}"
+      aria-expanded="false" aria-haspopup="true"
+      title="クリックで本日・週間単位の詳細を表示">
+      <span class="tuc-ico" aria-hidden="true">📊</span>
+      <span class="tuc-text">${daily}/${meter.used}</span>
+    </button>`;
+}
+
+/**
+ * アコーディオン詳細パネル（absolute オーバーレイ・グリッド非押し下げ）
+ * @param {object} meter
+ * @param {string} [dateStr]
+ * @param {string} [therapistName]
+ * @returns {string}
+ */
+export function buildUnitsDropdownHtml(meter, dateStr = '', therapistName = '') {
+  if (!meter) return '';
+  const daily = Number.isFinite(meter.dailyUnits) ? meter.dailyUnits : 0;
+  const pct = meter.max > 0 ? Math.min(100, Math.round((meter.used / meter.max) * 100)) : 0;
+  const barClass = meter.level === 'OVER' ? 'is-over' : (meter.level === 'WARN' ? 'is-warn' : 'is-ok');
+  const dateHint = dateStr ? String(dateStr).replace(/-/g, '/') : '選択日';
+  const weekRange = `${String(meter.weekStart).replace(/-/g, '/')}〜${String(meter.weekEnd).replace(/-/g, '/')}`;
+  return `
+    <div class="therapist-units-dropdown" role="dialog" aria-label="単位内訳">
+      <div class="tud-title">${therapistName ? `<strong>${therapistName}</strong> · ` : ''}単位内訳</div>
+      <div class="tud-row">
+        <span class="tud-k">本日（${dateHint}）</span>
+        <span class="tud-v">${daily}u</span>
+      </div>
+      <div class="tud-note">※本日単位は表示のみ（配置制限なし）</div>
+      <div class="tud-row">
+        <span class="tud-k">今週（${weekRange}）</span>
+        <span class="tud-v">${meter.used}/${meter.max}u</span>
+      </div>
+      <div class="tud-row">
+        <span class="tud-k">${meter.over > 0 ? '超過' : '残枠'}</span>
+        <span class="tud-v">${meter.over > 0 ? `+${meter.over}u` : `${meter.remain}u`}</span>
+      </div>
+      <div class="tud-bar" aria-hidden="true">
+        <div class="tud-bar-fill ${barClass}" style="width:${pct}%;"></div>
+      </div>
+      <div class="tud-bar-label">週上限到達度 ${pct}%</div>
+    </div>`;
+}
+
+/**
+ * 適応型ヘッダー本体（フル表示＋コンパクト＋ドロップダウン）
+ * @param {string} therapistName
+ * @param {object} meter
+ * @param {string} [dateStr]
+ * @returns {string}
+ */
+export function buildTherapistHeaderUnitsHtml(therapistName, meter, dateStr = '') {
+  const name = therapistName || '';
+  return `
+    <div class="therapist-header-full">
+      <div class="therapist-col-name">${name}</div>
+      ${buildWeeklyUnitsMeterHtml(meter, dateStr)}
+    </div>
+    <div class="therapist-header-compact">
+      <div class="therapist-col-name therapist-col-name-compact">${name}</div>
+      ${buildCompactUnitsBadgeHtml(meter)}
+    </div>
+    ${buildUnitsDropdownHtml(meter, dateStr, name)}`;
 }
 
 /** デバッグ・テスト用に週キー生成を再エクスポート */

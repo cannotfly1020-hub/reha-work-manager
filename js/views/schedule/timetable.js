@@ -21,7 +21,7 @@ import {
 import {
   getTherapistWeeklyUnits,
   getTherapistWeeklyUnitsMeter,
-  buildWeeklyUnitsMeterHtml
+  buildTherapistHeaderUnitsHtml
 } from '../../core/therapistWeeklyUnits.js';
 import { showToast } from '../../ui/toast.js';
 import { openSlotModal } from '../modals/slotModal.js';
@@ -140,16 +140,17 @@ export function renderTimetableGrid() {
   const therapistCount = therapists.length;
 
   gridEl.style.display = 'grid';
-  gridEl.style.gridTemplateColumns = `88px repeat(${therapistCount}, minmax(130px, 1fr)) 100px`;
+  // 人数増で列が狭まっても名前優先のコンパクト表示へ切替できるよう下限を 96px に
+  gridEl.style.gridTemplateColumns = `88px repeat(${therapistCount}, minmax(96px, 1fr)) 100px`;
   gridEl.style.overflowX = 'auto';
 
   let html = '<div class="timetable-header">時間帯</div>';
   therapists.forEach((t) => {
     const meter = getTherapistWeeklyUnitsMeter(t.id, scheduleState.dateStr);
     html += `
-      <div class="timetable-header therapist-col-header" data-therapist-header="${sanitizeHtml(t.id)}">
-        <div class="therapist-col-name">${sanitizeHtml(t.name)}</div>
-        ${buildWeeklyUnitsMeterHtml(meter, scheduleState.dateStr)}
+      <div class="timetable-header therapist-col-header therapist-header-cell"
+        data-therapist-header="${sanitizeHtml(t.id)}">
+        ${buildTherapistHeaderUnitsHtml(sanitizeHtml(t.name), meter, scheduleState.dateStr)}
       </div>`;
   });
   html += '<div class="timetable-header" style="background:#f0fdf4; color:#166534;">消炎鎮痛</div>';
@@ -366,7 +367,62 @@ function changeSlotUnitsQuick(therapistId, slotId, newUnitsRaw) {
   return true;
 }
 
+/**
+ * 幅狭時ヘッダー: コンパクトバッジのクリックで単位内訳ポップオーバーを開閉
+ * （展開は absolute オーバーレイのためグリッド行高を押し下げない）
+ * @param {HTMLElement} gridEl
+ */
+function attachTherapistHeaderAccordion(gridEl) {
+  const closeAll = () => {
+    gridEl.querySelectorAll('.therapist-units-dropdown.is-open').forEach((el) => {
+      el.classList.remove('is-open');
+    });
+    gridEl.querySelectorAll('.therapist-units-compact-btn[aria-expanded="true"]').forEach((btn) => {
+      btn.setAttribute('aria-expanded', 'false');
+    });
+    gridEl.querySelectorAll('.therapist-col-header.is-dropdown-open').forEach((h) => {
+      h.classList.remove('is-dropdown-open');
+    });
+  };
+
+  gridEl.querySelectorAll('.therapist-units-compact-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const header = btn.closest('.therapist-col-header');
+      const dropdown = header?.querySelector('.therapist-units-dropdown');
+      if (!dropdown) return;
+      const willOpen = !dropdown.classList.contains('is-open');
+      closeAll();
+      if (willOpen) {
+        dropdown.classList.add('is-open');
+        btn.setAttribute('aria-expanded', 'true');
+        header.classList.add('is-dropdown-open');
+      }
+    });
+  });
+
+  // ドロップダウン内クリックは閉じない
+  gridEl.querySelectorAll('.therapist-units-dropdown').forEach((panel) => {
+    panel.addEventListener('click', (e) => e.stopPropagation());
+  });
+
+  // グリッド外クリックで閉じる（多重登録防止のため一度だけ document に）
+  if (!gridEl.dataset.unitsDropdownDocBound) {
+    gridEl.dataset.unitsDropdownDocBound = '1';
+    document.addEventListener('click', (e) => {
+      if (e.target.closest?.('.therapist-col-header')) return;
+      closeAll();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeAll();
+    });
+  }
+}
+
 function attachGridEventListeners(gridEl) {
+  attachTherapistHeaderAccordion(gridEl);
+
   gridEl.querySelectorAll('.empty-slot-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();

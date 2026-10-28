@@ -21,7 +21,9 @@ position: sticky;
 top: 0;
 z-index: 30;
 }
-.timetable-header.therapist-col-header {
+.timetable-header.therapist-col-header,
+.therapist-header-cell {
+position: relative;
 display: flex;
 flex-direction: column;
 align-items: center;
@@ -29,6 +31,29 @@ justify-content: center;
 gap: 4px;
 padding: 6px 4px;
 min-height: 52px;
+container-type: inline-size;
+container-name: therapist-col;
+overflow: visible;
+z-index: 30;
+user-select: none;
+}
+.timetable-header.therapist-col-header.is-dropdown-open {
+z-index: 160;
+}
+.therapist-header-full {
+display: flex;
+flex-direction: column;
+align-items: center;
+gap: 3px;
+width: 100%;
+}
+.therapist-header-compact {
+display: none;
+align-items: center;
+justify-content: space-between;
+gap: 4px;
+width: 100%;
+min-width: 0;
 }
 .therapist-col-name {
 font-size: 0.82rem;
@@ -40,12 +65,141 @@ overflow: hidden;
 text-overflow: ellipsis;
 max-width: 100%;
 }
+.therapist-col-name-compact {
+flex: 1;
+min-width: 0;
+text-align: left;
+font-size: 0.78rem;
+}
 .therapist-units-meters {
 display: flex;
 flex-wrap: wrap;
 align-items: center;
 justify-content: center;
 gap: 4px;
+}
+/* 列幅が狭いとき（概ね130px未満）: フル非表示・コンパクト表示 */
+@container therapist-col (max-width: 129px) {
+  .therapist-header-full { display: none; }
+  .therapist-header-compact { display: flex; }
+}
+/* コンテナクエリ非対応ブラウザ向けフォールバック */
+@supports not (container-type: inline-size) {
+  @media (max-width: 1100px) {
+    .therapist-header-full { display: none; }
+    .therapist-header-compact { display: flex; }
+  }
+}
+.therapist-units-compact-btn {
+display: inline-flex;
+align-items: center;
+gap: 2px;
+padding: 1px 5px;
+border-radius: 999px;
+border: 1px solid #cbd5e1;
+background: #f8fafc;
+color: #334155;
+font-size: 0.62rem;
+font-weight: 800;
+line-height: 1.2;
+cursor: pointer;
+flex-shrink: 0;
+white-space: nowrap;
+}
+.therapist-units-compact-btn .tuc-ico {
+font-size: 0.58rem;
+}
+.therapist-units-compact-btn.is-ok {
+background: #ecfdf5;
+color: #047857;
+border-color: #6ee7b7;
+}
+.therapist-units-compact-btn.is-warn {
+background: #fffbeb;
+color: #b45309;
+border-color: #fbbf24;
+}
+.therapist-units-compact-btn.is-over {
+background: #fef2f2;
+color: #b91c1c;
+border-color: #fca5a5;
+}
+.therapist-units-compact-btn[aria-expanded="true"] {
+outline: 2px solid #0284c7;
+outline-offset: 1px;
+}
+/* アコーディオン詳細（グリッド非押し下げ・オーバーレイ） */
+.therapist-units-dropdown {
+position: absolute;
+top: calc(100% + 2px);
+left: 50%;
+transform: translateX(-50%);
+background: #ffffff;
+border: 1px solid #cbd5e1;
+border-radius: 8px;
+box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+padding: 8px 10px;
+z-index: 150;
+min-width: 168px;
+max-width: min(240px, 70vw);
+text-align: left;
+display: none;
+pointer-events: auto;
+}
+.therapist-units-dropdown.is-open {
+display: block;
+}
+.therapist-units-dropdown .tud-title {
+font-size: 0.72rem;
+font-weight: 800;
+color: #0f172a;
+margin-bottom: 6px;
+padding-bottom: 4px;
+border-bottom: 1px solid #e2e8f0;
+}
+.therapist-units-dropdown .tud-row {
+display: flex;
+justify-content: space-between;
+align-items: baseline;
+gap: 8px;
+font-size: 0.7rem;
+margin: 3px 0;
+}
+.therapist-units-dropdown .tud-k {
+color: #64748b;
+font-weight: 700;
+}
+.therapist-units-dropdown .tud-v {
+color: #0f172a;
+font-weight: 800;
+white-space: nowrap;
+}
+.therapist-units-dropdown .tud-note {
+font-size: 0.58rem;
+color: #94a3b8;
+font-weight: 600;
+margin: 0 0 6px;
+}
+.therapist-units-dropdown .tud-bar {
+height: 6px;
+background: #e2e8f0;
+border-radius: 999px;
+overflow: hidden;
+margin-top: 6px;
+}
+.therapist-units-dropdown .tud-bar-fill {
+height: 100%;
+border-radius: 999px;
+background: #10b981;
+}
+.therapist-units-dropdown .tud-bar-fill.is-warn { background: #f59e0b; }
+.therapist-units-dropdown .tud-bar-fill.is-over { background: #ef4444; }
+.therapist-units-dropdown .tud-bar-label {
+font-size: 0.58rem;
+color: #64748b;
+font-weight: 700;
+margin-top: 3px;
+text-align: right;
 }
 /* 本日単位（表示のみ・制限なし・中立色） */
 .daily-units-badge {
