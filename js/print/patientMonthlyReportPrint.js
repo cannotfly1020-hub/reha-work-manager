@@ -1,6 +1,6 @@
 // js/print/patientMonthlyReportPrint.js
-// 退院時・医事課提出用「患者個人 月間リハビリ実施実績表」A4縦1枚印刷
-// （入院日・算定期限・早期加算期限・介護認定なし表記・評価料種別を記載）
+// 退院時・医事課提出用「患者個人 月間リハビリ実施実績表」A4横1枚印刷
+// （入院日・算定期限・早期加算期限・介護認定なし表記・評価料種別・PT/OT日別分離）
 
 import { sanitizeHtml } from '../core/dataNormalizer.js';
 import { REHA_RULES } from '../config/rules.js';
@@ -267,17 +267,17 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
           ${stCells}
         </tr>` : '';
 
-  // 実施明細（PT/OT行追加に合わせ行数を抑制しA4縦1枚厳守）
+  // 実施明細（A4横・高さ制約に合わせ行数を抑制し1枚厳守）
   const detailSlots = slots
     .slice()
     .sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))
       || String(a.slotId || '').localeCompare(String(b.slotId || '')));
-  const maxDetailRows = showStRow ? 8 : 10;
+  const maxDetailRows = showStRow ? 7 : 9;
   const shownSlots = detailSlots.slice(0, maxDetailRows);
   const omitted = Math.max(0, detailSlots.length - shownSlots.length);
 
   let detailRows = '';
-    shownSlots.forEach((s) => {
+  shownSlots.forEach((s) => {
     const therapist = s.therapist ? getTherapistById(s.therapist) : null;
     const tName = s.isAnalgesia ? '消炎枠' : (therapist?.name || s.therapist || '-');
     const roleSuffix = s.isAnalgesia
@@ -306,7 +306,7 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
   const printedStr = `${printedAt.getFullYear()}/${String(printedAt.getMonth() + 1).padStart(2, '0')}/${String(printedAt.getDate()).padStart(2, '0')} ${String(printedAt.getHours()).padStart(2, '0')}:${String(printedAt.getMinutes()).padStart(2, '0')}`;
   const operatorLabel = formatOperatorLabel();
 
-  const printWindow = window.open('', '_blank', 'width=900,height=1100');
+  const printWindow = window.open('', '_blank', 'width=1200,height=850');
   if (!printWindow) {
     showToast('印刷ポップアップがブロックされました。ブラウザ設定をご確認ください。', 'warn');
     return;
@@ -319,8 +319,26 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
   <title>月間リハ実施実績_${sanitizeHtml(patient.name)}_${y}-${String(m).padStart(2, '0')}</title>
   <style>
     @page {
-      size: A4 portrait;
-      margin: 10mm;
+      size: A4 landscape;
+      margin: 8mm 10mm;
+    }
+    @media print {
+      html, body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        background: #ffffff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .patient-monthly-report-container {
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
@@ -329,122 +347,133 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
       font-family: "Meiryo UI", "Hiragino Sans", "Segoe UI", sans-serif;
       color: #0f172a;
       background: #fff;
-      font-size: 8.5pt;
+      font-size: 9pt;
       line-height: 1.2;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
-    .sheet {
+    .sheet,
+    .patient-monthly-report-container {
       width: 100%;
-      max-height: 277mm;
+      max-width: 100%;
+      /* A4横 210mm − 上下余白16mm ≈ 194mm に収める */
+      max-height: 194mm;
       overflow: hidden;
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 5px;
+      page-break-inside: avoid;
+      break-inside: avoid;
     }
     .head {
       display: flex;
       justify-content: space-between;
       align-items: flex-end;
-      border-bottom: 2px solid #0f172a;
-      padding-bottom: 3px;
+      border-bottom: 2.5px solid #0f172a;
+      padding-bottom: 4px;
+      flex-shrink: 0;
     }
     .head-title {
-      font-size: 13pt;
+      font-size: 15pt;
       font-weight: 800;
       letter-spacing: 0.02em;
     }
     .head-sub {
-      font-size: 7.5pt;
+      font-size: 8.5pt;
       color: #475569;
       font-weight: 700;
-      margin-top: 1px;
+      margin-top: 2px;
     }
-    .head-meta { text-align: right; font-size: 9pt; font-weight: 800; }
+    .head-meta { text-align: right; font-size: 10pt; font-weight: 800; }
     .month-badge {
       display: inline-block;
       background: #e0f2fe;
       color: #0369a1;
       border: 1px solid #7dd3fc;
       border-radius: 4px;
-      padding: 2px 8px;
-      font-size: 10pt;
+      padding: 3px 10px;
+      font-size: 12pt;
       font-weight: 800;
     }
+    /* 横幅を活かした6列属性グリッド */
     .info-grid {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 2px 6px;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 3px 8px;
       border: 1px solid #94a3b8;
-      border-radius: 3px;
-      padding: 5px 6px;
+      border-radius: 4px;
+      padding: 6px 8px;
       background: #f8fafc;
-      font-size: 7.5pt;
+      font-size: 8.5pt;
+      flex-shrink: 0;
     }
     .info-grid .cell { min-width: 0; }
     .info-grid .label {
       color: #64748b;
       font-weight: 700;
-      font-size: 6.5pt;
-      line-height: 1.1;
+      font-size: 7pt;
+      line-height: 1.15;
     }
     .info-grid .value {
       font-weight: 800;
       color: #0f172a;
-      font-size: 7.5pt;
-      line-height: 1.2;
+      font-size: 8.5pt;
+      line-height: 1.25;
       word-break: break-all;
     }
     .info-grid .span-2 { grid-column: span 2; }
-    .info-grid .span-4 { grid-column: 1 / -1; }
-    .kpi-row { display: flex; gap: 4px; flex-wrap: nowrap; }
+    .info-grid .span-3 { grid-column: span 3; }
+    .info-grid .span-6 { grid-column: 1 / -1; }
+    .kpi-row { display: flex; gap: 6px; flex-wrap: nowrap; flex-shrink: 0; }
     .kpi {
       flex: 1;
       min-width: 0;
       border: 1px solid #cbd5e1;
-      border-radius: 3px;
-      padding: 2px 4px;
+      border-radius: 4px;
+      padding: 4px 6px;
       text-align: center;
       background: #fff;
     }
-    .kpi .k-label { font-size: 6.5pt; color: #64748b; font-weight: 700; }
-    .kpi .k-value { font-size: 11pt; font-weight: 800; color: #0369a1; }
+    .kpi .k-label { font-size: 7.5pt; color: #64748b; font-weight: 700; }
+    .kpi .k-value { font-size: 14pt; font-weight: 800; color: #0369a1; }
     .kpi.warn .k-value { color: #dc2626; }
     .section-title {
-      font-size: 8pt;
+      font-size: 9.5pt;
       font-weight: 800;
       color: #0f172a;
-      border-left: 3px solid #0284c7;
-      padding-left: 5px;
+      border-left: 4px solid #0284c7;
+      padding-left: 6px;
       margin-top: 1px;
+      flex-shrink: 0;
     }
     .matrix {
       width: 100%;
       border-collapse: collapse;
       table-layout: fixed;
-      font-size: 6.5pt;
+      font-size: 8.5pt;
+      flex-shrink: 0;
     }
     .matrix th, .matrix td {
       border: 1px solid #64748b;
       text-align: center;
       vertical-align: middle;
-      padding: 0;
-      height: 11px;
+      padding: 1px 0;
+      height: 15px;
     }
     .matrix th {
       background: #1e293b;
       color: #fff;
       font-weight: 800;
-      font-size: 6pt;
+      font-size: 8pt;
     }
     .matrix th.sat, .matrix td.sat { background: #eff6ff; color: #1d4ed8; }
     .matrix th.sun, .matrix td.sun { background: #fff1f2; color: #be123c; }
     .matrix th.empty-day, .matrix td.empty-day { background: #f1f5f9; color: #cbd5e1; }
     .matrix td.row-label {
-      width: 48px;
+      width: 56px;
       background: #f1f5f9;
       font-weight: 800;
-      font-size: 6.5pt;
+      font-size: 8pt;
       color: #334155;
     }
     .matrix td.on-exit { background: #ffedd5 !important; }
@@ -459,22 +488,39 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
     .matrix td.row-label.role-ot { background: #d1fae5; color: #047857; }
     .matrix td.row-label.role-st { background: #ede9fe; color: #6d28d9; }
     .matrix td.row-label.role-total { background: #e2e8f0; color: #0f172a; }
-    .matrix .dow { font-size: 5.5pt; color: #64748b; height: 10px; background: #f8fafc; }
+    .matrix .dow { font-size: 7pt; color: #64748b; height: 12px; background: #f8fafc; }
+    /* 下段: 明細＋押印を横並びにして高さを節約・横幅を活用 */
+    .bottom-split {
+      display: grid;
+      grid-template-columns: 1.55fr 1fr;
+      gap: 8px;
+      align-items: stretch;
+      min-height: 0;
+      flex: 1 1 auto;
+      overflow: hidden;
+    }
+    .bottom-left, .bottom-right {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+      min-height: 0;
+    }
     .detail-table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 7pt;
+      font-size: 8pt;
       table-layout: fixed;
     }
     .detail-table th, .detail-table td {
       border: 1px solid #94a3b8;
-      padding: 1px 3px;
+      padding: 2px 4px;
     }
     .detail-table th {
       background: #e2e8f0;
       font-weight: 800;
       text-align: center;
-      font-size: 6.5pt;
+      font-size: 7.5pt;
     }
     .detail-table .num { text-align: center; font-weight: 800; }
     .detail-table .empty-msg {
@@ -484,57 +530,60 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
     }
     .sign-row {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-columns: 1fr;
       gap: 6px;
-      margin-top: 2px;
+      flex: 1;
     }
     .sign-box {
       border: 1px solid #64748b;
-      border-radius: 3px;
-      min-height: 40px;
-      padding: 3px 5px;
-      font-size: 7pt;
+      border-radius: 4px;
+      min-height: 42px;
+      flex: 1;
+      padding: 4px 6px;
+      font-size: 8pt;
       font-weight: 700;
       color: #475569;
     }
     .sign-box .line {
-      margin-top: 16px;
+      margin-top: 18px;
       border-top: 1px solid #94a3b8;
-      font-size: 6.5pt;
+      font-size: 7.5pt;
       color: #94a3b8;
       text-align: right;
-      padding-top: 1px;
+      padding-top: 2px;
     }
     .footer {
       display: flex;
       justify-content: space-between;
-      font-size: 6.5pt;
+      font-size: 7.5pt;
       color: #64748b;
       border-top: 1px solid #cbd5e1;
-      padding-top: 2px;
+      padding-top: 3px;
       margin-top: auto;
+      flex-shrink: 0;
     }
     .warn-banner {
       background: #fef2f2;
       border: 1px solid #fecaca;
       color: #b91c1c;
-      font-size: 7pt;
+      font-size: 8pt;
       font-weight: 800;
-      padding: 2px 5px;
+      padding: 3px 6px;
       border-radius: 3px;
+      flex-shrink: 0;
     }
   </style>
 </head>
 <body>
-  <div class="sheet">
+  <div class="sheet patient-monthly-report-container">
     <div class="head">
       <div>
         <div class="head-title">リハビリテーション実施実績表（患者個人）</div>
-        <div class="head-sub">医事課提出・カルテ挟込用 / 令和8年度改定準拠</div>
+        <div class="head-sub">医事課提出・カルテ挟込用 / 令和8年度改定準拠 / PT・OT日別分離</div>
       </div>
       <div class="head-meta">
         <div class="month-badge">${y}年 ${m}月分</div>
-        <div style="margin-top:2px; font-size:7pt; font-weight:700; color:#475569;">A4縦・1枚完結</div>
+        <div style="margin-top:2px; font-size:8pt; font-weight:700; color:#475569;">A4横・1枚完結</div>
       </div>
     </div>
 
@@ -552,11 +601,6 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
         <div class="value">${sanitizeHtml(careInsuranceDisplay)}</div>
       </div>
       <div class="cell">
-        <div class="label">終了・退院日</div>
-        <div class="value">${fmtSlash(exitDate)}</div>
-      </div>
-
-      <div class="cell">
         <div class="label">入院日</div>
         <div class="value">${fmtSlash(admissionDate)}</div>
       </div>
@@ -564,11 +608,15 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
         <div class="label">発症日・手術日（起算）</div>
         <div class="value">${fmtSlash(onsetDate)}</div>
       </div>
+      <div class="cell">
+        <div class="label">終了・退院日</div>
+        <div class="value">${fmtSlash(exitDate)}</div>
+      </div>
+
       <div class="cell span-2">
         <div class="label">疾患別リハ算定期限（満了日）</div>
         <div class="value">${sanitizeHtml(diseaseLimitDisplay)}</div>
       </div>
-
       <div class="cell span-2">
         <div class="label">早期加算Ⅰ 算定期限（起算: ${fmtSlash(earlyStartDate)}）</div>
         <div class="value">${sanitizeHtml(early1Display)}</div>
@@ -578,12 +626,11 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
         <div class="value">${sanitizeHtml(early2Display)}</div>
       </div>
 
-      <div class="cell span-4">
+      <div class="cell span-3">
         <div class="label">評価表（リハビリテーション総合計画評価料）分類・種別</div>
         <div class="value">${sanitizeHtml(planEvalDisplay)}</div>
       </div>
-
-      <div class="cell span-4">
+      <div class="cell span-3">
         <div class="label">病名（自由記述）</div>
         <div class="value" style="font-weight:700;">${sanitizeHtml(patient.diseaseName || '—')}</div>
       </div>
@@ -618,7 +665,7 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
     <table class="matrix">
       <thead>
         <tr>
-          <th style="width:48px;">項目</th>
+          <th style="width:56px;">項目</th>
           ${dayHeaderCells}
         </tr>
       </thead>
@@ -651,30 +698,36 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
       </tbody>
     </table>
 
-    <div class="section-title">実施明細（セラピスト別・抜粋）／評価料種別</div>
-    <table class="detail-table">
-      <thead>
-        <tr>
-          <th style="width:18%;">実施日</th>
-          <th style="width:34%;">担当</th>
-          <th style="width:16%;">単位/区分</th>
-          <th style="width:32%;">評価料種別</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${detailRows}
-      </tbody>
-    </table>
-
-    <div class="sign-row">
-      <div class="sign-box">理学療法士 確認印<div class="line">印</div></div>
-      <div class="sign-box">医事課 受領印<div class="line">印</div></div>
-      <div class="sign-box">備考・特記<div class="line">&nbsp;</div></div>
+    <div class="bottom-split">
+      <div class="bottom-left">
+        <div class="section-title">実施明細（セラピスト別・抜粋）／評価料種別</div>
+        <table class="detail-table">
+          <thead>
+            <tr>
+              <th style="width:18%;">実施日</th>
+              <th style="width:34%;">担当</th>
+              <th style="width:16%;">単位/区分</th>
+              <th style="width:32%;">評価料種別</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${detailRows}
+          </tbody>
+        </table>
+      </div>
+      <div class="bottom-right">
+        <div class="section-title">確認・受領</div>
+        <div class="sign-row">
+          <div class="sign-box">理学療法士 確認印<div class="line">印</div></div>
+          <div class="sign-box">医事課 受領印<div class="line">印</div></div>
+          <div class="sign-box">備考・特記<div class="line">&nbsp;</div></div>
+        </div>
+      </div>
     </div>
 
     <div class="footer">
       <span>出力: ${printedStr} / 操作者: ${sanitizeHtml(operatorLabel)}</span>
-      <span>reha-work-manager · 患者個人月間実績 · A4縦1枚</span>
+      <span>reha-work-manager · 患者個人月間実績 · A4横1枚</span>
     </div>
   </div>
   <script>
