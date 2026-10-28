@@ -9,8 +9,9 @@ import {
   checkMonth13UnitsViolation,
   evaluateRecommendedPlan
 } from '../core/deadlineCalc.js';
+import { buildDailyUnitsByRole, getTherapistRole } from '../core/therapistRoleUtil.js';
 import { getPatientById } from '../store/patientStore.js';
-import { getTherapistById } from '../store/therapistStore.js';
+import { getAllTherapists, getTherapistById } from '../store/therapistStore.js';
 import { aggregateFromAppSchedule } from '../store/scheduleStore.js';
 import { loadMonthOnDemand } from '../store/archiveManager.js';
 import { showToast } from '../ui/toast.js';
@@ -210,17 +211,41 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
     dowRowCells += '<td class="dow empty-day">-</td>';
   }
 
-  let unitCells = '';
+  // ★印刷時のみ PT / OT /（ST）/ 総計 に日別分離（画面マトリクスは1患者1行のまま）
+  const therapistsMaster = getAllTherapists();
+  const roleAgg = buildDailyUnitsByRole(slots, daysInMonth, therapistsMaster);
+  const dailyPt = roleAgg.dailyByRole.PT;
+  const dailyOt = roleAgg.dailyByRole.OT;
+  const dailySt = roleAgg.dailyByRole.ST;
+  const showStRow = roleAgg.hasRole.ST;
+  // スロット無しフォールバック: 合計を PT に寄せる
+  const roleSlotTotal = (roleAgg.totalsByRole.PT || 0) + (roleAgg.totalsByRole.OT || 0) + (roleAgg.totalsByRole.ST || 0);
+  if (roleSlotTotal === 0) {
+    for (let d = 1; d <= daysInMonth; d += 1) {
+      dailyPt[d] = dailyUnits[d] || 0;
+    }
+  }
+
+  let ptCells = '';
+  let otCells = '';
+  let stCells = '';
+  let totalCells = '';
   let earlyCells = '';
   let analgesiaCells = '';
   for (let d = 1; d <= 31; d += 1) {
     if (d > daysInMonth) {
-      unitCells += '<td class="empty-day">-</td>';
+      ptCells += '<td class="empty-day">-</td>';
+      otCells += '<td class="empty-day">-</td>';
+      stCells += '<td class="empty-day">-</td>';
+      totalCells += '<td class="empty-day">-</td>';
       earlyCells += '<td class="empty-day">-</td>';
       analgesiaCells += '<td class="empty-day">-</td>';
       continue;
     }
-    const u = dailyUnits[d] || 0;
+    const ptU = dailyPt[d] || 0;
+    const otU = dailyOt[d] || 0;
+    const stU = dailySt[d] || 0;
+    const totU = (dailyUnits[d] || 0) || (ptU + otU + stU);
     const eu = dailyEarly[d] || 0;
     const au = dailyAnalgesia[d] || 0;
     const exitDay = exitDate ? Number(String(exitDate).slice(8, 10)) : 0;
@@ -228,29 +253,41 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
     const afterExit = exitMonthMatch && exitDay > 0 && d > exitDay;
     const onExit = exitMonthMatch && exitDay > 0 && d === exitDay;
     const cellCls = afterExit ? 'after-exit' : (onExit ? 'on-exit' : '');
-    unitCells += `<td class="${cellCls}">${u > 0 ? `<strong>${u}</strong>` : '<span class="dash">-</span>'}</td>`;
+    ptCells += `<td class="${cellCls}">${ptU > 0 ? `<strong class="pt">${ptU}</strong>` : '<span class="dash">-</span>'}</td>`;
+    otCells += `<td class="${cellCls}">${otU > 0 ? `<strong class="ot">${otU}</strong>` : '<span class="dash">-</span>'}</td>`;
+    stCells += `<td class="${cellCls}">${stU > 0 ? `<strong class="st">${stU}</strong>` : '<span class="dash">-</span>'}</td>`;
+    totalCells += `<td class="${cellCls}">${totU > 0 ? `<strong>${totU}</strong>` : '<span class="dash">-</span>'}</td>`;
     earlyCells += `<td class="${cellCls}">${eu > 0 ? `<strong class="early">${eu}</strong>` : '<span class="dash">-</span>'}</td>`;
     analgesiaCells += `<td class="${cellCls}">${au > 0 ? '<strong class="analg">●</strong>' : '<span class="dash">-</span>'}</td>`;
   }
 
-  // 実施明細（ヘッダー拡充に合わせ行数を抑制しA4縦1枚厳守）
+  const stMatrixRow = showStRow ? `
+        <tr>
+          <td class="row-label role-st">ST</td>
+          ${stCells}
+        </tr>` : '';
+
+  // 実施明細（PT/OT行追加に合わせ行数を抑制しA4縦1枚厳守）
   const detailSlots = slots
     .slice()
     .sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))
       || String(a.slotId || '').localeCompare(String(b.slotId || '')));
-  const maxDetailRows = 12;
+  const maxDetailRows = showStRow ? 8 : 10;
   const shownSlots = detailSlots.slice(0, maxDetailRows);
   const omitted = Math.max(0, detailSlots.length - shownSlots.length);
 
   let detailRows = '';
-  shownSlots.forEach((s) => {
+    shownSlots.forEach((s) => {
     const therapist = s.therapist ? getTherapistById(s.therapist) : null;
     const tName = s.isAnalgesia ? '消炎枠' : (therapist?.name || s.therapist || '-');
+    const roleSuffix = s.isAnalgesia
+      ? ''
+      : ` [${getTherapistRole(s.therapist || '', therapist?.name || '', therapistsMaster)}]`;
     const plan = s.isAnalgesia ? '—' : resolveBillingPlanShort(s.billingPlan);
     detailRows += `
       <tr>
         <td>${sanitizeHtml(String(s.date || '').replace(/-/g, '/'))}</td>
-        <td>${sanitizeHtml(tName)}</td>
+        <td>${sanitizeHtml(tName)}${sanitizeHtml(roleSuffix)}</td>
         <td class="num">${s.isAnalgesia ? '消炎' : (s.units || 0)}</td>
         <td>${sanitizeHtml(plan)}</td>
       </tr>`;
@@ -392,7 +429,7 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
       text-align: center;
       vertical-align: middle;
       padding: 0;
-      height: 12px;
+      height: 11px;
     }
     .matrix th {
       background: #1e293b;
@@ -415,6 +452,13 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
     .matrix .dash { color: #cbd5e1; font-weight: 400; }
     .matrix .early { color: #7c3aed; }
     .matrix .analg { color: #16a34a; }
+    .matrix .pt { color: #1d4ed8; }
+    .matrix .ot { color: #047857; }
+    .matrix .st { color: #6d28d9; }
+    .matrix td.row-label.role-pt { background: #dbeafe; color: #1d4ed8; }
+    .matrix td.row-label.role-ot { background: #d1fae5; color: #047857; }
+    .matrix td.row-label.role-st { background: #ede9fe; color: #6d28d9; }
+    .matrix td.row-label.role-total { background: #e2e8f0; color: #0f172a; }
     .matrix .dow { font-size: 5.5pt; color: #64748b; height: 10px; background: #f8fafc; }
     .detail-table {
       width: 100%;
@@ -570,7 +614,7 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
       </div>
     </div>
 
-    <div class="section-title">日別実施単位マトリクス（1〜${daysInMonth}日）</div>
+    <div class="section-title">日別実施単位マトリクス（PT / OT 分離・1〜${daysInMonth}日）</div>
     <table class="matrix">
       <thead>
         <tr>
@@ -584,8 +628,17 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
           ${dowRowCells}
         </tr>
         <tr>
-          <td class="row-label">実施単位</td>
-          ${unitCells}
+          <td class="row-label role-pt">PT</td>
+          ${ptCells}
+        </tr>
+        <tr>
+          <td class="row-label role-ot">OT</td>
+          ${otCells}
+        </tr>
+        ${stMatrixRow}
+        <tr>
+          <td class="row-label role-total">総計</td>
+          ${totalCells}
         </tr>
         <tr>
           <td class="row-label">早期加算</td>

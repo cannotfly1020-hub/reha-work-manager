@@ -7,7 +7,11 @@
 import {
   addDays, calculatePatientDeadlines, evaluateEarlyBonusPhase, getDailyBasePoints
 } from '../../core/deadlineCalc.js';
+import {
+  buildDailyUnitsByRole, getTherapistRole, listRolesForExcelRows
+} from '../../core/therapistRoleUtil.js';
 import { getPatientById } from '../../store/patientStore.js';
+import { getAllTherapists, getTherapistById } from '../../store/therapistStore.js';
 import {
   STYLES, thinBorder, getEarlyBaseDate,
   setStyledCell, updateSheetRange, appendOrReplaceSheet,
@@ -312,18 +316,50 @@ function analyzePatientItem(item, year, month, daysInMonth) {
   const limitDateStr = deadlines.limitDateStr || '';
   const placement = classifyBillingPlacement(p, monthStart, monthEnd, limitDateStr);
   const switchStartStr = limitDateStr ? addDays(limitDateStr, 1) : '';
+  const therapistsMaster = getAllTherapists();
 
   const dailyUnits = Array(daysInMonth + 1).fill(0);
   const early1ByDay = Array(daysInMonth + 1).fill(0);
   const early2ByDay = Array(daysInMonth + 1).fill(0);
+  const early1ByDayByRole = {
+    PT: Array(daysInMonth + 1).fill(0),
+    OT: Array(daysInMonth + 1).fill(0),
+    ST: Array(daysInMonth + 1).fill(0)
+  };
+  const early2ByDayByRole = {
+    PT: Array(daysInMonth + 1).fill(0),
+    OT: Array(daysInMonth + 1).fill(0),
+    ST: Array(daysInMonth + 1).fill(0)
+  };
   const planByDay = Array(daysInMonth + 1).fill('');
+  const planByDayByRole = {
+    PT: Array(daysInMonth + 1).fill(''),
+    OT: Array(daysInMonth + 1).fill(''),
+    ST: Array(daysInMonth + 1).fill('')
+  };
   const isMaintDay = Array(daysInMonth + 1).fill(false);
 
-  // dailyRehaUnits 優先で単位を埋める
+  // 職種別日別単位（スロットの therapist から判定）
+  const roleAgg = buildDailyUnitsByRole(item.slots || [], daysInMonth, therapistsMaster);
+  const dailyUnitsByRole = roleAgg.dailyByRole;
+  const totalsByRole = roleAgg.totalsByRole;
+
+  // 合計日別: 職種合算（スロット優先）。スロット無し時は従来 dailyRehaUnits
+  const slotTotal = (totalsByRole.PT || 0) + (totalsByRole.OT || 0) + (totalsByRole.ST || 0);
   for (let d = 1; d <= daysInMonth; d += 1) {
-    dailyUnits[d] = item.dailyRehaUnits
-      ? (item.dailyRehaUnits[d] || 0)
-      : (item.dailyUnits?.[d] || 0);
+    const fromRoles = (dailyUnitsByRole.PT[d] || 0)
+      + (dailyUnitsByRole.OT[d] || 0)
+      + (dailyUnitsByRole.ST[d] || 0);
+    if (slotTotal > 0) {
+      dailyUnits[d] = fromRoles;
+    } else {
+      dailyUnits[d] = item.dailyRehaUnits
+        ? (item.dailyRehaUnits[d] || 0)
+        : (item.dailyUnits?.[d] || 0);
+      // スロット無しのフォールバックは PT 行へ寄せる
+      dailyUnitsByRole.PT[d] = dailyUnits[d];
+      totalsByRole.PT += dailyUnits[d];
+    }
   }
 
   (item.slots || []).forEach((s) => {
@@ -332,13 +368,24 @@ function analyzePatientItem(item, year, month, daysInMonth) {
     const dNum = parseInt(parts[2], 10);
     if (!(dNum >= 1 && dNum <= daysInMonth)) return;
     const u = s.units || 1;
+    const tid = s.therapistId || s.therapist || '';
+    const tObj = tid ? getTherapistById(tid) : null;
+    const role = getTherapistRole(tid, tObj?.name || s.therapistName || '', therapistsMaster);
 
-    if (s.billingPlan) planByDay[dNum] = s.date.slice(5);
+    if (s.billingPlan) {
+      planByDay[dNum] = s.date.slice(5);
+      planByDayByRole[role][dNum] = s.date.slice(5);
+    }
 
     if (isIn && baseEarlyDate) {
       const ph = evaluateEarlyBonusPhase(baseEarlyDate, s.date, 'INPATIENT');
-      if (ph.phase === 'PHASE_1') early1ByDay[dNum] += u;
-      else if (ph.phase === 'PHASE_2') early2ByDay[dNum] += u;
+      if (ph.phase === 'PHASE_1') {
+        early1ByDay[dNum] += u;
+        early1ByDayByRole[role][dNum] += u;
+      } else if (ph.phase === 'PHASE_2') {
+        early2ByDay[dNum] += u;
+        early2ByDayByRole[role][dNum] += u;
+      }
     }
 
     const rateInfo = getDailyBasePoints(p, s.date);
@@ -366,9 +413,14 @@ function analyzePatientItem(item, year, month, daysInMonth) {
     switchStartStr,
     dischargeDateStr,
     dailyUnits,
+    dailyUnitsByRole,
+    totalsByRole,
     early1ByDay,
     early2ByDay,
+    early1ByDayByRole,
+    early2ByDayByRole,
     planByDay,
+    planByDayByRole,
     isMaintDay,
     admissionLabel,
     careType: p.careInsuranceType || 'NONE',
@@ -383,12 +435,25 @@ function analyzePatientItem(item, year, month, daysInMonth) {
  * @param {number} year
  * @param {number} month
  * @param {number} daysInMonth
+ * @param {'PT'|'OT'|'ST'} [role] 職種行（必須: PT/OT分離）
  */
-function buildPeriodRowView(analysis, mode, year, month, daysInMonth) {
+function buildPeriodRowView(analysis, mode, year, month, daysInMonth, role = 'PT') {
   const {
-    limitDateStr, switchStartStr, dailyUnits, early1ByDay, early2ByDay,
-    planByDay, isMaintDay, careType
+    limitDateStr, switchStartStr, isMaintDay, careType
   } = analysis;
+
+  const dailyUnits = (analysis.dailyUnitsByRole && analysis.dailyUnitsByRole[role])
+    ? analysis.dailyUnitsByRole[role]
+    : analysis.dailyUnits;
+  const early1ByDay = (analysis.early1ByDayByRole && analysis.early1ByDayByRole[role])
+    ? analysis.early1ByDayByRole[role]
+    : analysis.early1ByDay;
+  const early2ByDay = (analysis.early2ByDayByRole && analysis.early2ByDayByRole[role])
+    ? analysis.early2ByDayByRole[role]
+    : analysis.early2ByDay;
+  const planByDay = (analysis.planByDayByRole && analysis.planByDayByRole[role])
+    ? analysis.planByDayByRole[role]
+    : analysis.planByDay;
 
   let periodTotal = 0;
   let early1 = 0;
@@ -437,6 +502,7 @@ function buildPeriodRowView(analysis, mode, year, month, daysInMonth) {
 
   return {
     mode,
+    role,
     periodTotal, // ★純粋な数値合算（「退」「維」文字列は含めない）
     early1,
     early2,
@@ -496,47 +562,51 @@ function collectSheetRows(aggregated) {
       name: String(p.name || '')
     };
 
-    if (analysis.placement === 'FULL_NORMAL') {
-      rows.push({
-        ...base,
-        reduced: false,
-        rowView: buildPeriodRowView(analysis, 'FULL_NORMAL', year, month, daysInMonth)
+    const roles = listRolesForExcelRows(analysis.totalsByRole);
+    const modes = analysis.placement === 'FULL_NORMAL'
+      ? [{ reduced: false, mode: 'FULL_NORMAL' }]
+      : (analysis.placement === 'FULL_REDUCED'
+        ? [{ reduced: true, mode: 'FULL_REDUCED' }]
+        : [
+          { reduced: false, mode: 'SPLIT_NORMAL' },
+          { reduced: true, mode: 'SPLIT_REDUCED' }
+        ]);
+
+    // 医事課照合用: 患者×期間モードごとに PT行 / OT行（ST実績時はST行も）を展開
+    modes.forEach(({ reduced, mode }) => {
+      roles.forEach((role) => {
+        rows.push({
+          ...base,
+          reduced,
+          role,
+          rowView: buildPeriodRowView(analysis, mode, year, month, daysInMonth, role)
+        });
       });
-    } else if (analysis.placement === 'FULL_REDUCED') {
-      rows.push({
-        ...base,
-        reduced: true,
-        rowView: buildPeriodRowView(analysis, 'FULL_REDUCED', year, month, daysInMonth)
-      });
-    } else {
-      // MID_MONTH_SWITCH → 通常・減算の両方（各期間の単位のみ計上）
-      rows.push({
-        ...base,
-        reduced: false,
-        rowView: buildPeriodRowView(analysis, 'SPLIT_NORMAL', year, month, daysInMonth)
-      });
-      rows.push({
-        ...base,
-        reduced: true,
-        rowView: buildPeriodRowView(analysis, 'SPLIT_REDUCED', year, month, daysInMonth)
-      });
-    }
+    });
   });
 
-  rows.sort((a, b) => a.id.localeCompare(b.id, 'ja', { numeric: true }));
+  rows.sort((a, b) => {
+    const idCmp = a.id.localeCompare(b.id, 'ja', { numeric: true });
+    if (idCmp !== 0) return idCmp;
+    const roleOrder = { PT: 0, OT: 1, ST: 2 };
+    const rCmp = (roleOrder[a.role] ?? 9) - (roleOrder[b.role] ?? 9);
+    if (rCmp !== 0) return rCmp;
+    return Number(a.reduced) - Number(b.reduced);
+  });
   return rows;
 }
 
 function writeTwoRowHeader(ws, rowH1, rowH2, year, month, daysInMonth, merges) {
-  const fixedLabels = ['ID', '患者氏名', '入院日', '介', '総'];
+  // ★職種列追加: ID / 職(PT・OT) / 患者氏名 / 入院日 / 介 / 総
+  const fixedLabels = ['ID', '職', '患者氏名', '入院日', '介', '総'];
   fixedLabels.forEach((label, c) => {
-    const style = c === 4 ? STYLE_HEADER_TOTAL : STYLE_HEADER;
+    const style = c === 5 ? STYLE_HEADER_TOTAL : STYLE_HEADER;
     setStyledCell(ws, rowH1, c, label, style);
     setStyledCell(ws, rowH2, c, '', style);
     merges.push({ s: { r: rowH1, c }, e: { r: rowH2, c } });
   });
 
-  const dayColStart = 5;
+  const dayColStart = 6;
   for (let d = 1; d <= DAY_COLS; d += 1) {
     const col = dayColStart + (d - 1);
     if (d > daysInMonth) {
@@ -587,23 +657,41 @@ function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraB
   const {
     periodTotal, early1, early2, planDateStr, visibleUnits,
     careLabel, careStyleBase, admissionLabel, mode,
-    dischargeDateStr, maintenanceStartDateStr
+    dischargeDateStr, maintenanceStartDateStr, role
   } = rowView;
+  const roleLabel = role || row.role || 'PT';
 
   setStyledCell(ws, curRow, 0, p.id, {
     ...STYLE_DATA_C, fill: zebraBg, font: { name: 'Meiryo UI', sz: 8, bold: true }
   });
-  setStyledCell(ws, curRow, 1, p.name, { ...STYLE_DATA_L, fill: zebraBg });
-  setStyledCell(ws, curRow, 2, admissionLabel, { ...STYLE_DATA_C, fill: zebraBg });
+
+  // 職種別行ラベル（PT=青 / OT=緑 / ST=紫）
+  let roleFill = { fgColor: { rgb: 'DBEAFE' } };
+  let roleColor = '1D4ED8';
+  if (roleLabel === 'OT') {
+    roleFill = { fgColor: { rgb: 'D1FAE5' } };
+    roleColor = '047857';
+  } else if (roleLabel === 'ST') {
+    roleFill = { fgColor: { rgb: 'EDE9FE' } };
+    roleColor = '6D28D9';
+  }
+  setStyledCell(ws, curRow, 1, roleLabel, {
+    ...STYLE_DATA_C,
+    fill: roleFill,
+    font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: roleColor } }
+  });
+
+  setStyledCell(ws, curRow, 2, p.name, { ...STYLE_DATA_L, fill: zebraBg });
+  setStyledCell(ws, curRow, 3, admissionLabel, { ...STYLE_DATA_C, fill: zebraBg });
 
   const careStyle = careStyleBase
     ? { ...careStyleBase }
     : { ...STYLE_DATA_C, fill: zebraBg };
-  setStyledCell(ws, curRow, 3, careLabel, careStyle);
+  setStyledCell(ws, curRow, 4, careLabel, careStyle);
 
-  // ★「総」は期間内の純粋な数値単位のみ（退・維マークは一切含めない）
+  // ★「総」は期間内の純粋な数値単位のみ（退・維マークは一切含めない）／職種別合計
   const isReducedSheet = mode === 'FULL_REDUCED' || mode === 'SPLIT_REDUCED';
-  setStyledCell(ws, curRow, 4, periodTotal, {
+  setStyledCell(ws, curRow, 5, periodTotal, {
     ...STYLE_DATA_C,
     fill: { fgColor: { rgb: isReducedSheet ? 'FEF3C7' : 'E0F2FE' } },
     font: {
@@ -615,7 +703,7 @@ function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraB
     numFmt: '#,##0'
   });
 
-  const dayColStart = 5;
+  const dayColStart = 6;
   for (let d = 1; d <= DAY_COLS; d += 1) {
     const col = dayColStart + (d - 1);
     if (d > daysInMonth) {
@@ -642,9 +730,18 @@ function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraB
     const hasMark = displayVal.includes('退') || displayVal.includes('維');
     const dayRate = getDailyBasePoints(p, dateStr);
     const isMaint = u > 0 && dayRate.isMaintenance && dayRate.isCareReduced;
-    const isPlan = !!row.analysis.planByDay[d];
-    const isE1 = (row.analysis.early1ByDay[d] || 0) > 0;
-    const isE2 = (row.analysis.early2ByDay[d] || 0) > 0;
+    const planMap = (row.analysis.planByDayByRole && row.analysis.planByDayByRole[roleLabel])
+      ? row.analysis.planByDayByRole[roleLabel]
+      : row.analysis.planByDay;
+    const e1Map = (row.analysis.early1ByDayByRole && row.analysis.early1ByDayByRole[roleLabel])
+      ? row.analysis.early1ByDayByRole[roleLabel]
+      : row.analysis.early1ByDay;
+    const e2Map = (row.analysis.early2ByDayByRole && row.analysis.early2ByDayByRole[roleLabel])
+      ? row.analysis.early2ByDayByRole[roleLabel]
+      : row.analysis.early2ByDay;
+    const isPlan = !!planMap[d];
+    const isE1 = (e1Map[d] || 0) > 0;
+    const isE2 = (e2Map[d] || 0) > 0;
 
     // 退院翌日以降の空欄はグレー。マーク付きは強調色
     let cellStyle = { ...STYLE_UNIT };
@@ -730,26 +827,33 @@ function buildSingleGroupWorksheet(aggregated, groupRows, def) {
   writeTwoRowHeader(ws, rowH1, rowH2, year, month, daysInMonth, merges);
   curRow = rowH2 + 1;
 
-  groupRows.forEach((row, idx) => {
-    const zebraBg = (idx % 2 === 1) ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } };
+  // 同一患者の PT/OT を同じゼブラ帯にまとめ、職種行を視認しやすくする
+  let patientBand = 0;
+  let prevId = '';
+  groupRows.forEach((row) => {
+    if (row.id !== prevId) {
+      if (prevId) patientBand += 1;
+      prevId = row.id;
+    }
+    const zebraBg = (patientBand % 2 === 1) ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } };
     writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraBg);
     curRow += 1;
   });
 
   const rHeights = [{ hpt: 22 }, { hpt: 16 }, { hpt: 14 }];
-  for (let r = 3; r < curRow; r += 1) rHeights.push({ hpt: 18 });
+  for (let r = 3; r < curRow; r += 1) rHeights.push({ hpt: 16 });
   ws['!rows'] = rHeights;
   ws['!merges'] = merges;
 
   const colProps = [
-    { wch: 7 }, { wch: 13 }, { wch: 9 }, { wch: 8 }, { wch: 6 }
+    { wch: 7 }, { wch: 4.5 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 5.5 }
   ];
-  for (let d = 0; d < DAY_COLS; d += 1) colProps.push({ wch: 3.2 });
+  for (let d = 0; d < DAY_COLS; d += 1) colProps.push({ wch: 3.1 });
   colProps.push({ wch: 5 }, { wch: 5 }, { wch: 7 });
   ws['!cols'] = colProps;
 
   ws['!views'] = [{ showGridLines: true }];
-  ws['!freeze'] = { xSplit: 5, ySplit: 3, topLeftCell: 'F4', activePane: 'bottomRight', state: 'frozen' };
+  ws['!freeze'] = { xSplit: 6, ySplit: 3, topLeftCell: 'G4', activePane: 'bottomRight', state: 'frozen' };
 
   applyA4LandscapePrintSetup(ws, false);
   ws['!margins'] = {
