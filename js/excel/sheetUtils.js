@@ -178,12 +178,55 @@ export function updateSheetRange(ws) {
   ws['!ref'] = window.XLSX.utils.encode_range({ r: minR, c: minC }, { r: maxR, c: maxC });
 }
 
+/**
+ * Excel シート名の安全化（禁止文字除去・31文字制限）
+ * 禁止: : \ / ? * [ ]
+ * @param {string} name
+ * @param {string} [fallback='Sheet']
+ * @returns {string}
+ */
+export function sanitizeSheetName(name, fallback = 'Sheet') {
+  let s = String(name || fallback)
+    .replace(/[:\\/?*[\]]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!s) s = fallback;
+  // Excel シート名上限 31 文字
+  if (s.length > 31) s = s.slice(0, 31);
+  // 末尾の単一クォート等は避ける
+  s = s.replace(/^'+|'+$/g, '');
+  if (!s) s = fallback;
+  return s;
+}
+
+/**
+ * ワークブック内で一意なシート名を返す（重複時は末尾に連番）
+ * @param {Object} wb
+ * @param {string} desiredName
+ * @returns {string}
+ */
+export function uniqueSheetName(wb, desiredName) {
+  const base = sanitizeSheetName(desiredName);
+  const names = (wb && Array.isArray(wb.SheetNames)) ? wb.SheetNames : [];
+  if (names.indexOf(base) < 0) return base;
+  for (let n = 2; n < 1000; n += 1) {
+    const suffix = `(${n})`;
+    const truncated = sanitizeSheetName(
+      `${base.slice(0, Math.max(1, 31 - suffix.length))}${suffix}`
+    );
+    if (names.indexOf(truncated) < 0) return truncated;
+  }
+  return sanitizeSheetName(`${base.slice(0, 24)}_${Date.now().toString(36).slice(-6)}`);
+}
+
 export function appendOrReplaceSheet(wb, ws, name) {
-  const existingIdx = wb.SheetNames.indexOf(name);
-  if (existingIdx >= 0) wb.Sheets[name] = ws;
-  else window.XLSX.utils.book_append_sheet(wb, ws, name);
+  const safeName = uniqueSheetName(wb, name);
+  const existingIdx = wb.SheetNames.indexOf(safeName);
+  if (existingIdx >= 0) wb.Sheets[safeName] = ws;
+  else window.XLSX.utils.book_append_sheet(wb, ws, safeName);
   if (wb) wb.__rehaForceA4Landscape = true;
   installXlsxA4LandscapeWriteHook();
+  return safeName;
 }
 
 /* -------------------------------------------------------------------------- */

@@ -15,11 +15,13 @@ import { getAllTherapists, getTherapistById } from '../../store/therapistStore.j
 import {
   STYLES, thinBorder, getEarlyBaseDate,
   setStyledCell, updateSheetRange, appendOrReplaceSheet,
-  applyA4LandscapePrintSetup
+  applyA4LandscapePrintSetup, sanitizeSheetName
 } from '../sheetUtils.js';
 
 const DAY_COLS = 31;
 const DAY_OF_WEEK = ['日', '月', '火', '水', '木', '金', '土'];
+/** A4横・縦方向収容: 1シートあたり最大患者数（PT/OT 2行×20名） */
+const PATIENTS_PER_SHEET = 20;
 
 /** @typedef {'FULL_NORMAL'|'FULL_REDUCED'|'SPLIT_NORMAL'|'SPLIT_REDUCED'} SheetPeriodMode */
 
@@ -916,7 +918,64 @@ function pushPatientRoleMerges(merges, rowStart, rowEnd) {
   });
 }
 
-function buildSingleGroupWorksheet(aggregated, groupRows, def) {
+/**
+ * 職種行配列を「患者ID順のグループ」にまとめ、20名チャンクへ分割する
+ * @param {object[]} rows
+ * @param {number} [chunkSize=20]
+ * @returns {{ patientIds: string[], chunks: object[][], patientCount: number }}
+ */
+function chunkRowsByPatient(rows, chunkSize = PATIENTS_PER_SHEET) {
+  /** @type {{ id: string, rows: object[] }[]} */
+  const groups = [];
+  let current = null;
+  (rows || []).forEach((row) => {
+    const id = String(row?.id || '');
+    if (!current || current.id !== id) {
+      current = { id, rows: [] };
+      groups.push(current);
+    }
+    current.rows.push(row);
+  });
+
+  /** @type {object[][]} */
+  const chunks = [];
+  for (let i = 0; i < groups.length; i += chunkSize) {
+    const slice = groups.slice(i, i + chunkSize);
+    chunks.push(slice.flatMap((g) => g.rows));
+  }
+
+  return {
+    patientIds: groups.map((g) => g.id),
+    chunks,
+    patientCount: groups.length
+  };
+}
+
+/**
+ * 分割シート名を生成（1枚のみは基名、複数は (1-20) 形式）
+ * @param {string} baseSheetName
+ * @param {number} pageIndex 1始まり
+ * @param {number} totalPages
+ * @param {number} patientStart 1始まり
+ * @param {number} patientEnd 1始まり
+ * @returns {string}
+ */
+function buildPagedSheetName(baseSheetName, pageIndex, totalPages, patientStart, patientEnd) {
+  const base = String(baseSheetName || 'Sheet');
+  if (totalPages <= 1) return sanitizeSheetName(base);
+  // 例: 入院_脳血管(通常)(1-20)
+  const rangeLabel = `(${patientStart}-${patientEnd})`;
+  const maxBaseLen = Math.max(1, 31 - rangeLabel.length);
+  return sanitizeSheetName(`${base.slice(0, maxBaseLen)}${rangeLabel}`);
+}
+
+/**
+ * @param {object} aggregated
+ * @param {object[]} groupRows
+ * @param {object} def
+ * @param {{ pageIndex?: number, totalPages?: number, patientStart?: number, patientEnd?: number, patientCountInPage?: number }} [pageMeta]
+ */
+function buildSingleGroupWorksheet(aggregated, groupRows, def, pageMeta = {}) {
   if (!groupRows || groupRows.length === 0) return null;
 
   const { year, month, daysInMonth } = aggregated;
@@ -925,9 +984,16 @@ function buildSingleGroupWorksheet(aggregated, groupRows, def) {
   let curRow = 0;
 
   const titleColor = def.reduced ? '881337' : '1E3A8A';
-  const title = `【${year}年${month}月 ${def.catLabel} ${def.disLabel} (${def.kindLabel})（個別リハビリ実施リスト）】`;
+  const totalPages = Number(pageMeta.totalPages) || 1;
+  const pageIndex = Number(pageMeta.pageIndex) || 1;
+  const pStart = Number(pageMeta.patientStart) || 1;
+  const pEnd = Number(pageMeta.patientEnd) || pStart;
+  const pageNote = totalPages > 1
+    ? ` ／ 分割 ${pageIndex}/${totalPages}（患者 ${pStart}〜${pEnd} 名目・本紙 ${pageMeta.patientCountInPage || 0} 名）`
+    : '';
+  const title = `【${year}年${month}月 ${def.catLabel} ${def.disLabel} (${def.kindLabel})（個別リハビリ実施リスト）${pageNote}】`;
   setStyledCell(ws, curRow, 0, title, {
-    font: { name: 'Meiryo UI', sz: 11, bold: true, color: { rgb: titleColor } }
+    font: { name: 'Meiryo UI', sz: totalPages > 1 ? 10 : 11, bold: true, color: { rgb: titleColor } }
   });
   curRow += 1;
 
@@ -1044,7 +1110,9 @@ function buildSingleGroupWorksheet(aggregated, groupRows, def) {
 }
 
 /**
- * 個別リハ実施リストを最大12物理タブへ追加（当月切替は日割りで両シートへ）
+ * 個別リハ実施リストを物理タブへ追加
+ * ・入院/外来 × 疾患 × 通常/減算（最大12系統）
+ * ・各系統で患者20名超は自動シート分割（A4横の縦ハミ出し防止）
  * @param {Object} wb
  * @param {Object} aggregated
  * @returns {string[]}
@@ -1063,14 +1131,37 @@ export function writeIndividualRehaSheets(wb, aggregated) {
 
     if (filtered.length === 0) continue;
 
-    const ws = buildSingleGroupWorksheet(aggregated, filtered, def);
-    if (!ws) continue;
+    const { chunks, patientCount } = chunkRowsByPatient(filtered, PATIENTS_PER_SHEET);
+    const totalPages = Math.max(1, chunks.length);
 
-    appendOrReplaceSheet(wb, ws, def.sheetName);
-    if (wb.SheetNames.indexOf(def.sheetName) < 0 && window.XLSX?.utils?.book_append_sheet) {
-      window.XLSX.utils.book_append_sheet(wb, ws, def.sheetName);
-    }
-    appendedNames.push(def.sheetName);
+    chunks.forEach((chunkRows, chunkIdx) => {
+      const pageIndex = chunkIdx + 1;
+      const patientStart = chunkIdx * PATIENTS_PER_SHEET + 1;
+      const patientEnd = Math.min(patientCount, (chunkIdx + 1) * PATIENTS_PER_SHEET);
+      // チャンク内のユニーク患者数
+      const idsInChunk = new Set(chunkRows.map((r) => String(r.id || '')));
+      const patientCountInPage = idsInChunk.size;
+
+      const sheetName = buildPagedSheetName(
+        def.sheetName,
+        pageIndex,
+        totalPages,
+        patientStart,
+        patientEnd
+      );
+
+      const ws = buildSingleGroupWorksheet(aggregated, chunkRows, def, {
+        pageIndex,
+        totalPages,
+        patientStart,
+        patientEnd,
+        patientCountInPage
+      });
+      if (!ws) return;
+
+      const finalName = appendOrReplaceSheet(wb, ws, sheetName);
+      appendedNames.push(finalName || sheetName);
+    });
   }
 
   return appendedNames;
