@@ -7,7 +7,11 @@ import { loadMonthOnDemand } from '../store/archiveManager.js';
 import { showToast } from '../ui/toast.js';
 import { printMonthlyAuditSheet } from '../print/monthlyAuditPrint.js';
 import {
-  monthlyState, MONTHLY_QUICK_FILTERS, MONTHLY_QUICK_FILTER_LABELS
+  monthlyState,
+  MONTHLY_QUICK_FILTERS,
+  MONTHLY_QUICK_FILTER_LABELS,
+  parseMonthlyFilterSelectValue,
+  buildMonthlyFilterSelectValue,
 } from './monthly/monthlyState.js';
 import {
   renderRevenueDashboard, setupRevenueBreakdownModalListeners, openRevenueBreakdownModal
@@ -17,17 +21,14 @@ import {
 } from './monthly/unitsTable.js';
 import { renderDailyDiaryPreview } from './monthly/diaryPreview.js';
 
-const VALID_QUICK_FILTERS = new Set(Object.values(MONTHLY_QUICK_FILTERS));
-
 export function initMonthlyView() {
   const monthInput = document.getElementById('monthlyMonthInput');
   const btnPrev = document.getElementById('btnPrevMonth');
   const btnNext = document.getElementById('btnNextMonth');
   const sortSelect = document.getElementById('monthlySortSelect');
-  const therapistFilterSelect = document.getElementById('monthlyTherapistFilterSelect');
+  const filterSelect = document.getElementById('monthlyFilterSelect');
   const btnAuditPrint = document.getElementById('btnMonthlyAuditPrint');
   const todayCard = document.getElementById('kpiTodayRevenueCard');
-  const quickFilterBar = document.getElementById('monthlyQuickFilterBar');
 
   if (monthInput) {
     monthInput.value = `${monthlyState.year}-${String(monthlyState.month).padStart(2, '0')}`;
@@ -65,9 +66,11 @@ export function initMonthlyView() {
     }
   });
 
-  // 担当セラピスト絞り込み（クイックフィルター・ソートと併用／再集計不要）
-  therapistFilterSelect?.addEventListener('change', (e) => {
-    monthlyState.therapistFilterId = String(e.target.value || '').trim();
+  // 絞り込みセレクト（区分 / 維持期 / 計画未算定 / 担当セラピスト）
+  filterSelect?.addEventListener('change', (e) => {
+    const parsed = parseMonthlyFilterSelectValue(e.target.value);
+    monthlyState.quickFilter = parsed.filterKey;
+    monthlyState.therapistFilterId = parsed.therapistFilterId;
     if (monthlyState.lastAggregated) {
       renderMonthlyUnitsTable(monthlyState.lastAggregated);
     } else {
@@ -84,13 +87,19 @@ export function initMonthlyView() {
     }
     const patients = collectVisibleMonthlyPatients(aggregated);
     const filterKey = monthlyState.quickFilter || MONTHLY_QUICK_FILTERS.ALL;
+    const tid = String(monthlyState.therapistFilterId || '').trim();
+    let quickFilterLabel = MONTHLY_QUICK_FILTER_LABELS[filterKey] || '全員';
+    if (tid) {
+      const opt = filterSelect?.selectedOptions?.[0];
+      quickFilterLabel = opt ? String(opt.textContent || '').replace(/\s*\(\d+\)\s*$/, '').trim() : `担当 ${tid}`;
+    }
     printMonthlyAuditSheet({
       year: monthlyState.year,
       month: monthlyState.month,
       patients,
       daysInMonth: aggregated.daysInMonth,
-      selectedTherapistId: monthlyState.therapistFilterId || null,
-      quickFilterLabel: MONTHLY_QUICK_FILTER_LABELS[filterKey] || '全員'
+      selectedTherapistId: tid || null,
+      quickFilterLabel
     });
   });
 
@@ -98,20 +107,13 @@ export function initMonthlyView() {
     openRevenueBreakdownModal();
   });
 
-  // 臨床最重要クイックフィルター（ワンクリック切替・再集計なし）
-  quickFilterBar?.addEventListener('click', (e) => {
-    const btn = e.target.closest('.monthly-qf-btn');
-    if (!btn || !quickFilterBar.contains(btn)) return;
-    const key = btn.getAttribute('data-monthly-filter');
-    if (!key || !VALID_QUICK_FILTERS.has(key)) return;
-    if (monthlyState.quickFilter === key) return;
-    monthlyState.quickFilter = key;
-    if (monthlyState.lastAggregated) {
-      renderMonthlyUnitsTable(monthlyState.lastAggregated);
-    } else {
-      renderMonthlyView();
-    }
-  });
+  // 初期セレクト値を状態と同期
+  if (filterSelect) {
+    filterSelect.value = buildMonthlyFilterSelectValue(monthlyState);
+  }
+  if (sortSelect && monthlyState.sortKey) {
+    sortSelect.value = monthlyState.sortKey;
+  }
 
   setupRevenueBreakdownModalListeners();
 }

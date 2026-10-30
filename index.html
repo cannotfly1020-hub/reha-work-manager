@@ -183,18 +183,45 @@
         <span class="monthly-tb-divider" aria-hidden="true"></span>
 
         <div class="filter-sort-group">
-          <select id="monthlySortSelect" class="monthly-tb-select monthly-tb-select-sort" title="並び替え">
-            <option value="CATEGORY" selected>区分順</option>
-            <option value="DISEASE">疾患順</option>
-            <option value="THERAPIST_ASC">担当↑</option>
-            <option value="THERAPIST_DESC">担当↓</option>
-            <option value="KANA">五十音順</option>
-            <option value="ID">ID順</option>
+          <!-- ①誰を出すか -->
+          <select id="monthlyFilterSelect" class="monthly-tb-select monthly-tb-select-filter" title="絞り込み（対象の限定）" style="height:36px; font-size:13px; font-weight:600; min-width:170px;">
+            <optgroup label="全体">
+              <option value="ALL" selected>絞り込み: 全員</option>
+            </optgroup>
+            <optgroup label="区分別">
+              <option value="inpatient">入院患者のみ</option>
+              <option value="outpatient">外来患者のみ</option>
+              <option value="disuse_all">消炎鎮痛のみ</option>
+            </optgroup>
+            <optgroup label="維持期（月13単位対象）">
+              <option value="maint_all">維持期 全員（月13単位）</option>
+              <option value="maint_inpatient">🏥 入院の維持期のみ</option>
+              <option value="maint_outpatient">🚶 外来の維持期のみ</option>
+            </optgroup>
+            <optgroup label="点検・アラート">
+              <option value="uncalculated_plan">⚠️ 計画書未算定のみ</option>
+            </optgroup>
+            <optgroup label="担当セラピスト" id="filterOptgroupTherapists">
+              <!-- PT/OT/ST 一覧を動的生成 -->
+            </optgroup>
           </select>
-          <select id="monthlyTherapistFilterSelect" class="monthly-tb-select monthly-tb-select-therapist" title="担当セラピストで絞り込み">
-            <option value="">担当: 全員</option>
+          <!-- ②どの順で並べるか -->
+          <select id="monthlySortSelect" class="monthly-tb-select monthly-tb-select-sort" title="並べ替え" style="height:36px; font-size:13px; font-weight:600; min-width:150px;">
+            <option value="CATEGORY" selected>並べ替え: 区分順</option>
+            <option value="DISEASE">並べ替え: 疾患順</option>
+            <option value="MAINT13_DESC">並べ替え: 維持期13単位 多い順⚠️</option>
+            <option value="THERAPIST_ASC">並べ替え: 担当↑</option>
+            <option value="THERAPIST_DESC">並べ替え: 担当↓</option>
+            <option value="KANA">並べ替え: 五十音順</option>
+            <option value="ID">並べ替え: ID順</option>
           </select>
         </div>
+
+        <span class="monthly-tb-divider" aria-hidden="true"></span>
+
+        <span id="filteredCountBadge" class="monthly-shown-badge" title="現在の絞り込み結果">
+          表示中: <strong id="currentShownCount">0</strong> 名
+        </span>
 
         <span class="monthly-tb-divider" aria-hidden="true"></span>
 
@@ -226,34 +253,6 @@
       </div>
     </div>
     <div id="dailyDiaryPreviewContainer" style="margin-bottom:16px;"></div>
-    <!-- 臨床動線順クイックフィルター（入院/外来 × 疾患別/消炎 分離） -->
-    <div id="monthlyQuickFilterBar" class="monthly-quick-filter-bar" role="toolbar" aria-label="月間単位表クイックフィルター">
-      <span class="monthly-qf-label">絞り込み:</span>
-      <button type="button" class="monthly-qf-btn is-active" data-monthly-filter="ALL" title="全患者を表示">
-        🌐 全員 <span class="monthly-qf-count" data-count-for="ALL">0</span>
-      </button>
-      <button type="button" class="monthly-qf-btn monthly-qf-in-disease" data-monthly-filter="IN_DISEASE" title="入院・疾患別個別リハ（退院・退院予定を含む）">
-        🏥 入院疾患別 <span class="monthly-qf-count" data-count-for="IN_DISEASE">0</span>
-      </button>
-      <button type="button" class="monthly-qf-btn monthly-qf-in-analg" data-monthly-filter="IN_ANALGESIA" title="入院・消炎鎮痛等処置">
-        ⚡ 入院消炎鎮痛 <span class="monthly-qf-count" data-count-for="IN_ANALGESIA">0</span>
-      </button>
-      <button type="button" class="monthly-qf-btn monthly-qf-out-disease" data-monthly-filter="OUT_DISEASE" title="外来・疾患別個別リハのみ">
-        🚶 外来疾患別 <span class="monthly-qf-count" data-count-for="OUT_DISEASE">0</span>
-      </button>
-      <button type="button" class="monthly-qf-btn monthly-qf-out-analg" data-monthly-filter="OUT_ANALGESIA" title="外来・消炎鎮痛等処置のみ">
-        ⚡ 外来消炎鎮痛 <span class="monthly-qf-count" data-count-for="OUT_ANALGESIA">0</span>
-      </button>
-      <button type="button" class="monthly-qf-btn monthly-qf-maint" data-monthly-filter="MAINTENANCE" title="算定日数上限超過・要介護移行期・月13単位制限の管理対象">
-        ⏳ 維持期・移行対象 <span class="monthly-qf-count" data-count-for="MAINTENANCE">0</span>
-      </button>
-      <button type="button" class="monthly-qf-btn monthly-qf-alert" data-monthly-filter="PLAN_MISSING" title="当月リハ実績あり・計画評価料未算定（算定漏れ防止）">
-        ⚠️ 計画書未算定 <span class="monthly-qf-count" data-count-for="PLAN_MISSING">0</span>
-      </button>
-      <span id="filteredCountBadge" class="monthly-qf-shown">
-        表示中: <strong id="currentShownCount">0</strong> 名
-      </span>
-    </div>
     <div id="monthlyTherapistSummaryBar" class="monthly-therapist-summary" style="display:none;" role="status" aria-live="polite"></div>
     <div class="table-container" id="monthlyTableContainer"></div>
   </section>
