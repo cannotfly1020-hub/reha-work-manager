@@ -171,22 +171,17 @@
 
   <!-- VIEW 2: 月間単位・収益ダッシュボード -->
   <section id="viewMonthly" class="view-panel">
-    <div class="monthly-toolbar-row">
-      <div class="monthly-toolbar" role="toolbar" aria-label="月間単位・収益ツールバー">
-        <!-- グループ1: 年月ナビゲーション -->
+    <div class="monthly-header-row monthly-toolbar-row">
+      <!-- 左側: 操作・フィルター群 -->
+      <div class="monthly-controls-left monthly-toolbar" role="toolbar" aria-label="月間単位・収益ツールバー">
         <div class="month-nav-group">
-          <button type="button" id="btnPrevMonth" class="monthly-tb-btn monthly-tb-btn-nav" title="前月へ">
-            ◀ 前月
-          </button>
+          <button type="button" id="btnPrevMonth" class="monthly-tb-btn monthly-tb-btn-nav" title="前月へ">◀ 前月</button>
           <input type="month" id="monthlyMonthInput" class="monthly-tb-month" title="対象年月">
-          <button type="button" id="btnNextMonth" class="monthly-tb-btn monthly-tb-btn-nav" title="次月へ">
-            次月 ▶
-          </button>
+          <button type="button" id="btnNextMonth" class="monthly-tb-btn monthly-tb-btn-nav" title="次月へ">次月 ▶</button>
         </div>
 
         <span class="monthly-tb-divider" aria-hidden="true"></span>
 
-        <!-- グループ2: ソート・担当絞り込み -->
         <div class="filter-sort-group">
           <select id="monthlySortSelect" class="monthly-tb-select monthly-tb-select-sort" title="並び替え">
             <option value="CATEGORY" selected>並べ替え: 区分順 (入院→外来→消炎)</option>
@@ -203,17 +198,17 @@
 
         <span class="monthly-tb-divider" aria-hidden="true"></span>
 
-        <!-- グループ3: 点検印刷 -->
         <button type="button" id="btnMonthlyAuditPrint" class="monthly-tb-btn monthly-tb-btn-print"
           title="赤ペン点検用A4横チェックシートを印刷（現在の絞り込みを反映）">
-          🖨️ 点検チェック印刷
+          <span aria-hidden="true">🖨️</span> 点検チェック印刷
         </button>
       </div>
 
-      <div class="monthly-kpi-group">
-        <div id="kpiTodayRevenueCard" class="monthly-kpi-card" title="クリックで本日の収益内訳明細を表示">
+      <!-- 右側: 収益見込ミニカード（右寄せ・コンパクト） -->
+      <div class="monthly-kpi-right monthly-kpi-group">
+        <div id="kpiTodayRevenueCard" class="monthly-kpi-card kpi-mini-card" title="クリックで本日の収益内訳明細を表示">
           <div class="monthly-kpi-label">
-            <span>本日収益見込 (単位)</span>
+            <span>本日収益見込</span>
             <span class="monthly-kpi-chip">内訳🔍</span>
           </div>
           <div class="monthly-kpi-value monthly-kpi-value-today">
@@ -221,7 +216,7 @@
             <span id="kpiTodayUnits" class="monthly-kpi-units">(0単位)</span>
           </div>
         </div>
-        <div class="monthly-kpi-card">
+        <div class="monthly-kpi-card kpi-mini-card">
           <div class="monthly-kpi-label">当月累計収益 (総単位)</div>
           <div class="monthly-kpi-value monthly-kpi-value-month">
             <span id="kpiMonthRevenue">¥0</span>
