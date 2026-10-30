@@ -73,6 +73,114 @@ function patientHasTherapistSlots(item, therapistId) {
 }
 
 /**
+ * 特定セラピストに絞り込まれた際の当人単位集計（患者1名分）
+ * @param {object} item aggregate patientMap entry
+ * @param {string} selectedTherapistId
+ * @returns {{ totalUnits: number, dailyUnits: Record<number, number>, earlyUnits: number, planCount: number, diseaseUnits: number }|null}
+ */
+export function calculateTherapistSpecificUnits(item, selectedTherapistId) {
+  const tid = String(selectedTherapistId || '').trim();
+  if (!tid || tid === 'ALL') return null;
+
+  let therapistUnits = 0;
+  let earlyUnits = 0;
+  let planCount = 0;
+  /** @type {Record<number, number>} */
+  const therapistDaily = {};
+
+  (item?.slots || []).forEach((slot) => {
+    if (!slot || slot.isAnalgesia) return;
+    const slotTid = String(slot.therapist || slot.therapistId || '').trim();
+    if (slotTid !== tid) return;
+
+    const u = Number(slot.units || slot.unit || 0);
+    if (u <= 0) return;
+
+    therapistUnits += u;
+    const day = Number(String(slot.date || '').slice(8, 10));
+    if (day >= 1 && day <= 31) {
+      therapistDaily[day] = (therapistDaily[day] || 0) + u;
+      // その日に早期加算実績がある場合、当人実施単位を加算側に計上
+      const dayEarly = Number(item?.dailyEarlyUnits?.[day] || 0);
+      if (dayEarly > 0) earlyUnits += u;
+    }
+    if (slot.billingPlan) planCount += 1;
+  });
+
+  return {
+    totalUnits: therapistUnits,
+    dailyUnits: therapistDaily,
+    earlyUnits,
+    planCount,
+    diseaseUnits: therapistUnits, // 個別リハ（消炎スロット除外済み）
+  };
+}
+
+/**
+ * 表示中患者群に対するセラピスト個人サマリーを集計
+ * @param {object[]} patients
+ * @param {string} selectedTherapistId
+ * @returns {{ patientCount: number, totalUnits: number, diseaseUnits: number, earlyUnits: number, planCount: number }}
+ */
+export function aggregateTherapistPersonalSummary(patients, selectedTherapistId) {
+  const summary = {
+    patientCount: 0,
+    totalUnits: 0,
+    diseaseUnits: 0,
+    earlyUnits: 0,
+    planCount: 0,
+  };
+  const tid = String(selectedTherapistId || '').trim();
+  if (!tid) return summary;
+
+  (patients || []).forEach((item) => {
+    const specific = calculateTherapistSpecificUnits(item, tid);
+    if (!specific || specific.totalUnits <= 0) return;
+    summary.patientCount += 1;
+    summary.totalUnits += specific.totalUnits;
+    summary.diseaseUnits += specific.diseaseUnits;
+    summary.earlyUnits += specific.earlyUnits;
+    summary.planCount += specific.planCount;
+  });
+  return summary;
+}
+
+/**
+ * セラピスト個人サマリーバーの表示／非表示
+ * @param {string} therapistFilterId
+ * @param {object[]} patients
+ */
+export function syncMonthlyTherapistSummaryBar(therapistFilterId, patients) {
+  const bar = document.getElementById('monthlyTherapistSummaryBar');
+  if (!bar) return;
+
+  const tid = String(therapistFilterId || '').trim();
+  if (!tid || tid === 'ALL') {
+    bar.classList.remove('is-visible');
+    bar.style.display = 'none';
+    bar.innerHTML = '';
+    return;
+  }
+
+  const t = getTherapistById(tid);
+  const role = getTherapistRole(tid, t?.name || '', getAllTherapists());
+  const name = t?.name || tid;
+  const summary = aggregateTherapistPersonalSummary(patients, tid);
+
+  bar.innerHTML = `
+    <span class="mts-title">【👤 ${sanitizeHtml(role)} ${sanitizeHtml(name)} 療法士 の当月実績】</span>
+    担当患者: <span class="mts-num">${summary.patientCount}</span> 名
+    <span class="mts-sep">｜</span>
+    個人取得単位: <span class="mts-num">${summary.totalUnits}</span> 単位
+    <span style="font-weight:600; color:#0369a1;">
+      (疾患別: ${summary.diseaseUnits} / 加算: ${summary.earlyUnits} / 計画書: ${summary.planCount}件)
+    </span>
+  `;
+  bar.classList.add('is-visible');
+  bar.style.display = 'block';
+}
+
+/**
  * セラピスト名・職種に基づく患者ソート
  * @param {object[]} patientRows
  * @param {boolean} [isAsc=true]
@@ -255,7 +363,7 @@ function sortPatients(patients, sortKey) {
 }
 
 /**
- * 担当セラピスト絞り込み（主担当一致、または当月実施実績あり）
+ * 担当セラピスト絞り込み（当月に当該セラピストの実施スロットがある患者）
  * @param {object} item
  * @param {string} therapistFilterId
  * @returns {boolean}
@@ -263,8 +371,6 @@ function sortPatients(patients, sortKey) {
 export function matchesTherapistFilter(item, therapistFilterId) {
   const tid = String(therapistFilterId || '').trim();
   if (!tid) return true;
-  const primary = resolvePrimaryTherapistId(item);
-  if (primary === tid) return true;
   return patientHasTherapistSlots(item, tid);
 }
 
@@ -459,6 +565,7 @@ export function renderMonthlyUnitsTable(aggregated) {
 
   if (rawPatients.length === 0) {
     syncMonthlyQuickFilterBar(counts, 0);
+    syncMonthlyTherapistSummaryBar('', []);
     container.innerHTML = '<div style="padding:24px; text-align:center; color:#94a3b8; font-size:0.85rem;">対象月のデータはありません</div>';
     return;
   }
@@ -471,8 +578,10 @@ export function renderMonthlyUnitsTable(aggregated) {
   ));
   const patients = sortPatients(filtered, monthlyState.sortKey);
   syncMonthlyQuickFilterBar(counts, patients.length);
+  syncMonthlyTherapistSummaryBar(therapistFilterId, patients);
   const year = monthlyState.year;
   const month = monthlyState.month;
+  const therapistFocus = Boolean(therapistFilterId);
 
   if (patients.length === 0) {
     const labels = {
@@ -494,13 +603,16 @@ export function renderMonthlyUnitsTable(aggregated) {
     return;
   }
 
+  const totalColWidth = therapistFocus ? '72px' : '44px';
+  const totalColLabel = therapistFocus ? '当人/全体' : '当月計';
+
   let html = `
-    <table class="modern-table table-monthly">
+    <table class="modern-table table-monthly${therapistFocus ? ' table-monthly-therapist-focus' : ''}">
       <thead>
         <tr>
           <th class="col-fixed" style="width:128px;">氏名</th>
           <th style="width:32px;">区分</th>
-          <th style="width:44px;">当月計</th>
+          <th style="width:${totalColWidth};">${totalColLabel}</th>
           <th style="width:42px;">計画書</th>
           <th style="width:52px;">提出用</th>
   `;
@@ -514,6 +626,9 @@ export function renderMonthlyUnitsTable(aggregated) {
     const isAnalgesia = p.diseaseType === 'ANALGESIA';
     const isOut = p.category === 'OUTPATIENT';
     const dischargeInfo = (!isOut && !isAnalgesia) ? resolveDischargeInMonth(p, year, month) : null;
+    const specific = therapistFocus
+      ? calculateTherapistSpecificUnits(item, therapistFilterId)
+      : null;
 
     let catBadge = isOut
       ? '<span style="color:#2563eb; font-weight:700;">外</span>'
@@ -545,17 +660,30 @@ export function renderMonthlyUnitsTable(aggregated) {
     }
 
     let totalBadge = `<strong>${item.totalUnits}</strong>`;
-    if (violation.isOver13) {
+    if (therapistFocus && specific) {
+      const ownU = specific.totalUnits;
+      const allU = item.rehaTotalUnits || item.totalUnits || 0;
+      const warnMark = violation.isOver13 ? '⚠️' : '';
+      totalBadge = `
+        <span class="total-therapist-own" title="${sanitizeHtml(totalTitle || `当人取得 ${ownU}単位 / 患者全体 ${allU}単位`)}">当人:${ownU}${warnMark}</span>
+        <span class="total-therapist-all">全体:${allU}</span>
+      `;
+    } else if (violation.isOver13) {
       totalBadge = `<span style="color:#dc2626; font-weight:800;" title="${sanitizeHtml(totalTitle)}">${item.totalUnits}⚠️</span>`;
     } else if (isNearLimit) {
       totalBadge = `<span style="background:#fef3c7; color:#b45309; padding:1px 3px; border-radius:3px; font-weight:700;" title="${sanitizeHtml(totalTitle)}">${item.totalUnits}</span>`;
     }
 
-    const planBadge = item.planCount > 0
-      ? '<span style="background:#e0f2fe; color:#0369a1; padding:1px 4px; border-radius:3px; font-weight:700;">済</span>'
+    const planCountForBadge = (therapistFocus && specific)
+      ? specific.planCount
+      : item.planCount;
+    const planBadge = planCountForBadge > 0
+      ? `<span style="background:#e0f2fe; color:#0369a1; padding:1px 4px; border-radius:3px; font-weight:700;">${therapistFocus ? `${planCountForBadge}` : '済'}</span>`
       : '<span style="color:#cbd5e1;">-</span>';
 
-    const hasEarly = item.totalEarlyUnits > 0;
+    const hasEarly = therapistFocus && specific
+      ? specific.earlyUnits > 0
+      : item.totalEarlyUnits > 0;
     const earlyBadge = hasEarly
       ? `<span class="toggle-early-btn" style="cursor:pointer; margin-left:4px; font-size:0.65rem; background:#ede9fe; color:#7c3aed; padding:0 3px; border-radius:3px; font-weight:700;" title="早期加算内訳">早▼</span>`
       : '';
@@ -580,17 +708,29 @@ export function renderMonthlyUnitsTable(aggregated) {
         </td>
     `;
     for (let d = 1; d <= daysInMonth; d++) {
-      const u = item.dailyUnits[d] || 0;
+      const uAll = item.dailyUnits[d] || 0;
+      const uOwn = specific ? (specific.dailyUnits[d] || 0) : 0;
       const isAfterDischarge = dischargeInfo && d > dischargeInfo.day;
       const isDischargeDay = dischargeInfo && d === dischargeInfo.day;
       let cellClass = '';
       if (isAfterDischarge) cellClass = 'cell-after-discharge';
       else if (isDischargeDay) cellClass = 'cell-discharge-day';
 
-      if (isAfterDischarge) {
-        html += `<td class="${cellClass}">${u > 0 ? `<span class="unit-after-discharge">${u}</span>` : '<span class="dash-after-discharge">-</span>'}</td>`;
-      } else if (u > 0) {
-        html += `<td class="${cellClass}"><span style="font-weight:700; color:${isAnalgesia ? '#16a34a' : '#0f172a'};">${u}</span></td>`;
+      if (therapistFocus) {
+        if (isAfterDischarge) {
+          html += `<td class="${cellClass}">${uOwn > 0 ? `<span class="unit-after-discharge">${uOwn}</span>` : '<span class="dash-after-discharge">-</span>'}</td>`;
+        } else if (uOwn > 0) {
+          const tip = uAll > uOwn ? `当人${uOwn} / 全体${uAll}` : `当人${uOwn}単位`;
+          html += `<td class="${cellClass} cell-therapist-own" title="${tip}"><span class="unit-therapist-own">${uOwn}</span></td>`;
+        } else if (uAll > 0) {
+          html += `<td class="${cellClass}" title="他担当のみ: ${uAll}単位"><span class="unit-therapist-other">${uAll}</span></td>`;
+        } else {
+          html += `<td class="${cellClass}"><span style="color:#e2e8f0;">-</span></td>`;
+        }
+      } else if (isAfterDischarge) {
+        html += `<td class="${cellClass}">${uAll > 0 ? `<span class="unit-after-discharge">${uAll}</span>` : '<span class="dash-after-discharge">-</span>'}</td>`;
+      } else if (uAll > 0) {
+        html += `<td class="${cellClass}"><span style="font-weight:700; color:${isAnalgesia ? '#16a34a' : '#0f172a'};">${uAll}</span></td>`;
       } else {
         html += `<td class="${cellClass}"><span style="color:#e2e8f0;">-</span></td>`;
       }
@@ -598,19 +738,24 @@ export function renderMonthlyUnitsTable(aggregated) {
     html += `</tr>`;
 
     if (hasEarly) {
+      const earlyTotalShow = (therapistFocus && specific) ? specific.earlyUnits : item.totalEarlyUnits;
       html += `
         <tr id="early-${p.id}" class="sub-row-early" style="display:none;">
           <td class="col-fixed" style="font-size:0.72rem; color:#7c3aed; font-weight:700; padding-left:14px;">↳ 早</td>
           <td style="font-size:0.7rem; color:#7c3aed;">加</td>
-          <td style="font-weight:700; color:#7c3aed;">${item.totalEarlyUnits}</td>
+          <td style="font-weight:700; color:#7c3aed;">${earlyTotalShow}</td>
           <td style="color:#cbd5e1;">-</td>
           <td style="color:#cbd5e1;">-</td>
       `;
       for (let d = 1; d <= daysInMonth; d++) {
-        const eu = item.dailyEarlyUnits[d] || 0;
+        const euAll = item.dailyEarlyUnits[d] || 0;
+        const euOwn = (therapistFocus && specific && euAll > 0)
+          ? (specific.dailyUnits[d] || 0)
+          : euAll;
+        const showEu = therapistFocus ? euOwn : euAll;
         const isAfterDischarge = dischargeInfo && d > dischargeInfo.day;
         const cellClass = isAfterDischarge ? 'cell-after-discharge' : '';
-        html += `<td class="${cellClass}">${eu > 0 ? `<span style="font-weight:700; color:#7c3aed;">${eu}</span>` : '<span style="color:#e2e8f0;">-</span>'}</td>`;
+        html += `<td class="${cellClass}">${showEu > 0 ? `<span style="font-weight:700; color:#7c3aed;">${showEu}</span>` : '<span style="color:#e2e8f0;">-</span>'}</td>`;
       }
       html += `</tr>`;
     }
