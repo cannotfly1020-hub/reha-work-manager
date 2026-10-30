@@ -4,11 +4,17 @@
 import { safeParseInt } from '../core/dataNormalizer.js';
 import { aggregateFromAppSchedule } from '../store/scheduleStore.js';
 import { loadMonthOnDemand } from '../store/archiveManager.js';
-import { monthlyState, MONTHLY_QUICK_FILTERS } from './monthly/monthlyState.js';
+import { showToast } from '../ui/toast.js';
+import { printMonthlyAuditSheet } from '../print/monthlyAuditPrint.js';
+import {
+  monthlyState, MONTHLY_QUICK_FILTERS, MONTHLY_QUICK_FILTER_LABELS
+} from './monthly/monthlyState.js';
 import {
   renderRevenueDashboard, setupRevenueBreakdownModalListeners, openRevenueBreakdownModal
 } from './monthly/revenueDashboard.js';
-import { renderMonthlyUnitsTable } from './monthly/unitsTable.js';
+import {
+  renderMonthlyUnitsTable, collectVisibleMonthlyPatients
+} from './monthly/unitsTable.js';
 import { renderDailyDiaryPreview } from './monthly/diaryPreview.js';
 
 const VALID_QUICK_FILTERS = new Set(Object.values(MONTHLY_QUICK_FILTERS));
@@ -19,6 +25,7 @@ export function initMonthlyView() {
   const btnNext = document.getElementById('btnNextMonth');
   const sortSelect = document.getElementById('monthlySortSelect');
   const therapistFilterSelect = document.getElementById('monthlyTherapistFilterSelect');
+  const btnAuditPrint = document.getElementById('btnMonthlyAuditPrint');
   const todayCard = document.getElementById('kpiTodayRevenueCard');
   const quickFilterBar = document.getElementById('monthlyQuickFilterBar');
 
@@ -66,6 +73,25 @@ export function initMonthlyView() {
     } else {
       renderMonthlyView();
     }
+  });
+
+  // 実務点検・赤ペン用 A4横チェックシート（画面の絞り込み・ソートを反映）
+  btnAuditPrint?.addEventListener('click', () => {
+    const aggregated = monthlyState.lastAggregated;
+    if (!aggregated) {
+      showToast('月間データが未集計です。画面を再表示してから印刷してください', 'warn');
+      return;
+    }
+    const patients = collectVisibleMonthlyPatients(aggregated);
+    const filterKey = monthlyState.quickFilter || MONTHLY_QUICK_FILTERS.ALL;
+    printMonthlyAuditSheet({
+      year: monthlyState.year,
+      month: monthlyState.month,
+      patients,
+      daysInMonth: aggregated.daysInMonth,
+      selectedTherapistId: monthlyState.therapistFilterId || null,
+      quickFilterLabel: MONTHLY_QUICK_FILTER_LABELS[filterKey] || '全員'
+    });
   });
 
   todayCard?.addEventListener('click', () => {

@@ -17,6 +17,17 @@ export const MONTHLY_QUICK_FILTERS = Object.freeze({
   PLAN_MISSING: 'PLAN_MISSING',
 });
 
+/** クイックフィルター表示ラベル（印刷タイトル・UI共用） */
+export const MONTHLY_QUICK_FILTER_LABELS = Object.freeze({
+  [MONTHLY_QUICK_FILTERS.ALL]: '全員',
+  [MONTHLY_QUICK_FILTERS.IN_DISEASE]: '入院疾患別',
+  [MONTHLY_QUICK_FILTERS.IN_ANALGESIA]: '入院消炎鎮痛',
+  [MONTHLY_QUICK_FILTERS.OUT_DISEASE]: '外来疾患別',
+  [MONTHLY_QUICK_FILTERS.OUT_ANALGESIA]: '外来消炎鎮痛',
+  [MONTHLY_QUICK_FILTERS.MAINTENANCE]: '維持期・移行対象',
+  [MONTHLY_QUICK_FILTERS.PLAN_MISSING]: '計画書未算定',
+});
+
 export const monthlyState = {
   year: now.getFullYear(),
   month: now.getMonth() + 1,

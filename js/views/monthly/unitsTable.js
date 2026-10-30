@@ -554,6 +554,24 @@ export function syncMonthlyQuickFilterBar(counts, shownCount) {
   }
 }
 
+/**
+ * 画面と同じクイックフィルター・担当絞り込み・ソート済みの患者行を返す
+ * （点検チェック印刷など外部出力用）
+ * @param {object} aggregated
+ * @returns {object[]}
+ */
+export function collectVisibleMonthlyPatients(aggregated) {
+  if (!aggregated?.patientMap) return [];
+  const rawPatients = Object.values(aggregated.patientMap);
+  const filterKey = monthlyState.quickFilter || MONTHLY_QUICK_FILTERS.ALL;
+  const therapistFilterId = String(monthlyState.therapistFilterId || '').trim();
+  const filtered = rawPatients.filter((item) => (
+    matchesMonthlyQuickFilter(item, filterKey)
+    && matchesTherapistFilter(item, therapistFilterId)
+  ));
+  return sortPatients(filtered, monthlyState.sortKey);
+}
+
 export function renderMonthlyUnitsTable(aggregated) {
   const container = document.getElementById('monthlyTableContainer');
   if (!container) return;
