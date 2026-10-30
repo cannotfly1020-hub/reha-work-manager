@@ -6,7 +6,8 @@ import { sanitizeHtml } from '../../core/dataNormalizer.js';
 import {
   getAllTherapists, addTherapist, updateTherapistSettings,
   saveAllTherapists, THERAPIST_STATUS,
-  DEFAULT_LUNCH_BREAK, LUNCH_BREAK_TIME_OPTIONS, resolveTherapistLunchBreak
+  DEFAULT_LUNCH_BREAK, LUNCH_BREAK_TIME_OPTIONS, resolveTherapistLunchBreak,
+  applyFacilityLunchToAllTherapists
 } from '../../store/therapistStore.js';
 import { showToast } from '../../ui/toast.js';
 import { getAssistantSettings, saveAssistantSettings } from '../../store/assistantStore.js';
@@ -25,21 +26,45 @@ import { renderAppointmentCalendarView } from '../appointmentCalendarView.js';
 let onStaffUpdatedCallback = null;
 
 /**
+ * select に候補が無い時刻を追加してから値をセット
+ * @param {HTMLSelectElement|null} selectEl
+ * @param {string} value
+ */
+function setLunchSelectValue(selectEl, value) {
+  if (!selectEl) return;
+  const v = String(value || '').trim();
+  if (!v) return;
+  if (![...selectEl.options].some((o) => o.value === v)) {
+    const opt = document.createElement('option');
+    opt.value = v;
+    opt.textContent = v;
+    selectEl.appendChild(opt);
+  }
+  selectEl.value = v;
+}
+
+/**
  * フォームから施設時間オブジェクトを読み取る
- * @returns {{ amStart: string, amEnd: string, pmStart: string, pmEnd: string }}
+ * @returns {{ amStart: string, amEnd: string, pmStart: string, pmEnd: string, defaultLunchStart: string, defaultLunchEnd: string }}
  */
 function readFacilityHoursFromForm() {
+  const lunch = resolveTherapistLunchBreak({
+    lunchStart: document.getElementById('settingDefaultLunchStart')?.value,
+    lunchEnd: document.getElementById('settingDefaultLunchEnd')?.value
+  });
   return {
     amStart: document.getElementById('settingAmStartInput')?.value || '',
     amEnd: document.getElementById('settingAmEndInput')?.value || '',
     pmStart: document.getElementById('settingPmStartInput')?.value || '',
-    pmEnd: document.getElementById('settingPmEndInput')?.value || ''
+    pmEnd: document.getElementById('settingPmEndInput')?.value || '',
+    defaultLunchStart: lunch.start,
+    defaultLunchEnd: lunch.end
   };
 }
 
 /**
  * 保存済み（または引数）の施設時間をフォームへセット
- * @param {{ amStart?: string, amEnd?: string, pmStart?: string, pmEnd?: string }|null|undefined} [hours]
+ * @param {Partial<import('../../core/timeSlotGenerator.js').FacilityHours>|null|undefined} [hours]
  */
 function fillFacilityHoursForm(hours) {
   const h = hours || getSavedFacilityHours();
@@ -51,6 +76,13 @@ function fillFacilityHoursForm(hours) {
   if (amEnd) amEnd.value = h.amEnd || DEFAULT_FACILITY_HOURS.amEnd;
   if (pmStart) pmStart.value = h.pmStart || DEFAULT_FACILITY_HOURS.pmStart;
   if (pmEnd) pmEnd.value = h.pmEnd || DEFAULT_FACILITY_HOURS.pmEnd;
+
+  const lunch = resolveTherapistLunchBreak({
+    lunchStart: h.defaultLunchStart || DEFAULT_FACILITY_HOURS.defaultLunchStart,
+    lunchEnd: h.defaultLunchEnd || DEFAULT_FACILITY_HOURS.defaultLunchEnd
+  });
+  setLunchSelectValue(document.getElementById('settingDefaultLunchStart'), lunch.start);
+  setLunchSelectValue(document.getElementById('settingDefaultLunchEnd'), lunch.end);
   updateFacilityHoursSlotSummaryBadge();
 }
 
@@ -136,11 +168,34 @@ export function setupStaffSettingsModalListeners(onUpdate) {
     document.getElementById('settingAmStartInput'),
     document.getElementById('settingAmEndInput'),
     document.getElementById('settingPmStartInput'),
-    document.getElementById('settingPmEndInput')
+    document.getElementById('settingPmEndInput'),
+    document.getElementById('settingDefaultLunchStart'),
+    document.getElementById('settingDefaultLunchEnd')
   ];
   facilityTimeInputs.forEach((el) => {
     el?.addEventListener('input', updateFacilityHoursSlotSummaryBadge);
     el?.addEventListener('change', updateFacilityHoursSlotSummaryBadge);
+  });
+
+  // 施設標準昼休み → 全スタッフ一括適用
+  document.getElementById('btnApplyDefaultLunchToAllStaff')?.addEventListener('click', () => {
+    const lunchStart = document.getElementById('settingDefaultLunchStart')?.value || DEFAULT_LUNCH_BREAK.start;
+    const lunchEnd = document.getElementById('settingDefaultLunchEnd')?.value || DEFAULT_LUNCH_BREAK.end;
+    const overwriteCustom = Boolean(document.getElementById('chkOverwriteCustomLunch')?.checked);
+    const resolved = resolveTherapistLunchBreak({ lunchStart, lunchEnd });
+    if (resolved.end <= resolved.start) {
+      showToast('標準昼休みの終了は開始より後にしてください', 'error');
+      return;
+    }
+    const result = applyFacilityLunchToAllTherapists(resolved.start, resolved.end, { overwriteCustom });
+    if (!result.success) {
+      showToast(result.message || '一括適用に失敗しました', 'error');
+      return;
+    }
+    fillFacilityHoursForm(getSavedFacilityHours());
+    renderStaffSettingsFields();
+    showToast(result.message, 'success');
+    if (typeof onStaffUpdatedCallback === 'function') onStaffUpdatedCallback();
   });
 
   // 起動時にも休暇プリセットを現行コマ数へ同期
@@ -197,18 +252,22 @@ export function setupStaffSettingsModalListeners(onUpdate) {
   });
 
   btnReset?.addEventListener('click', () => {
+    const resetLunch = {
+      lunchStart: DEFAULT_FACILITY_HOURS.defaultLunchStart || DEFAULT_LUNCH_BREAK.start,
+      lunchEnd: DEFAULT_FACILITY_HOURS.defaultLunchEnd || DEFAULT_LUNCH_BREAK.end
+    };
     const defaultList = [
       {
         id: 'A', name: 'PT A', color: '#0284c7', status: THERAPIST_STATUS.ACTIVE,
-        lunchStart: DEFAULT_LUNCH_BREAK.start, lunchEnd: DEFAULT_LUNCH_BREAK.end
+        lunchStart: resetLunch.lunchStart, lunchEnd: resetLunch.lunchEnd
       },
       {
         id: 'B', name: 'PT B', color: '#0d9488', status: THERAPIST_STATUS.ACTIVE,
-        lunchStart: DEFAULT_LUNCH_BREAK.start, lunchEnd: DEFAULT_LUNCH_BREAK.end
+        lunchStart: resetLunch.lunchStart, lunchEnd: resetLunch.lunchEnd
       },
       {
         id: 'C', name: 'PT C', color: '#7c3aed', status: THERAPIST_STATUS.ACTIVE,
-        lunchStart: DEFAULT_LUNCH_BREAK.start, lunchEnd: DEFAULT_LUNCH_BREAK.end
+        lunchStart: resetLunch.lunchStart, lunchEnd: resetLunch.lunchEnd
       }
     ];
     const staffReset = saveAllTherapists(defaultList);
@@ -217,13 +276,15 @@ export function setupStaffSettingsModalListeners(onUpdate) {
     if (assistant1Input) assistant1Input.value = '';
     if (assistant2Input) assistant2Input.value = '';
 
-    // 施設時間も初期デフォルトへ戻す
+    // 施設時間・標準昼休みも初期デフォルトへ戻す
     const hoursSave = saveFacilityHours({ ...DEFAULT_FACILITY_HOURS });
     if (hoursSave.success) {
       reloadFacilityTimeSlots(hoursSave.hours);
       fillFacilityHoursForm(hoursSave.hours);
       syncLeavePresetDurations(hoursSave.hours);
     }
+    const overwriteChk = document.getElementById('chkOverwriteCustomLunch');
+    if (overwriteChk) overwriteChk.checked = false;
 
     renderStaffSettingsFields();
     showToast('セラピスト・助手・施設時間を初期デフォルトに戻しました', 'info');
@@ -356,7 +417,7 @@ export function renderStaffSettingsFields() {
                   style="padding:4px 6px; border:1px solid #fdba74; border-radius:4px; font-size:0.75rem; font-weight:700; background:#fff7ed; color:#9a3412; cursor:pointer;">
             ${buildLunchOptionsHtml(lunch.end)}
           </select>
-          <span style="font-size:0.65rem; color:#a8a29e; font-weight:600;">交代休憩（本日時間割にハイライト）</span>
+          <span style="font-size:0.65rem; color:#a8a29e; font-weight:600;">個別上書き可（標準は施設設定から一括適用）</span>
         </div>
       </div>
     `;

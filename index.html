@@ -921,6 +921,54 @@
           <p style="font-size:0.68rem; color:#64748b; margin:6px 0 0;">
             条件: 午前開始 &lt; 午前終了 ≦ 午後開始 &lt; 業務終了。20分刻みでコマを自動生成します。
           </p>
+
+          <!-- 施設標準昼休み時間（交代制・誤配置防止ハイライトの基準） -->
+          <div style="margin-top:10px; padding-top:10px; border-top:1px dashed #7dd3fc;">
+            <div style="font-size:0.78rem; font-weight:800; color:#9a3412; margin-bottom:6px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              <span>🍽️ 標準昼休み時間</span>
+              <span style="font-size:0.65rem; color:#c2410c; font-weight:600;">（新規スタッフ初期値／一括適用の基準・本日時間割ハイライト連動）</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              <label for="settingDefaultLunchStart" style="font-size:0.72rem; font-weight:700; color:#9a3412;">開始</label>
+              <select id="settingDefaultLunchStart" title="施設標準・昼休み開始"
+                      style="padding:5px 8px; border:1px solid #fdba74; border-radius:4px; font-size:0.78rem; font-weight:700; background:#fff7ed; color:#9a3412; cursor:pointer;">
+                <option value="11:00">11:00</option>
+                <option value="11:20">11:20</option>
+                <option value="11:40">11:40</option>
+                <option value="12:00" selected>12:00</option>
+                <option value="12:20">12:20</option>
+                <option value="12:40">12:40</option>
+                <option value="13:00">13:00</option>
+                <option value="13:20">13:20</option>
+                <option value="13:40">13:40</option>
+                <option value="14:00">14:00</option>
+              </select>
+              <span style="font-size:0.75rem; font-weight:700; color:#78716c;">〜</span>
+              <label for="settingDefaultLunchEnd" style="font-size:0.72rem; font-weight:700; color:#9a3412;">終了</label>
+              <select id="settingDefaultLunchEnd" title="施設標準・昼休み終了"
+                      style="padding:5px 8px; border:1px solid #fdba74; border-radius:4px; font-size:0.78rem; font-weight:700; background:#fff7ed; color:#9a3412; cursor:pointer;">
+                <option value="11:40">11:40</option>
+                <option value="12:00">12:00</option>
+                <option value="12:20">12:20</option>
+                <option value="12:40">12:40</option>
+                <option value="13:00" selected>13:00</option>
+                <option value="13:20">13:20</option>
+                <option value="13:40">13:40</option>
+                <option value="14:00">14:00</option>
+                <option value="14:20">14:20</option>
+                <option value="14:40">14:40</option>
+                <option value="15:00">15:00</option>
+              </select>
+              <button type="button" id="btnApplyDefaultLunchToAllStaff"
+                      style="padding:5px 10px; border:1px solid #ea580c; background:#fff; color:#c2410c; border-radius:4px; font-size:0.75rem; font-weight:800; cursor:pointer; white-space:nowrap;">
+                ⚡ 全スタッフに一括適用
+              </button>
+            </div>
+            <label style="display:flex; align-items:center; gap:6px; margin-top:6px; font-size:0.72rem; font-weight:600; color:#78716c; cursor:pointer; user-select:none;">
+              <input type="checkbox" id="chkOverwriteCustomLunch" style="accent-color:#ea580c;">
+              個別変更済みのスタッフも上書きする（未チェック時は施設標準と異なる設定者を保護）
+            </label>
+          </div>
         </div>
 
         <!-- 過去・退職者（非表示スタッフ）折りたたみアコーディオン（トップを汚さず一番下に配置） -->

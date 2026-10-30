@@ -6,7 +6,14 @@
 
 /**
  * 施設の診療時間設定（スタッフ設定モーダル／定数初期値で同じ形）
- * @typedef {{ amStart: string, amEnd: string, pmStart: string, pmEnd: string }} FacilityHours
+ * @typedef {{
+ *   amStart: string,
+ *   amEnd: string,
+ *   pmStart: string,
+ *   pmEnd: string,
+ *   defaultLunchStart: string,
+ *   defaultLunchEnd: string
+ * }} FacilityHours
  */
 
 /** localStorage キー（施設リハビリ提供時間） */
@@ -21,7 +28,9 @@ const LEGACY_LUNCH_GAP_FACILITY_HOURS = {
   amStart: '09:00',
   amEnd: '13:00',
   pmStart: '14:00',
-  pmEnd: '18:00'
+  pmEnd: '18:00',
+  defaultLunchStart: '12:00',
+  defaultLunchEnd: '13:00'
 };
 
 /** @type {FacilityHours} */
@@ -29,7 +38,10 @@ export const DEFAULT_FACILITY_HOURS = {
   amStart: '09:00',
   amEnd: '13:00',   // 午前終了（12コマ: 09:00〜13:00）
   pmStart: '13:00',  // 午後開始＝午前終了（昼休憩なし・完全連続）
-  pmEnd: '18:00'     // 業務終了（15コマ: 13:00〜18:00）→ 合計27コマ
+  pmEnd: '18:00',    // 業務終了（15コマ: 13:00〜18:00）→ 合計27コマ
+  // 施設標準昼休み時間（スタッフ個別未設定・新規登録の初期値／一括適用の基準）
+  defaultLunchStart: '12:00',
+  defaultLunchEnd: '13:00'
 };
 
 /**
@@ -75,11 +87,36 @@ export function minutesToTime(minutes) {
  * @returns {FacilityHours}
  */
 export function normalizeFacilityHours(hours) {
+  const defaultLunchStart = normalizeTimeString(hours?.defaultLunchStart)
+    || DEFAULT_FACILITY_HOURS.defaultLunchStart;
+  let defaultLunchEnd = normalizeTimeString(hours?.defaultLunchEnd)
+    || DEFAULT_FACILITY_HOURS.defaultLunchEnd;
+  // 終了≦開始の不正値は施設標準デフォルトへフォールバック
+  if (defaultLunchEnd <= defaultLunchStart) {
+    defaultLunchEnd = DEFAULT_FACILITY_HOURS.defaultLunchEnd;
+    if (defaultLunchEnd <= defaultLunchStart) {
+      defaultLunchEnd = '13:00';
+    }
+  }
   return {
     amStart: normalizeTimeString(hours?.amStart) || DEFAULT_FACILITY_HOURS.amStart,
     amEnd: normalizeTimeString(hours?.amEnd) || DEFAULT_FACILITY_HOURS.amEnd,
     pmStart: normalizeTimeString(hours?.pmStart) || DEFAULT_FACILITY_HOURS.pmStart,
-    pmEnd: normalizeTimeString(hours?.pmEnd) || DEFAULT_FACILITY_HOURS.pmEnd
+    pmEnd: normalizeTimeString(hours?.pmEnd) || DEFAULT_FACILITY_HOURS.pmEnd,
+    defaultLunchStart,
+    defaultLunchEnd
+  };
+}
+
+/**
+ * 施設標準昼休み時間を取得
+ * @returns {{ start: string, end: string }}
+ */
+export function getFacilityDefaultLunchBreak() {
+  const h = getSavedFacilityHours();
+  return {
+    start: h.defaultLunchStart || DEFAULT_FACILITY_HOURS.defaultLunchStart,
+    end: h.defaultLunchEnd || DEFAULT_FACILITY_HOURS.defaultLunchEnd
   };
 }
 

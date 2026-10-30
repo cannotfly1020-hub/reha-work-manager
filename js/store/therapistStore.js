@@ -4,6 +4,12 @@
 import { normalizeString } from '../core/dataNormalizer.js';
 import { storageGet } from '../core/storageAdapter.js';
 import { writeStorageItem } from './storageWrite.js';
+import {
+  getSavedFacilityHours,
+  saveFacilityHours,
+  getFacilityDefaultLunchBreak,
+  normalizeFacilityHours
+} from '../core/timeSlotGenerator.js';
 
 const STORAGE_KEY = 'reha_therapists_master';
 
@@ -73,27 +79,122 @@ function normalizeClockHm(value) {
 }
 
 /**
- * セラピストの昼休み時間帯を安全に解決（未設定・不正時はデフォルト）
+ * 施設標準昼休み（未保存時は定数デフォルト）
+ * @returns {{ start: string, end: string }}
+ */
+function resolveFacilityLunchFallback() {
+  try {
+    const facility = getFacilityDefaultLunchBreak();
+    const start = normalizeClockHm(facility.start) || DEFAULT_LUNCH_BREAK.start;
+    const end = normalizeClockHm(facility.end) || DEFAULT_LUNCH_BREAK.end;
+    if (end > start) return { start, end };
+  } catch (_) { /* ignore */ }
+  return { start: DEFAULT_LUNCH_BREAK.start, end: DEFAULT_LUNCH_BREAK.end };
+}
+
+/**
+ * セラピストの昼休み時間帯を安全に解決
+ * （個別未設定・不正時は施設標準 → 定数デフォルト）
  * @param {object|null|undefined} therapistOrPartial
  * @returns {{ start: string, end: string }}
  */
 export function resolveTherapistLunchBreak(therapistOrPartial) {
-  const start = normalizeClockHm(
-    therapistOrPartial?.lunchStart
-    || therapistOrPartial?.breakStartTime
-    || DEFAULT_LUNCH_BREAK.start
-  ) || DEFAULT_LUNCH_BREAK.start;
-  const end = normalizeClockHm(
-    therapistOrPartial?.lunchEnd
-    || therapistOrPartial?.breakEndTime
-    || DEFAULT_LUNCH_BREAK.end
-  ) || DEFAULT_LUNCH_BREAK.end;
+  const facilityFallback = resolveFacilityLunchFallback();
+  const hasExplicitStart = Boolean(
+    therapistOrPartial?.lunchStart || therapistOrPartial?.breakStartTime
+  );
+  const hasExplicitEnd = Boolean(
+    therapistOrPartial?.lunchEnd || therapistOrPartial?.breakEndTime
+  );
 
-  // 終了が開始以下（同じ・逆転）の場合はデフォルトへフォールバック
+  const start = normalizeClockHm(
+    hasExplicitStart
+      ? (therapistOrPartial?.lunchStart || therapistOrPartial?.breakStartTime)
+      : facilityFallback.start
+  ) || facilityFallback.start;
+  const end = normalizeClockHm(
+    hasExplicitEnd
+      ? (therapistOrPartial?.lunchEnd || therapistOrPartial?.breakEndTime)
+      : facilityFallback.end
+  ) || facilityFallback.end;
+
+  // 終了が開始以下（同じ・逆転）の場合は施設標準へフォールバック
   if (end <= start) {
-    return { start: DEFAULT_LUNCH_BREAK.start, end: DEFAULT_LUNCH_BREAK.end };
+    return { ...facilityFallback };
   }
   return { start, end };
+}
+
+/**
+ * 施設標準昼休みを全スタッフへ一括適用
+ * @param {string} lunchStart
+ * @param {string} lunchEnd
+ * @param {{ overwriteCustom?: boolean }} [options]
+ * @returns {{ success: boolean, updated: number, skipped: number, message: string, lunch: { start: string, end: string } }}
+ */
+export function applyFacilityLunchToAllTherapists(lunchStart, lunchEnd, options = {}) {
+  const overwriteCustom = Boolean(options?.overwriteCustom);
+  const prevFacility = getSavedFacilityHours();
+  const prevDefault = resolveTherapistLunchBreak({
+    lunchStart: prevFacility.defaultLunchStart,
+    lunchEnd: prevFacility.defaultLunchEnd
+  });
+  const newLunch = resolveTherapistLunchBreak({ lunchStart, lunchEnd });
+
+  const hoursToSave = normalizeFacilityHours({
+    ...prevFacility,
+    defaultLunchStart: newLunch.start,
+    defaultLunchEnd: newLunch.end
+  });
+  const savedHours = saveFacilityHours(hoursToSave);
+  if (!savedHours.success) {
+    return {
+      success: false,
+      updated: 0,
+      skipped: 0,
+      message: savedHours.message || '施設標準昼休みの保存に失敗しました',
+      lunch: newLunch
+    };
+  }
+
+  const list = getAllTherapists();
+  let updated = 0;
+  let skipped = 0;
+  list.forEach((t) => {
+    const current = resolveTherapistLunchBreak(t);
+    const isCustom = current.start !== prevDefault.start || current.end !== prevDefault.end;
+    if (isCustom && !overwriteCustom) {
+      skipped += 1;
+      return;
+    }
+    if (t.lunchStart !== newLunch.start || t.lunchEnd !== newLunch.end) {
+      t.lunchStart = newLunch.start;
+      t.lunchEnd = newLunch.end;
+      updated += 1;
+    }
+  });
+
+  const ok = saveAllTherapists(list);
+  if (!ok) {
+    return {
+      success: false,
+      updated: 0,
+      skipped,
+      message: 'スタッフへの昼休み一括適用の保存に失敗しました',
+      lunch: newLunch
+    };
+  }
+
+  const protectNote = overwriteCustom
+    ? ''
+    : (skipped > 0 ? `（個別設定 ${skipped} 名は保護）` : '');
+  return {
+    success: true,
+    updated,
+    skipped,
+    message: `標準昼休み ${newLunch.start}〜${newLunch.end} を ${updated} 名に適用しました${protectNote}`,
+    lunch: newLunch
+  };
 }
 
 /**
@@ -212,14 +313,15 @@ export function addTherapist(name = '', status = THERAPIST_STATUS.ACTIVE) {
   const cleanName = normalizeString(name) || `PT ${nextId}`;
   const validStatus = Object.values(THERAPIST_STATUS).includes(status) ? status : THERAPIST_STATUS.ACTIVE;
   const color = DEFAULT_COLORS[list.length % DEFAULT_COLORS.length];
+  const facilityLunch = resolveFacilityLunchFallback();
 
   const newTherapist = {
     id: nextId,
     name: cleanName,
     color,
     status: validStatus,
-    lunchStart: DEFAULT_LUNCH_BREAK.start,
-    lunchEnd: DEFAULT_LUNCH_BREAK.end
+    lunchStart: facilityLunch.start,
+    lunchEnd: facilityLunch.end
   };
 
   list.push(newTherapist);
