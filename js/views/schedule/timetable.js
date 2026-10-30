@@ -7,7 +7,8 @@ import { sanitizeHtml, safeParseInt } from '../../core/dataNormalizer.js';
 import { getActiveTherapists } from '../../store/therapistStore.js';
 import { getPatientById } from '../../store/patientStore.js';
 import {
-  getDailySchedule, moveScheduleSlot, setScheduleSlot, addAnalgesiaPatient, getAnalgesiaSlotPatients,
+  getDailySchedule, moveScheduleSlot, swapScheduleSlots, checkSwapConflict,
+  setScheduleSlot, addAnalgesiaPatient, getAnalgesiaSlotPatients,
   isNonPatientBlock, getSlotSpan, slotRangeOverlaps, getPatientMonthDailyRehaUnitsMap
 } from '../../store/scheduleStore.js';
 import {
@@ -53,7 +54,7 @@ function buildTaskCardHtml(cellData, tId, slotId) {
   const fullSlots = TOTAL_SLOT_COUNT || 27;
   const durationLabel = u >= fullSlots ? '終日' : (u >= halfSlots ? '半日' : `${u * 20}分`);
   return `
-    <div class="cell-slot">
+    <div class="cell-slot" data-therapist="${tId}" data-slot="${slotId}" data-occupied="1">
       <div class="reha-slot-card ${cardClass} card-unit-${u}" draggable="true" data-therapist="${tId}" data-slot="${slotId}"
            style="height:${calculatedHeight}px !important; max-height:${calculatedHeight}px !important; box-sizing:border-box; overflow:hidden; cursor:grab;">
         <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -110,7 +111,7 @@ export function buildSlotCardHtml(p, u, cellData, tId, slotId) {
   const calculatedHeight = (52 * u) - 5;
 
   return `
-    <div class="cell-slot">
+    <div class="cell-slot" data-therapist="${tId}" data-slot="${slotId}" data-occupied="1">
       <div class="reha-slot-card ${cardClass} card-unit-${u}" draggable="true" data-therapist="${tId}" data-slot="${slotId}"
            style="height:${calculatedHeight}px !important; max-height:${calculatedHeight}px !important; box-sizing:border-box; overflow:hidden; cursor:grab;">
         <div style="display:flex; justify-content:space-between; align-items:center; gap:4px;">
@@ -471,9 +472,13 @@ function attachGridEventListeners(gridEl) {
   });
 
   gridEl.querySelectorAll('.cell-slot[data-therapist]').forEach((cell) => {
-    cell.addEventListener('dragover', (e) => e.preventDefault());
+    cell.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+    });
     cell.addEventListener('drop', (e) => {
       e.preventDefault();
+      e.stopPropagation();
       const targetTId = cell.dataset.therapist;
       const targetSId = cell.dataset.slot;
       if (!targetTId || !targetSId) return;
@@ -491,6 +496,51 @@ function attachGridEventListeners(gridEl) {
         const sourceItem = sched[fromTherapist]?.[fromSlot];
         if (!sourceItem) return;
 
+        const targetItem = sched[targetTId]?.[targetSId] || null;
+
+        // ★予約済みコマ上へのドロップ → 患者同士なら SWAP、それ以外は衝突として拒否
+        if (targetItem) {
+          const canSwapPatients = sourceItem.patientId
+            && targetItem.patientId
+            && !isNonPatientBlock(sourceItem)
+            && !isNonPatientBlock(targetItem);
+
+          if (!canSwapPatients) {
+            showToast('他の予約と重複するため入れ替えできません', 'warn');
+            return;
+          }
+
+          const conflict = checkSwapConflict(
+            sched, fromTherapist, fromSlot, targetTId, targetSId
+          );
+          if (conflict.blocked) {
+            showToast(conflict.message || '衝突するため入れ替えできません', 'warn');
+            return;
+          }
+
+          const swapped = swapScheduleSlots(
+            scheduleState.dateStr, fromTherapist, fromSlot, targetTId, targetSId
+          );
+          if (!swapped) {
+            showToast('他の予約と重複するため入れ替えできません', 'warn');
+            renderScheduleView();
+            return;
+          }
+
+          const nameA = getPatientById(sourceItem.patientId)?.name || '患者A';
+          const nameB = getPatientById(targetItem.patientId)?.name || '患者B';
+          showToast(`${nameA} 様 と ${nameB} 様 の予約を入れ替えました`, 'success');
+
+          if (typeof window.triggerDailyBackup === 'function') {
+            window.triggerDailyBackup();
+          }
+
+          // 本日・週108単位メーター再集計（renderScheduleView → ヘッダー再描画）
+          renderScheduleView();
+          return;
+        }
+
+        // ★空きセルへのドロップ → 従来の MOVE
         const units = getSlotSpan(sourceItem) || sourceItem.units || 1;
         const excludeSlotId = fromTherapist === targetTId ? fromSlot : null;
         const overlap = slotRangeOverlaps(sched, targetTId, targetSId, units, excludeSlotId);
@@ -521,6 +571,12 @@ function attachGridEventListeners(gridEl) {
         }
 
         renderScheduleView();
+        return;
+      }
+
+      // 占有セルへのパレット新規配置は不可（SWAP対象外）
+      if (cell.dataset.occupied === '1') {
+        showToast('空き枠にドロップしてください', 'warn');
         return;
       }
 

@@ -1,5 +1,5 @@
 // js/store/scheduleStore.js
-// 時間割コマCRUD・コマ移動・消炎鎮痛CRUD・LocalStorage永続化・月間集計（消炎/疾患別自動完全分離対応・高速O(1)最適化版）
+// 時間割コマCRUD・コマ移動・コマ入れ替え(SWAP)・消炎鎮痛CRUD・LocalStorage永続化・月間集計（消炎/疾患別自動完全分離対応・高速O(1)最適化版）
 
 import { TIME_SLOTS } from '../config/rules.js';
 import { normalizeDateString, safeParseInt } from '../core/dataNormalizer.js';
@@ -45,6 +45,159 @@ export function slotRangeOverlaps(schedule, therapistId, startSlotId, span, excl
     }
   }
   return { blocked: false, message: '' };
+}
+
+/**
+ * スワップ用: 両コマを除外した一時スケジュール上で衝突を検証
+ * （単位数が異なる場合の他コマとの重なり・同セラピスト内の相互衝突を含む）
+ * @returns {{ blocked: boolean, message: string }}
+ */
+export function checkSwapConflict(schedule, therapistA, slotA, therapistB, slotB) {
+  const aItem = schedule?.[therapistA]?.[slotA];
+  const bItem = schedule?.[therapistB]?.[slotB];
+  if (!aItem || !bItem) {
+    return { blocked: true, message: '入れ替え対象のコマが見つかりません。' };
+  }
+  if (therapistA === therapistB && slotA === slotB) {
+    return { blocked: false, message: '' };
+  }
+
+  const aUnits = getSlotSpan(aItem);
+  const bUnits = getSlotSpan(bItem);
+  if (aUnits <= 0 || bUnits <= 0) {
+    return { blocked: true, message: '入れ替え対象のコマ単位が不正です。' };
+  }
+
+  const aStart = TIME_SLOTS.findIndex((slot) => slot.id === slotA);
+  const bStart = TIME_SLOTS.findIndex((slot) => slot.id === slotB);
+  if (aStart < 0 || bStart < 0) {
+    return { blocked: true, message: '時間枠が見つかりません。' };
+  }
+  if (bStart + aUnits > TIME_SLOTS.length || aStart + bUnits > TIME_SLOTS.length) {
+    return { blocked: true, message: 'コマの終了時間が診療時間枠を超過しています。' };
+  }
+
+  // 同セラピスト内: 入れ替え後の2レンジが互いに重なる場合は不可
+  if (therapistA === therapistB) {
+    const mutualOverlap = bStart < aStart + bUnits && aStart < bStart + aUnits;
+    if (mutualOverlap) {
+      return { blocked: true, message: '入れ替え後の時間帯が互いに重なるため入れ替えできません。' };
+    }
+  }
+
+  // 両コマを除いた一時スケジュールで、他コマとの衝突を検証
+  const temp = {};
+  Object.keys(schedule || {}).forEach((key) => {
+    if (key === 'analgesia') {
+      temp.analgesia = schedule.analgesia;
+      return;
+    }
+    temp[key] = { ...(schedule[key] || {}) };
+  });
+  if (temp[therapistA]) delete temp[therapistA][slotA];
+  if (temp[therapistB]) delete temp[therapistB][slotB];
+
+  // A ➔ Bの位置 / B ➔ Aの位置
+  const overlapA = slotRangeOverlaps(temp, therapistB, slotB, aUnits);
+  if (overlapA.blocked) {
+    return { blocked: true, message: overlapA.message || '他の予約と重複するため入れ替えできません' };
+  }
+  const overlapB = slotRangeOverlaps(temp, therapistA, slotA, bUnits);
+  if (overlapB.blocked) {
+    return { blocked: true, message: overlapB.message || '他の予約と重複するため入れ替えできません' };
+  }
+
+  // 患者の他セラピスト二重登録チェック（両元コマ除外済みの temp 上で検証）
+  if (aItem.patientId && !isNonPatientBlock(aItem)) {
+    const aOccupied = [];
+    for (let i = 0; i < aUnits; i += 1) aOccupied.push(TIME_SLOTS[bStart + i]?.id);
+    for (const tId of listTherapistIdsFromSchedule(temp)) {
+      const tSlots = temp[tId] || {};
+      for (const [sId, item] of Object.entries(tSlots)) {
+        if (!item?.patientId || isNonPatientBlock(item)) continue;
+        const itemStart = TIME_SLOTS.findIndex((slot) => slot.id === sId);
+        const itemSpan = getSlotSpan(item);
+        if (itemStart < 0 || itemSpan <= 0) continue;
+        const itemOccupied = [];
+        for (let i = 0; i < itemSpan; i += 1) itemOccupied.push(TIME_SLOTS[itemStart + i]?.id);
+        const hits = aOccupied.some((id) => id && itemOccupied.includes(id));
+        if (!hits) continue;
+        if (tId === therapistB) {
+          return { blocked: true, message: '他の予約と重複するため入れ替えできません' };
+        }
+        if (item.patientId === aItem.patientId) {
+          return { blocked: true, message: '同時刻に同一患者が他枠にいるため入れ替えできません' };
+        }
+      }
+    }
+  }
+  if (bItem.patientId && !isNonPatientBlock(bItem)) {
+    const bOccupied = [];
+    for (let i = 0; i < bUnits; i += 1) bOccupied.push(TIME_SLOTS[aStart + i]?.id);
+    for (const tId of listTherapistIdsFromSchedule(temp)) {
+      const tSlots = temp[tId] || {};
+      for (const [sId, item] of Object.entries(tSlots)) {
+        if (!item?.patientId || isNonPatientBlock(item)) continue;
+        const itemStart = TIME_SLOTS.findIndex((slot) => slot.id === sId);
+        const itemSpan = getSlotSpan(item);
+        if (itemStart < 0 || itemSpan <= 0) continue;
+        const itemOccupied = [];
+        for (let i = 0; i < itemSpan; i += 1) itemOccupied.push(TIME_SLOTS[itemStart + i]?.id);
+        const hits = bOccupied.some((id) => id && itemOccupied.includes(id));
+        if (!hits) continue;
+        if (tId === therapistA) {
+          return { blocked: true, message: '他の予約と重複するため入れ替えできません' };
+        }
+        if (item.patientId === bItem.patientId) {
+          return { blocked: true, message: '同時刻に同一患者が他枠にいるため入れ替えできません' };
+        }
+      }
+    }
+  }
+
+  return { blocked: false, message: '' };
+}
+
+/**
+ * 2つの予約コマの時間帯・担当セラピストを相互入れ替え（SWAP）
+ * @returns {boolean}
+ */
+export function swapScheduleSlots(dateStr, therapistA, slotA, therapistB, slotB) {
+  const current = getDailySchedule(dateStr);
+  const aItem = current[therapistA]?.[slotA];
+  const bItem = current[therapistB]?.[slotB];
+  if (!aItem || !bItem) return false;
+  if (therapistA === therapistB && slotA === slotB) return true;
+
+  const conflict = checkSwapConflict(current, therapistA, slotA, therapistB, slotB);
+  if (conflict.blocked) return false;
+
+  if (!current[therapistA]) current[therapistA] = {};
+  if (!current[therapistB]) current[therapistB] = {};
+
+  const aCopy = { ...aItem, updatedAt: new Date().toISOString() };
+  const bCopy = { ...bItem, updatedAt: new Date().toISOString() };
+
+  delete current[therapistA][slotA];
+  delete current[therapistB][slotB];
+  current[therapistB][slotB] = aCopy;
+  current[therapistA][slotA] = bCopy;
+
+  const ok = saveDailySchedule(dateStr, current);
+  if (ok) {
+    try {
+      const patientA = aItem.patientId ? getPatientById(aItem.patientId) : null;
+      const patientB = bItem.patientId ? getPatientById(bItem.patientId) : null;
+      appendAuditLog({
+        category: AUDIT_CATEGORY.SCHEDULE,
+        action: AUDIT_ACTION.MOVE,
+        targetPatientId: aItem.patientId || bItem.patientId || '',
+        targetPatientName: patientA?.name || patientB?.name || '',
+        description: `時間割コマを入れ替え（${dateStr} ${therapistA}/${slotA}${patientA ? ` ${patientA.name}` : ''} ⇄ ${therapistB}/${slotB}${patientB ? ` ${patientB.name}` : ''}）`
+      });
+    } catch (_) { /* ignore */ }
+  }
+  return ok;
 }
 
 const STORAGE_PREFIX = 'reha_schedule_';
