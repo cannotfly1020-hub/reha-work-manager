@@ -171,38 +171,62 @@
 
   <!-- VIEW 2: 月間単位・収益ダッシュボード -->
   <section id="viewMonthly" class="view-panel">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-      <div style="display:flex; align-items:center; gap:8px;">
-        <button id="btnPrevMonth" style="padding:6px 12px; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer;">◀ 前月</button>
-        <input type="month" id="monthlyMonthInput" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.95rem; font-weight:700;">
-        <button id="btnNextMonth" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; cursor:pointer;">次月 ▶</button>
-        <select id="monthlySortSelect" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; background:#fff; font-weight:600; color:#334155; cursor:pointer; margin-left:8px;">
-          <option value="CATEGORY" selected>並べ替え: 区分順 (入院→外来→消炎)</option>
-          <option value="DISEASE">並べ替え: 疾患別 (運動器→脳血管→廃用)</option>
-          <option value="THERAPIST_ASC">並べ替え: 担当セラピスト順 (昇順 PT→OT→ST)</option>
-          <option value="THERAPIST_DESC">並べ替え: 担当セラピスト順 (降順)</option>
-          <option value="KANA">並べ替え: 五十音順 (あいうえお)</option>
-          <option value="ID">並べ替え: 患者ID順</option>
-        </select>
-        <select id="monthlyTherapistFilterSelect" title="担当セラピストで絞り込み" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; background:#fff; font-weight:600; color:#334155; cursor:pointer; margin-left:6px; max-width:200px;">
-          <option value="">担当: 全員</option>
-        </select>
-        <button type="button" id="btnMonthlyAuditPrint" title="赤ペン点検用A4横チェックシートを印刷（現在の絞り込みを反映）"
-          style="padding:6px 12px; border:1px solid #0284c7; background:#fff; color:#0369a1; border-radius:6px; cursor:pointer; font-size:0.82rem; font-weight:800; margin-left:6px; white-space:nowrap;">
+    <div class="monthly-toolbar-row">
+      <div class="monthly-toolbar" role="toolbar" aria-label="月間単位・収益ツールバー">
+        <!-- グループ1: 年月ナビゲーション -->
+        <div class="month-nav-group">
+          <button type="button" id="btnPrevMonth" class="monthly-tb-btn monthly-tb-btn-nav" title="前月へ">
+            ◀ 前月
+          </button>
+          <input type="month" id="monthlyMonthInput" class="monthly-tb-month" title="対象年月">
+          <button type="button" id="btnNextMonth" class="monthly-tb-btn monthly-tb-btn-nav" title="次月へ">
+            次月 ▶
+          </button>
+        </div>
+
+        <span class="monthly-tb-divider" aria-hidden="true"></span>
+
+        <!-- グループ2: ソート・担当絞り込み -->
+        <div class="filter-sort-group">
+          <select id="monthlySortSelect" class="monthly-tb-select monthly-tb-select-sort" title="並び替え">
+            <option value="CATEGORY" selected>並べ替え: 区分順 (入院→外来→消炎)</option>
+            <option value="DISEASE">並べ替え: 疾患別 (運動器→脳血管→廃用)</option>
+            <option value="THERAPIST_ASC">並べ替え: 担当セラピスト順 (昇順 PT→OT→ST)</option>
+            <option value="THERAPIST_DESC">並べ替え: 担当セラピスト順 (降順)</option>
+            <option value="KANA">並べ替え: 五十音順 (あいうえお)</option>
+            <option value="ID">並べ替え: 患者ID順</option>
+          </select>
+          <select id="monthlyTherapistFilterSelect" class="monthly-tb-select monthly-tb-select-therapist" title="担当セラピストで絞り込み">
+            <option value="">担当: 全員</option>
+          </select>
+        </div>
+
+        <span class="monthly-tb-divider" aria-hidden="true"></span>
+
+        <!-- グループ3: 点検印刷 -->
+        <button type="button" id="btnMonthlyAuditPrint" class="monthly-tb-btn monthly-tb-btn-print"
+          title="赤ペン点検用A4横チェックシートを印刷（現在の絞り込みを反映）">
           🖨️ 点検チェック印刷
         </button>
       </div>
-      <div style="display:flex; gap:16px;">
-        <div id="kpiTodayRevenueCard" style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:8px 16px; text-align:center; cursor:pointer;" title="クリックで本日の収益内訳明細を表示">
-          <div style="font-size:0.75rem; color:#64748b; display:flex; align-items:center; justify-content:center; gap:4px;">
+
+      <div class="monthly-kpi-group">
+        <div id="kpiTodayRevenueCard" class="monthly-kpi-card" title="クリックで本日の収益内訳明細を表示">
+          <div class="monthly-kpi-label">
             <span>本日収益見込 (単位)</span>
-            <span style="font-size:0.68rem; background:#e0f2fe; color:#0369a1; padding:1px 4px; border-radius:3px; font-weight:700;">内訳🔍</span>
+            <span class="monthly-kpi-chip">内訳🔍</span>
           </div>
-          <div style="font-size:1.1rem; font-weight:800; color:#0369a1;"><span id="kpiTodayRevenue">¥0</span> <span id="kpiTodayUnits" style="font-size:0.8rem; font-weight:600; color:#64748b;">(0単位)</span></div>
+          <div class="monthly-kpi-value monthly-kpi-value-today">
+            <span id="kpiTodayRevenue">¥0</span>
+            <span id="kpiTodayUnits" class="monthly-kpi-units">(0単位)</span>
+          </div>
         </div>
-        <div style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:8px 16px; text-align:center;">
-          <div style="font-size:0.75rem; color:#64748b;">当月累計収益 (総単位)</div>
-          <div style="font-size:1.1rem; font-weight:800; color:#059669;"><span id="kpiMonthRevenue">¥0</span> <span id="kpiMonthUnits" style="font-size:0.8rem; font-weight:600; color:#64748b;">(0単位)</span></div>
+        <div class="monthly-kpi-card">
+          <div class="monthly-kpi-label">当月累計収益 (総単位)</div>
+          <div class="monthly-kpi-value monthly-kpi-value-month">
+            <span id="kpiMonthRevenue">¥0</span>
+            <span id="kpiMonthUnits" class="monthly-kpi-units">(0単位)</span>
+          </div>
         </div>
       </div>
     </div>
