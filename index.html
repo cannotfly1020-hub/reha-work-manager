@@ -171,76 +171,68 @@
 
   <!-- VIEW 2: 月間単位・収益ダッシュボード -->
   <section id="viewMonthly" class="view-panel">
-    <!-- 全コントロール高さ36px・横一列（縦積み禁止） -->
+    <!-- 全コントロール高さ36px・横一列・衝突防止スリム版 -->
     <div class="monthly-header-row monthly-toolbar-row">
-      <!-- 左側: 操作コントロール群 -->
       <div class="monthly-controls-left monthly-toolbar" role="toolbar" aria-label="月間単位・収益ツールバー">
         <div class="month-nav-group">
-          <button type="button" id="btnPrevMonth" class="monthly-tb-btn monthly-tb-btn-nav" title="前月へ">◀ 前月</button>
+          <button type="button" id="btnPrevMonth" class="monthly-tb-btn monthly-tb-btn-nav" title="前月へ">◀</button>
           <input type="month" id="monthlyMonthInput" class="monthly-tb-month" title="対象年月">
-          <button type="button" id="btnNextMonth" class="monthly-tb-btn monthly-tb-btn-nav" title="次月へ">次月 ▶</button>
+          <button type="button" id="btnNextMonth" class="monthly-tb-btn monthly-tb-btn-nav" title="次月へ">▶</button>
         </div>
 
-        <span class="monthly-tb-divider" aria-hidden="true"></span>
-
-        <!-- 絞り込み → 並べ替え（必ず横並び・縦積み禁止） -->
         <select id="monthlyFilterSelect" class="monthly-tb-select monthly-tb-select-filter" title="絞り込み（対象の限定）">
           <optgroup label="全体">
-            <option value="ALL" selected>絞り込み: 全員</option>
+            <option value="ALL" selected>全員</option>
           </optgroup>
           <optgroup label="区分別">
-            <option value="inpatient">入院患者のみ</option>
-            <option value="outpatient">外来患者のみ</option>
-            <option value="disuse_all">消炎鎮痛のみ</option>
+            <option value="inpatient">入院のみ</option>
+            <option value="outpatient">外来のみ</option>
+            <option value="disuse_all">消炎鎮痛</option>
           </optgroup>
-          <optgroup label="維持期（月13単位対象）">
-            <option value="maint_all">維持期 全員（月13単位）</option>
-            <option value="maint_inpatient">🏥 入院の維持期のみ</option>
-            <option value="maint_outpatient">🚶 外来の維持期のみ</option>
+          <optgroup label="維持期（月13単位）">
+            <option value="maint_all">維持期 全員</option>
+            <option value="maint_inpatient">入院の維持期</option>
+            <option value="maint_outpatient">外来の維持期</option>
           </optgroup>
           <optgroup label="点検・アラート">
-            <option value="uncalculated_plan">⚠️ 計画書未算定のみ</option>
+            <option value="uncalculated_plan">⚠️ 計画未算定</option>
           </optgroup>
           <optgroup label="担当セラピスト" id="filterOptgroupTherapists">
-            <!-- PT/OT/ST 一覧を動的生成 -->
           </optgroup>
         </select>
+
         <select id="monthlySortSelect" class="monthly-tb-select monthly-tb-select-sort" title="並べ替え">
-          <option value="CATEGORY" selected>並べ替え: 区分順</option>
-          <option value="DISEASE">並べ替え: 疾患順</option>
-          <option value="MAINT13_DESC">並べ替え: 維持期13単位 多い順⚠️</option>
-          <option value="THERAPIST_ASC">並べ替え: 担当↑</option>
-          <option value="THERAPIST_DESC">並べ替え: 担当↓</option>
-          <option value="KANA">並べ替え: 五十音順</option>
-          <option value="ID">並べ替え: ID順</option>
+          <option value="disease" selected>疾患順</option>
+          <option value="id">ID順</option>
+          <option value="units_desc">単位順</option>
+          <option value="sessions_desc">回数順</option>
+          <option value="maint_progress">13単位進捗順</option>
         </select>
 
-        <span class="monthly-tb-divider" aria-hidden="true"></span>
-
         <span id="filteredCountBadge" class="monthly-shown-badge" title="現在の絞り込み結果">
-          表示中: <strong id="currentShownCount">0</strong> 名
+          <strong id="currentShownCount">0</strong>名
         </span>
 
         <button type="button" id="btnMonthlyAuditPrint" class="monthly-tb-btn monthly-tb-btn-print"
           title="赤ペン点検用A4横チェックシートを印刷（現在の絞り込みを反映）">
-          <span aria-hidden="true">🖨️</span> 点検チェック印刷
+          <span aria-hidden="true">🖨️</span> 点検印刷
         </button>
       </div>
 
-      <!-- 右側: 収益KPI（右寄せ・高さ36px単行） -->
       <div class="monthly-kpi-right monthly-kpi-group">
-        <div id="kpiTodayRevenueCard" class="monthly-kpi-card kpi-mini-card" title="クリックで本日の収益内訳明細を表示">
-          <span class="monthly-kpi-label"><span>本日収益</span><span class="monthly-kpi-chip">内訳🔍</span></span>
+        <div id="kpiTodayRevenueCard" class="monthly-kpi-card kpi-mini-card" title="クリックで本日の収益内訳明細を表示" role="button" tabindex="0">
+          <span class="monthly-kpi-label">本日</span>
+          <span id="btnDailyRevenueDetail" class="monthly-kpi-chip">内訳🔍</span>
           <span class="monthly-kpi-value monthly-kpi-value-today">
             <span id="kpiTodayRevenue">¥0</span>
-            <span id="kpiTodayUnits" class="monthly-kpi-units">(0単位)</span>
+            <span id="kpiTodayUnits" class="monthly-kpi-units">(0)</span>
           </span>
         </div>
         <div class="monthly-kpi-card kpi-mini-card">
-          <span class="monthly-kpi-label">当月累計</span>
+          <span class="monthly-kpi-label">当月</span>
           <span class="monthly-kpi-value monthly-kpi-value-month">
             <span id="kpiMonthRevenue">¥0</span>
-            <span id="kpiMonthUnits" class="monthly-kpi-units">(0単位)</span>
+            <span id="kpiMonthUnits" class="monthly-kpi-units">(0)</span>
           </span>
         </div>
       </div>

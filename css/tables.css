@@ -27,52 +27,58 @@ color: var(--color-text-muted);
 background-color: #f1f5f9;
 }
 
-/* ========== 月間単位・収益 ツールバー（高さ36px・横一列・縦積み禁止） ========== */
+/* ========== 月間単位・収益 ツールバー（高さ36px・横一列・絶対衝突防止） ========== */
+#viewMonthly .monthly-header-row,
+#viewMonthly .monthly-toolbar-row,
 .monthly-header-row,
 .monthly-toolbar-row {
-  display: flex;
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto; /* 左=可変 / 右=固定 → 重なり物理的に不可能 */
   align-items: center;
-  justify-content: space-between;
-  gap: 10px 12px;
-  flex-wrap: nowrap; /* ★ヘッダー全体も縦積み禁止 */
+  column-gap: 8px;
+  row-gap: 8px;
   margin-bottom: 12px;
   width: 100%;
   min-height: 36px;
+  height: 36px;
+  max-height: 36px;
   box-sizing: border-box;
   min-width: 0;
+  overflow: visible;
 }
 .monthly-controls-left,
 .monthly-toolbar {
-  display: inline-flex;
+  display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 8px;
-  flex-wrap: nowrap; /* ★絞り込み/並べ替えの縦積みを禁止 */
-  flex: 1 1 auto;
-  flex-shrink: 1;
-  min-width: 0;
+  gap: 6px;
+  flex-wrap: nowrap;
+  min-width: 0; /* グリッド1fr内で縮小可能 */
+  width: 100%;
   height: 36px;
   box-sizing: border-box;
+  overflow-x: auto; /* 極狭時は横スクロール（KPIの下に潜り込まない） */
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.monthly-controls-left::-webkit-scrollbar,
+.monthly-toolbar::-webkit-scrollbar {
+  display: none;
 }
 .month-nav-group,
 .filter-sort-group {
   display: inline-flex;
   flex-direction: row;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   flex-wrap: nowrap;
   flex-shrink: 0;
   height: 36px;
   box-sizing: border-box;
 }
 .monthly-tb-divider {
-  width: 1px;
-  height: 22px;
-  background: #e2e8f0;
-  flex-shrink: 0;
-  margin: 0 2px;
-  align-self: center;
+  display: none;
 }
 .monthly-tb-btn,
 .monthly-tb-month,
@@ -112,14 +118,18 @@ background-color: #f1f5f9;
   border-color: #94a3b8;
 }
 .monthly-tb-btn-nav {
-  min-width: 64px;
-  padding: 0 8px;
+  width: 34px;
+  min-width: 34px;
+  max-width: 34px;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 800;
 }
 .monthly-tb-month {
-  width: 138px;
-  min-width: 128px;
-  max-width: 148px;
-  padding: 0 8px;
+  width: 125px;
+  min-width: 125px;
+  max-width: 125px;
+  padding: 0 6px;
   border: 1px solid #cbd5e1;
   background: #fff;
   color: #0f172a;
@@ -144,12 +154,12 @@ background-color: #f1f5f9;
   appearance: none;
   -webkit-appearance: none;
   display: inline-block;
-  padding: 0 26px 0 10px;
+  padding: 0 22px 0 8px;
   border: 1px solid #cbd5e1;
   background-color: #fff;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748b' d='M2.5 4.5L6 8l3.5-3.5'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 8px center;
+  background-position: right 6px center;
   color: #0f172a;
   font-size: 12.5px;
   font-weight: 600;
@@ -159,18 +169,18 @@ background-color: #f1f5f9;
 }
 .monthly-tb-select-filter,
 #monthlyFilterSelect {
-  min-width: 170px;
-  max-width: 210px;
-  width: 190px;
-  flex: 0 0 auto;
+  width: 160px;
+  min-width: 112px;
+  max-width: 175px;
+  flex: 1 1 160px; /* 狭いときだけ絞り込みが先に縮む緩衝材 */
   border-color: #cbd5e1;
 }
 .monthly-tb-select-sort,
 #monthlySortSelect {
-  min-width: 135px;
-  max-width: 160px;
-  width: 148px;
-  flex: 0 0 auto;
+  width: 110px;
+  min-width: 110px;
+  max-width: 110px;
+  flex: 0 0 110px;
   color: #334155;
 }
 .monthly-tb-select-therapist,
@@ -183,7 +193,7 @@ background-color: #f1f5f9;
   display: inline-flex;
   align-items: center;
   height: 36px;
-  padding: 0 10px;
+  padding: 0 8px;
   border-radius: 6px;
   background: #f1f5f9;
   border: 1px solid #cbd5e1;
@@ -196,15 +206,17 @@ background-color: #f1f5f9;
 .monthly-shown-badge strong {
   color: #0f172a;
   font-weight: 800;
-  margin: 0 2px 0 4px;
+  margin: 0 1px 0 0;
 }
 .monthly-tb-btn-print {
-  padding: 0 12px;
+  padding: 0 10px;
   border-color: #0284c7;
   background: #0284c7;
   color: #fff;
   font-size: 12.5px;
   font-weight: 700;
+  gap: 4px;
+  flex-shrink: 0;
 }
 .monthly-tb-btn-print:hover {
   background: #0369a1;
@@ -216,27 +228,30 @@ background-color: #f1f5f9;
   display: inline-flex;
   flex-direction: row;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: nowrap;
   flex: 0 0 auto;
   flex-shrink: 0;
-  margin-left: auto;
+  margin-left: 0;
   height: 36px;
   box-sizing: border-box;
+  position: relative;
+  z-index: 1;
+  justify-self: end;
 }
 .monthly-kpi-card,
 .kpi-mini-card {
   display: inline-flex;
   flex-direction: row;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   height: 36px;
   min-height: 36px;
   max-height: 36px;
   background: #fff;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
-  padding: 0 10px;
+  padding: 0 8px;
   text-align: left;
   min-width: 0;
   box-sizing: border-box;
@@ -258,7 +273,7 @@ background-color: #f1f5f9;
   color: #64748b;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   font-weight: 700;
   line-height: 1;
   margin: 0;
@@ -276,8 +291,8 @@ background-color: #f1f5f9;
 .monthly-kpi-value {
   display: inline-flex;
   align-items: baseline;
-  gap: 4px;
-  font-size: 13.5px;
+  gap: 2px;
+  font-size: 13px;
   font-weight: 800;
   margin: 0;
   line-height: 1;
@@ -294,42 +309,37 @@ background-color: #f1f5f9;
   font-weight: 600;
   color: #64748b;
 }
-/* 超狭幅のみ左右を段落ち（内部の絞り込み/並べ替えは常に横並び維持） */
-@media (max-width: 1100px) {
-  .monthly-tb-month {
-    width: 128px;
-    min-width: 120px;
-  }
+/* 中型ノート: さらに圧縮（重なり絶対防止） */
+@media (max-width: 1360px) {
   .monthly-tb-select-filter,
   #monthlyFilterSelect {
-    width: 170px;
-    min-width: 160px;
-    max-width: 190px;
-  }
-  .monthly-tb-select-sort,
-  #monthlySortSelect {
-    width: 135px;
-    min-width: 130px;
+    width: 140px;
     max-width: 150px;
   }
+  .monthly-kpi-chip {
+    display: none; /* カード全体クリックで内訳モーダル */
+  }
+  .monthly-tb-month {
+    width: 118px;
+    min-width: 118px;
+    max-width: 118px;
+  }
 }
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
+  #viewMonthly .monthly-header-row,
+  #viewMonthly .monthly-toolbar-row,
   .monthly-header-row,
   .monthly-toolbar-row {
-    flex-wrap: wrap; /* 左右グループのみ段落ち可 */
+    grid-template-columns: 1fr;
     height: auto;
-    min-height: 36px;
+    max-height: none;
   }
   .monthly-controls-left,
   .monthly-toolbar {
     width: 100%;
-    flex-wrap: nowrap; /* 内部は縦積み禁止のまま */
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
   }
   .monthly-kpi-right,
   .monthly-kpi-group {
-    margin-left: 0;
     width: 100%;
     justify-content: flex-end;
   }

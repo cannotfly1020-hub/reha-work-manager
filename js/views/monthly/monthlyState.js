@@ -81,7 +81,7 @@ export function buildMonthlyFilterSelectValue(state) {
 export const monthlyState = {
   year: now.getFullYear(),
   month: now.getMonth() + 1,
-  sortKey: 'CATEGORY',
+  sortKey: 'disease',
   /** @type {string} */
   quickFilter: MONTHLY_QUICK_FILTERS.ALL,
   /** 担当セラピスト絞り込み（空文字＝全員／セレクトで th: 選択時のみ） */

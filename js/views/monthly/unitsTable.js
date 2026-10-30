@@ -322,16 +322,16 @@ export function syncMonthlyFilterSelect(rawPatients, counts = {}) {
     });
   });
 
-  // 固定オプションの件数をラベルへ反映
+  // 固定オプションの件数を短ラベルへ反映（ツールバー幅スリム化）
   const labelMap = {
-    ALL: `絞り込み: 全員${counts.ALL != null ? ` (${counts.ALL})` : ''}`,
-    inpatient: `入院患者のみ${counts.inpatient != null ? ` (${counts.inpatient})` : ''}`,
-    outpatient: `外来患者のみ${counts.outpatient != null ? ` (${counts.outpatient})` : ''}`,
-    disuse_all: `消炎鎮痛のみ${counts.disuse_all != null ? ` (${counts.disuse_all})` : ''}`,
-    maint_all: `維持期 全員（月13単位）${counts.maint_all != null ? ` (${counts.maint_all})` : ''}`,
-    maint_inpatient: `🏥 入院の維持期のみ${counts.maint_inpatient != null ? ` (${counts.maint_inpatient})` : ''}`,
-    maint_outpatient: `🚶 外来の維持期のみ${counts.maint_outpatient != null ? ` (${counts.maint_outpatient})` : ''}`,
-    uncalculated_plan: `⚠️ 計画書未算定のみ${counts.uncalculated_plan != null ? ` (${counts.uncalculated_plan})` : ''}`,
+    ALL: `全員${counts.ALL != null ? ` (${counts.ALL})` : ''}`,
+    inpatient: `入院のみ${counts.inpatient != null ? ` (${counts.inpatient})` : ''}`,
+    outpatient: `外来のみ${counts.outpatient != null ? ` (${counts.outpatient})` : ''}`,
+    disuse_all: `消炎鎮痛${counts.disuse_all != null ? ` (${counts.disuse_all})` : ''}`,
+    maint_all: `維持期 全員${counts.maint_all != null ? ` (${counts.maint_all})` : ''}`,
+    maint_inpatient: `入院の維持期${counts.maint_inpatient != null ? ` (${counts.maint_inpatient})` : ''}`,
+    maint_outpatient: `外来の維持期${counts.maint_outpatient != null ? ` (${counts.maint_outpatient})` : ''}`,
+    uncalculated_plan: `⚠️ 計画未算定${counts.uncalculated_plan != null ? ` (${counts.uncalculated_plan})` : ''}`,
   };
   [...select.options].forEach((opt) => {
     if (Object.prototype.hasOwnProperty.call(labelMap, opt.value)) {
@@ -449,11 +449,36 @@ function resolveMaint13SortMeta(item) {
   };
 }
 
+/**
+ * 患者行の当月総単位（並び替え用）
+ * @param {object} item
+ * @returns {number}
+ */
+function resolveItemTotalUnits(item) {
+  return Number(item?.rehaTotalUnits ?? item?.totalUnits ?? 0) || 0;
+}
+
+/**
+ * 患者行の実施回数（単位>0の日数）
+ * @param {object} item
+ * @returns {number}
+ */
+function resolveItemSessionDays(item) {
+  const daysInMonth = new Date(monthlyState.year, monthlyState.month, 0).getDate();
+  /** @type {Record<number, number>} */
+  const map = {};
+  for (let d = 1; d <= daysInMonth; d += 1) {
+    map[d] = item?.dailyRehaUnits?.[d] || item?.dailyUnits?.[d] || 0;
+  }
+  return aggregatePatientMonthlyStats(map).sessionDays;
+}
+
 function sortPatients(patients, sortKey) {
-  if (sortKey === 'THERAPIST_ASC' || sortKey === 'THERAPIST' || sortKey === 'therapist') {
+  const key = String(sortKey || 'disease');
+  if (key === 'THERAPIST_ASC' || key === 'THERAPIST' || key === 'therapist') {
     return sortPatientsByTherapist(patients, true, getAllTherapists());
   }
-  if (sortKey === 'THERAPIST_DESC') {
+  if (key === 'THERAPIST_DESC') {
     return sortPatientsByTherapist(patients, false, getAllTherapists());
   }
 
@@ -461,18 +486,32 @@ function sortPatients(patients, sortKey) {
     const pA = a.patient;
     const pB = b.patient;
 
-    if (sortKey === 'KANA') {
+    if (key === 'KANA') {
       const kanaA = normalizeToKatakana(pA.nameKana || pA.name);
       const kanaB = normalizeToKatakana(pB.nameKana || pB.name);
       return kanaA.localeCompare(kanaB, 'ja');
     }
 
-    if (sortKey === 'ID') {
+    if (key === 'id' || key === 'ID') {
       return (pA.id || '').localeCompare(pB.id || '', undefined, { numeric: true });
     }
 
-    // 維持期13単位: 超過 → 適用単位多い順 → 非対象は末尾
-    if (sortKey === 'MAINT13_DESC') {
+    // 単位順（多い順）
+    if (key === 'units_desc') {
+      const uDiff = resolveItemTotalUnits(b) - resolveItemTotalUnits(a);
+      if (uDiff !== 0) return uDiff;
+      return (pA.id || '').localeCompare(pB.id || '', undefined, { numeric: true });
+    }
+
+    // 回数順（実施日数 多い順）
+    if (key === 'sessions_desc') {
+      const sDiff = resolveItemSessionDays(b) - resolveItemSessionDays(a);
+      if (sDiff !== 0) return sDiff;
+      return (pA.id || '').localeCompare(pB.id || '', undefined, { numeric: true });
+    }
+
+    // 13単位進捗順 / 旧 MAINT13_DESC: 超過 → 適用単位多い順 → 非対象は末尾
+    if (key === 'maint_progress' || key === 'MAINT13_DESC') {
       const mA = resolveMaint13SortMeta(a);
       const mB = resolveMaint13SortMeta(b);
       if (mA.subject !== mB.subject) return mA.subject ? -1 : 1;
@@ -482,17 +521,16 @@ function sortPatients(patients, sortKey) {
     }
 
     // 疾患別 (運動器 → 脳血管 → 廃用 → その他 → 消炎)
-    if (sortKey === 'DISEASE' || sortKey === 'disease') {
+    if (key === 'DISEASE' || key === 'disease') {
       const rankDiff = getDiseaseSortRank(pA) - getDiseaseSortRank(pB);
       if (rankDiff !== 0) return rankDiff;
-      // 同疾患内は区分（入院→外来）→ ID で安定ソート
       const catA = pA.category === 'INPATIENT' ? 0 : 1;
       const catB = pB.category === 'INPATIENT' ? 0 : 1;
       if (catA !== catB) return catA - catB;
       return (pA.id || '').localeCompare(pB.id || '', undefined, { numeric: true });
     }
 
-    // デフォルト: CATEGORY (入院 → 外来 → 消炎)
+    // 互換: CATEGORY (入院 → 外来 → 消炎)
     const getCatScore = (p) => {
       if (p.diseaseType === 'ANALGESIA') return 3;
       if (p.category === 'INPATIENT') return 1;
