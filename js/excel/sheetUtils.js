@@ -127,14 +127,14 @@ export function applyA4LandscapePrintSetup(ws, fitHeight = false) {
     fitToPage: true
   };
 
-  // 3. 印刷余白（余白狭め：インチ単位）
+  // 3. 印刷余白（インチ単位・左右約7.6mmで印字幅確保／A4横 fitToWidth=1 前提）
   ws['!margins'] = {
-    left: 0.2,
-    right: 0.2,
-    top: 0.3,
-    bottom: 0.3,
-    header: 0.1,
-    footer: 0.1
+    left: 0.3,
+    right: 0.3,
+    top: 0.4,
+    bottom: 0.4,
+    header: 0.2,
+    footer: 0.2
   };
 
   // 4. ZIP後処理用メタ（シート順で fitHeight を復元）
@@ -296,6 +296,9 @@ export function injectA4LandscapeIntoSheetXml(xml, fitHeight = false, orientatio
   const orient = orientation === 'portrait' ? 'portrait' : 'landscape';
   const pageSetupTag =
     `<pageSetup paperSize="9" orientation="${orient}" fitToWidth="1" fitToHeight="${fitH}" scale="100"/>`;
+  // 左右0.3"（約7.6mm）で印字幅確保。横はみ出しは fitToWidth=1 で強制抑制
+  const pageMarginsTag =
+    '<pageMargins left="0.3" right="0.3" top="0.4" bottom="0.4" header="0.2" footer="0.2"/>';
 
   // sheetPr / pageSetUpPr（fitToPage）
   if (/<sheetPr\b[^>]*\/>/.test(out)) {
@@ -308,6 +311,15 @@ export function injectA4LandscapeIntoSheetXml(xml, fitHeight = false, orientatio
     }
   } else {
     out = out.replace(/<worksheet\b[^>]*>/, (m) => `${m}<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>`);
+  }
+
+  // pageMargins（既存置換 or pageSetup 直前へ挿入）
+  if (/<pageMargins\b[^>]*\/>/.test(out)) {
+    out = out.replace(/<pageMargins\b[^>]*\/>/, pageMarginsTag);
+  } else if (/<pageMargins\b[^>]*>[\s\S]*?<\/pageMargins>/.test(out)) {
+    out = out.replace(/<pageMargins\b[^>]*>[\s\S]*?<\/pageMargins>/, pageMarginsTag);
+  } else if (/<pageSetup\b/.test(out)) {
+    out = out.replace(/<pageSetup\b/, `${pageMarginsTag}<pageSetup`);
   }
 
   // pageSetup（既存があれば置換、なければ pageMargins 直後へ挿入）

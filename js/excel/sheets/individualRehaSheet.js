@@ -458,6 +458,7 @@ function buildPeriodRowView(analysis, mode, year, month, daysInMonth, role = 'PT
     : analysis.planByDay;
 
   let periodTotal = 0;
+  let sessionDays = 0; // 実施回数（期間内・単位>0の日数）
   let early1 = 0;
   let early2 = 0;
   let planDateStr = '';
@@ -474,6 +475,7 @@ function buildPeriodRowView(analysis, mode, year, month, daysInMonth, role = 'PT
     const u = dailyUnits[d] || 0;
     visibleUnits[d] = u;
     periodTotal += u;
+    if (u > 0) sessionDays += 1;
     early1 += early1ByDay[d] || 0;
     early2 += early2ByDay[d] || 0;
     if (planByDay[d]) planDateStr = planByDay[d];
@@ -506,6 +508,7 @@ function buildPeriodRowView(analysis, mode, year, month, daysInMonth, role = 'PT
     mode,
     role,
     periodTotal, // ★純粋な数値合算（「退」「維」文字列は含めない）
+    sessionDays, // 実施回数（日数）
     early1,
     early2,
     planDateStr,
@@ -517,6 +520,26 @@ function buildPeriodRowView(analysis, mode, year, month, daysInMonth, role = 'PT
     // 維持開始日＝満了翌日（当月切替の減算初日に「維」を印字）
     maintenanceStartDateStr: analysis.switchStartStr || ''
   };
+}
+
+/**
+ * PT/OT(/ST) ブロック全体で「実施した日」の和集合を数え、患者の実施回数とする
+ * （同日に PT+OT があっても 1 回）
+ * @param {object[]} block
+ * @returns {number}
+ */
+function countMergedSessionDays(block) {
+  /** @type {Record<number, true>} */
+  const hit = {};
+  (block || []).forEach((r) => {
+    const vu = r?.rowView?.visibleUnits;
+    if (!vu) return;
+    for (let d = 1; d <= DAY_COLS; d += 1) {
+      const u = vu[d];
+      if (u !== null && u !== undefined && Number(u) > 0) hit[d] = true;
+    }
+  });
+  return Object.keys(hit).length;
 }
 
 /**
@@ -601,7 +624,8 @@ function collectSheetRows(aggregated) {
 
 /**
  * 列順序（厳格）:
- * ID → 患者氏名 → 介 → 入院日 → 職 → 1〜31日 → 総 → 早Ⅰ → 早Ⅱ → 計画
+ * ID → 患者氏名 → 介 → 入院日 → 職 → 1〜31日 → 回数 → 総 → 早Ⅰ → 早Ⅱ → 計画
+ * ※「回数」= 実施日数（単位>0の日）。廃用計画書転記必須。A4横 fitToWidth=1 厳守のため列幅を詰める。
  */
 const COL_ID = 0;
 const COL_NAME = 1;
@@ -609,10 +633,11 @@ const COL_CARE = 2;
 const COL_ADMISSION = 3;
 const COL_ROLE = 4;
 const DAY_COL_START = 5;
-const COL_TOTAL = DAY_COL_START + DAY_COLS; // 36
-const COL_EARLY1 = COL_TOTAL + 1;           // 37
-const COL_EARLY2 = COL_TOTAL + 2;           // 38
-const COL_PLAN = COL_TOTAL + 3;             // 39
+const COL_SESS = DAY_COL_START + DAY_COLS; // 36 実施回数
+const COL_TOTAL = COL_SESS + 1;            // 37 総単位
+const COL_EARLY1 = COL_TOTAL + 1;          // 38
+const COL_EARLY2 = COL_TOTAL + 2;          // 39
+const COL_PLAN = COL_TOTAL + 3;            // 40
 
 function writeTwoRowHeader(ws, rowH1, rowH2, year, month, daysInMonth, merges) {
   // 固定先頭: ID / 患者氏名 / 介 / 入院日 / 職
@@ -671,8 +696,9 @@ function writeTwoRowHeader(ws, rowH1, rowH2, year, month, daysInMonth, merges) {
     });
   }
 
-  // 右端: 総 / 早Ⅰ / 早Ⅱ / 計画
+  // 右端: 回数 / 総 / 早Ⅰ / 早Ⅱ / 計画
   const rightLabels = [
+    { c: COL_SESS, label: '回数', style: STYLE_HEADER },
     { c: COL_TOTAL, label: '総', style: STYLE_HEADER_TOTAL },
     { c: COL_EARLY1, label: '早Ⅰ', style: STYLE_HEADER },
     { c: COL_EARLY2, label: '早Ⅱ', style: STYLE_HEADER },
@@ -702,6 +728,7 @@ function writeTwoRowHeader(ws, rowH1, rowH2, year, month, daysInMonth, merges) {
  * @param {{
  *   writeShared?: boolean,
  *   mergedTotal?: number,
+ *   mergedSessionDays?: number,
  *   mergedEarly1?: number,
  *   mergedEarly2?: number,
  *   mergedPlan?: string
@@ -712,19 +739,22 @@ function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraB
   // 最新マスター優先（退マーク・グレーアウト判定と氏名表示の整合）
   const p = row.analysis?.livePatient || resolveLivePatient(item.patient);
   const {
-    periodTotal, early1, early2, planDateStr, visibleUnits,
+    periodTotal, sessionDays, early1, early2, planDateStr, visibleUnits,
     careLabel, careStyleBase, admissionLabel, mode,
     dischargeDateStr, maintenanceStartDateStr, role
   } = rowView;
   const roleLabel = role || row.role || 'PT';
   const writeShared = mergeOpts.writeShared !== false;
   const totalValue = Number.isFinite(mergeOpts.mergedTotal) ? mergeOpts.mergedTotal : periodTotal;
+  const sessionDaysValue = Number.isFinite(mergeOpts.mergedSessionDays)
+    ? mergeOpts.mergedSessionDays
+    : (Number(sessionDays) || 0);
   const early1Value = Number.isFinite(mergeOpts.mergedEarly1) ? mergeOpts.mergedEarly1 : early1;
   const early2Value = Number.isFinite(mergeOpts.mergedEarly2) ? mergeOpts.mergedEarly2 : early2;
   const planValue = (mergeOpts.mergedPlan !== undefined) ? mergeOpts.mergedPlan : planDateStr;
 
   // 結合セル用: 先頭行に値、下位行は空（マージで上の値が見える）
-  // 順序: ID → 氏名 → 介 → 入院日 → 職 → 日別 → 総 → 早Ⅰ → 早Ⅱ → 計画
+  // 順序: ID → 氏名 → 介 → 入院日 → 職 → 日別 → 回数 → 総 → 早Ⅰ → 早Ⅱ → 計画
   if (writeShared) {
     setStyledCell(ws, curRow, COL_ID, p.id, {
       ...STYLE_DATA_C,
@@ -853,9 +883,21 @@ function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraB
     }
   }
 
-  // 日別の右側: 総（合算）→ 早Ⅰ → 早Ⅱ → 計画
+  // 日別の右側: 回数 → 総（合算）→ 早Ⅰ → 早Ⅱ → 計画
   if (writeShared) {
     const isReducedSheet = mode === 'FULL_REDUCED' || mode === 'SPLIT_REDUCED';
+    setStyledCell(ws, curRow, COL_SESS, sessionDaysValue, {
+      ...STYLE_DATA_C,
+      fill: { fgColor: { rgb: 'FFF7ED' } },
+      font: {
+        name: 'Meiryo UI',
+        sz: 8.5,
+        bold: true,
+        color: { rgb: '9A3412' }
+      },
+      alignment: { horizontal: 'center', vertical: 'center' },
+      numFmt: '0'
+    });
     setStyledCell(ws, curRow, COL_TOTAL, totalValue, {
       ...STYLE_DATA_C,
       fill: { fgColor: { rgb: isReducedSheet ? 'FEF3C7' : 'E0F2FE' } },
@@ -887,6 +929,7 @@ function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraB
       alignment: { horizontal: 'center', vertical: 'center' }
     });
   } else {
+    setStyledCell(ws, curRow, COL_SESS, '', { ...STYLE_DATA_C, fill: zebraBg });
     setStyledCell(ws, curRow, COL_TOTAL, '', { ...STYLE_DATA_C, fill: zebraBg });
     setStyledCell(ws, curRow, COL_EARLY1, '', { ...STYLE_DATA_C, fill: zebraBg });
     setStyledCell(ws, curRow, COL_EARLY2, '', { ...STYLE_DATA_C, fill: zebraBg });
@@ -908,6 +951,7 @@ function pushPatientRoleMerges(merges, rowStart, rowEnd) {
     COL_NAME,
     COL_CARE,
     COL_ADMISSION,
+    COL_SESS,
     COL_TOTAL,
     COL_EARLY1,
     COL_EARLY2,
@@ -1034,12 +1078,15 @@ function buildSingleGroupWorksheet(aggregated, groupRows, def, pageMeta = {}) {
       mergedEarly2 += Number(r.rowView?.early2) || 0;
       if (!mergedPlan && r.rowView?.planDateStr) mergedPlan = r.rowView.planDateStr;
     });
+    // 実施回数: 職種横断の実施日和集合（同日二重計上なし）
+    const mergedSessionDays = countMergedSessionDays(block);
 
     const blockStartRow = curRow;
     block.forEach((r, idx) => {
       writePatientMatrixRow(ws, curRow, r, year, month, daysInMonth, zebraBg, {
         writeShared: idx === 0,
         mergedTotal,
+        mergedSessionDays,
         mergedEarly1,
         mergedEarly2,
         mergedPlan
@@ -1057,21 +1104,23 @@ function buildSingleGroupWorksheet(aggregated, groupRows, def, pageMeta = {}) {
   ws['!rows'] = rHeights;
   ws['!merges'] = merges;
 
-  // 列幅: A4横 fitToWidth=1 で右端（総・早Ⅰ・早Ⅱ・計画）がハミ出さないよう詰める
-  // 順序: ID / 氏名 / 介 / 入院日 / 職 / 1〜31 / 総 / 早Ⅰ / 早Ⅱ / 計画
+  // 列幅: A4横 fitToWidth=1 で右端（回数・総・早Ⅰ・早Ⅱ・計画）がハミ出さないよう詰める
+  // 回数追加分は日列・属性列から吸収（総 wch 合計を追加前と同水準以下に維持）
+  // 順序: ID / 氏名 / 介 / 入院日 / 職 / 1〜31 / 回数 / 総 / 早Ⅰ / 早Ⅱ / 計画
   const colProps = [
-    { wch: 6.5 },  // ID
-    { wch: 11 },   // 患者氏名
-    { wch: 7 },    // 介
-    { wch: 7 },    // 入院日
-    { wch: 3.8 }   // 職
+    { wch: 6 },    // ID
+    { wch: 10 },   // 患者氏名
+    { wch: 6.5 },  // 介
+    { wch: 6.5 },  // 入院日
+    { wch: 3.5 }   // 職
   ];
-  for (let d = 0; d < DAY_COLS; d += 1) colProps.push({ wch: 2.85 });
+  for (let d = 0; d < DAY_COLS; d += 1) colProps.push({ wch: 2.72 });
   colProps.push(
-    { wch: 4.5 },  // 総
-    { wch: 4.2 },  // 早Ⅰ
-    { wch: 4.2 },  // 早Ⅱ
-    { wch: 5.5 }   // 計画
+    { wch: 3.6 },  // 回数（実施日数）
+    { wch: 4.2 },  // 総
+    { wch: 3.8 },  // 早Ⅰ
+    { wch: 3.8 },  // 早Ⅱ
+    { wch: 5 }     // 計画
   );
   ws['!cols'] = colProps;
 
@@ -1081,18 +1130,24 @@ function buildSingleGroupWorksheet(aggregated, groupRows, def, pageMeta = {}) {
 
   // ★A4横・横幅1ページ絶対収容（fitToWidth:1 / orientation:landscape）
   applyA4LandscapePrintSetup(ws, false);
+  // 左右余白約7.6mm（0.3"）で印字幅確保。fitToWidth=1 により環境差でも横1ページ厳守
   ws['!margins'] = {
-    left: 0.15, right: 0.15, top: 0.25, bottom: 0.25, header: 0.08, footer: 0.08
+    left: 0.3,
+    right: 0.3,
+    top: 0.4,
+    bottom: 0.4,
+    header: 0.2,
+    footer: 0.2
   };
   // applyA4 後も fitToWidth を明示上書き（他処理による上書き防止）
   ws['!pageSetup'] = {
     ...(ws['!pageSetup'] || {}),
     paperSize: 9,
     orientation: 'landscape',
+    fitToPage: true,
     fitToWidth: 1,
     fitToHeight: 0,
-    scale: 100,
-    fitToPage: true
+    scale: 100
   };
   ws['!sheetPr'] = { pageSetUpPr: { fitToPage: true } };
   ws['!rehaPrintSetup'] = {
@@ -1102,7 +1157,15 @@ function buildSingleGroupWorksheet(aggregated, groupRows, def, pageMeta = {}) {
     fitToWidth: 1,
     fitToHeight: 0,
     fitHeight: false,
-    scale: 100
+    scale: 100,
+    margins: {
+      left: 0.3,
+      right: 0.3,
+      top: 0.4,
+      bottom: 0.4,
+      header: 0.2,
+      footer: 0.2
+    }
   };
 
   updateSheetRange(ws);
