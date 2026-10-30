@@ -506,7 +506,7 @@ function attachGridEventListeners(gridEl) {
             && !isNonPatientBlock(targetItem);
 
           if (!canSwapPatients) {
-            showToast('他の予約と重複するため入れ替えできません', 'warn');
+            showToast('他の時間割と重複するため入れ替えできません', 'warn');
             return;
           }
 
@@ -522,14 +522,14 @@ function attachGridEventListeners(gridEl) {
             scheduleState.dateStr, fromTherapist, fromSlot, targetTId, targetSId
           );
           if (!swapped) {
-            showToast('他の予約と重複するため入れ替えできません', 'warn');
+            showToast('他の時間割と重複するため入れ替えできません', 'warn');
             renderScheduleView();
             return;
           }
 
           const nameA = getPatientById(sourceItem.patientId)?.name || '患者A';
           const nameB = getPatientById(targetItem.patientId)?.name || '患者B';
-          showToast(`${nameA} 様 と ${nameB} 様 の予約を入れ替えました`, 'success');
+          showToast(`${nameA} 様 と ${nameB} 様 の時間割を入れ替えました`, 'success');
 
           if (typeof window.triggerDailyBackup === 'function') {
             window.triggerDailyBackup();

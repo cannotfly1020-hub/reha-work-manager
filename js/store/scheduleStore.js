@@ -100,11 +100,11 @@ export function checkSwapConflict(schedule, therapistA, slotA, therapistB, slotB
   // A ➔ Bの位置 / B ➔ Aの位置
   const overlapA = slotRangeOverlaps(temp, therapistB, slotB, aUnits);
   if (overlapA.blocked) {
-    return { blocked: true, message: overlapA.message || '他の予約と重複するため入れ替えできません' };
+    return { blocked: true, message: overlapA.message || '他の時間割と重複するため入れ替えできません' };
   }
   const overlapB = slotRangeOverlaps(temp, therapistA, slotA, bUnits);
   if (overlapB.blocked) {
-    return { blocked: true, message: overlapB.message || '他の予約と重複するため入れ替えできません' };
+    return { blocked: true, message: overlapB.message || '他の時間割と重複するため入れ替えできません' };
   }
 
   // 患者の他セラピスト二重登録チェック（両元コマ除外済みの temp 上で検証）
@@ -123,7 +123,7 @@ export function checkSwapConflict(schedule, therapistA, slotA, therapistB, slotB
         const hits = aOccupied.some((id) => id && itemOccupied.includes(id));
         if (!hits) continue;
         if (tId === therapistB) {
-          return { blocked: true, message: '他の予約と重複するため入れ替えできません' };
+          return { blocked: true, message: '他の時間割と重複するため入れ替えできません' };
         }
         if (item.patientId === aItem.patientId) {
           return { blocked: true, message: '同時刻に同一患者が他枠にいるため入れ替えできません' };
@@ -146,7 +146,7 @@ export function checkSwapConflict(schedule, therapistA, slotA, therapistB, slotB
         const hits = bOccupied.some((id) => id && itemOccupied.includes(id));
         if (!hits) continue;
         if (tId === therapistA) {
-          return { blocked: true, message: '他の予約と重複するため入れ替えできません' };
+          return { blocked: true, message: '他の時間割と重複するため入れ替えできません' };
         }
         if (item.patientId === bItem.patientId) {
           return { blocked: true, message: '同時刻に同一患者が他枠にいるため入れ替えできません' };
