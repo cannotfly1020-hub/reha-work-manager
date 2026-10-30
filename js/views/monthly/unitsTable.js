@@ -1,12 +1,171 @@
 // js/views/monthly/unitsTable.js
-// 月間単位表（退院予定日バッジ・退院翌日以降セルのグレーアウト・臨床クイックフィルター対応）
+// 月間単位表（退院予定日バッジ・退院翌日以降セルのグレーアウト・臨床クイックフィルター・担当セラピスト順ソート対応）
 
 import { REHA_RULES } from '../../config/rules.js';
 import { sanitizeHtml, normalizeToKatakana } from '../../core/dataNormalizer.js';
 import { calculatePatientDeadlines, checkMonth13UnitsViolation } from '../../core/deadlineCalc.js';
+import { getTherapistRole } from '../../core/therapistRoleUtil.js';
+import { getAllTherapists, getTherapistById } from '../../store/therapistStore.js';
 import { monthlyState, MONTHLY_QUICK_FILTERS } from './monthlyState.js';
 import { printPatientMonthlyReport } from '../../print/patientMonthlyReportPrint.js';
 import { showToast } from '../../ui/toast.js';
+
+const ROLE_SORT_ORDER = Object.freeze({ PT: 1, OT: 2, ST: 3 });
+
+/**
+ * 患者の担当セラピストIDを解決する
+ * 優先: 患者マスター主担当 → 当月スロットで最多単位のセラピスト
+ * @param {object} item aggregate patientMap entry
+ * @returns {string}
+ */
+export function resolvePrimaryTherapistId(item) {
+  const p = item?.patient || {};
+  const masterId = String(
+    p.mainTherapistId || p.assignedTherapistId || p.primaryTherapistId || p.therapistId || ''
+  ).trim();
+  if (masterId && masterId !== 'NONE' && masterId !== 'ANALGESIA' && masterId.toUpperCase() !== 'NONE') {
+    return masterId;
+  }
+
+  /** @type {Record<string, number>} */
+  const unitsByTherapist = {};
+  (item?.slots || []).forEach((s) => {
+    if (!s || s.isAnalgesia) return;
+    const tid = String(s.therapist || s.therapistId || '').trim();
+    if (!tid || tid === 'NONE' || tid === 'ANALGESIA') return;
+    const u = Number(s.units) || 0;
+    if (u <= 0) return;
+    unitsByTherapist[tid] = (unitsByTherapist[tid] || 0) + u;
+  });
+
+  let bestId = '';
+  let bestUnits = -1;
+  Object.entries(unitsByTherapist).forEach(([tid, units]) => {
+    if (units > bestUnits) {
+      bestUnits = units;
+      bestId = tid;
+      return;
+    }
+    if (units === bestUnits && bestId) {
+      // 同単位は ID 昇順で安定化
+      if (tid.localeCompare(bestId, undefined, { numeric: true }) < 0) {
+        bestId = tid;
+      }
+    }
+  });
+  return bestId;
+}
+
+/**
+ * 当月スロットに指定セラピストの実施が含まれるか
+ * @param {object} item
+ * @param {string} therapistId
+ * @returns {boolean}
+ */
+function patientHasTherapistSlots(item, therapistId) {
+  const tid = String(therapistId || '').trim();
+  if (!tid) return false;
+  return (item?.slots || []).some((s) => {
+    if (!s || s.isAnalgesia) return false;
+    const sid = String(s.therapist || s.therapistId || '').trim();
+    return sid === tid;
+  });
+}
+
+/**
+ * セラピスト名・職種に基づく患者ソート
+ * @param {object[]} patientRows
+ * @param {boolean} [isAsc=true]
+ * @param {Array} [therapistsMaster=[]]
+ * @returns {object[]}
+ */
+export function sortPatientsByTherapist(patientRows, isAsc = true, therapistsMaster = []) {
+  const master = Array.isArray(therapistsMaster) && therapistsMaster.length > 0
+    ? therapistsMaster
+    : getAllTherapists();
+  const therapistMap = new Map(master.map((t) => [String(t.id), t]));
+
+  return [...patientRows].sort((a, b) => {
+    const tIdA = resolvePrimaryTherapistId(a);
+    const tIdB = resolvePrimaryTherapistId(b);
+    const tA = therapistMap.get(String(tIdA)) || (tIdA ? getTherapistById(tIdA) : null);
+    const tB = therapistMap.get(String(tIdB)) || (tIdB ? getTherapistById(tIdB) : null);
+
+    // 未設定は末尾
+    if (!tIdA && tIdB) return 1;
+    if (tIdA && !tIdB) return -1;
+    if (!tIdA && !tIdB) {
+      return (a.patient?.name || '').localeCompare(b.patient?.name || '', 'ja');
+    }
+
+    const roleA = getTherapistRole(tIdA, tA?.name || '', master);
+    const roleB = getTherapistRole(tIdB, tB?.name || '', master);
+    const rA = ROLE_SORT_ORDER[roleA] || 99;
+    const rB = ROLE_SORT_ORDER[roleB] || 99;
+    if (rA !== rB) {
+      return isAsc ? (rA - rB) : (rB - rA);
+    }
+
+    const nameA = (tA?.name || tIdA || '');
+    const nameB = (tB?.name || tIdB || '');
+    const nameCmp = nameA.localeCompare(nameB, 'ja');
+    if (nameCmp !== 0) {
+      return isAsc ? nameCmp : -nameCmp;
+    }
+
+    // 同一セラピスト内は患者氏名順（昇順固定で視認性を安定）
+    const patientCmp = (a.patient?.name || '').localeCompare(b.patient?.name || '', 'ja');
+    if (patientCmp !== 0) return patientCmp;
+    return String(a.patient?.id || '').localeCompare(String(b.patient?.id || ''), undefined, { numeric: true });
+  });
+}
+
+/**
+ * 担当セラピスト絞り込みセレクトの選択肢を同期
+ * @param {object[]} rawPatients
+ */
+export function syncMonthlyTherapistFilterSelect(rawPatients) {
+  const select = document.getElementById('monthlyTherapistFilterSelect');
+  if (!select) return;
+
+  const therapists = getAllTherapists();
+  const usedIds = new Set();
+  (rawPatients || []).forEach((item) => {
+    const primary = resolvePrimaryTherapistId(item);
+    if (primary) usedIds.add(primary);
+    (item?.slots || []).forEach((s) => {
+      if (s?.isAnalgesia) return;
+      const tid = String(s.therapist || s.therapistId || '').trim();
+      if (tid && tid !== 'NONE' && tid !== 'ANALGESIA') usedIds.add(tid);
+    });
+  });
+
+  const current = String(monthlyState.therapistFilterId || '');
+  const options = ['<option value="">担当: 全員</option>'];
+  therapists
+    .slice()
+    .sort((a, b) => {
+      const rA = ROLE_SORT_ORDER[getTherapistRole(a.id, a.name, therapists)] || 99;
+      const rB = ROLE_SORT_ORDER[getTherapistRole(b.id, b.name, therapists)] || 99;
+      if (rA !== rB) return rA - rB;
+      return String(a.name || '').localeCompare(String(b.name || ''), 'ja');
+    })
+    .forEach((t) => {
+      const role = getTherapistRole(t.id, t.name, therapists);
+      const mark = usedIds.has(String(t.id)) ? '' : '（当月実績なし）';
+      options.push(
+        `<option value="${sanitizeHtml(t.id)}">${sanitizeHtml(role)} ${sanitizeHtml(t.name || t.id)}${sanitizeHtml(mark)}</option>`
+      );
+    });
+
+  select.innerHTML = options.join('');
+  if (current && [...select.options].some((o) => o.value === current)) {
+    select.value = current;
+  } else {
+    select.value = '';
+    monthlyState.therapistFilterId = '';
+  }
+}
 
 /**
  * 疾患別ソート用ランク（運動器 → 脳血管 → 廃用 → その他個別 → 消炎 → 未設定）
@@ -51,6 +210,13 @@ function getDiseaseSortRank(patient) {
 }
 
 function sortPatients(patients, sortKey) {
+  if (sortKey === 'THERAPIST_ASC' || sortKey === 'THERAPIST' || sortKey === 'therapist') {
+    return sortPatientsByTherapist(patients, true, getAllTherapists());
+  }
+  if (sortKey === 'THERAPIST_DESC') {
+    return sortPatientsByTherapist(patients, false, getAllTherapists());
+  }
+
   return [...patients].sort((a, b) => {
     const pA = a.patient;
     const pB = b.patient;
@@ -86,6 +252,20 @@ function sortPatients(patients, sortKey) {
     if (scoreDiff !== 0) return scoreDiff;
     return (pA.id || '').localeCompare(pB.id || '', undefined, { numeric: true });
   });
+}
+
+/**
+ * 担当セラピスト絞り込み（主担当一致、または当月実施実績あり）
+ * @param {object} item
+ * @param {string} therapistFilterId
+ * @returns {boolean}
+ */
+export function matchesTherapistFilter(item, therapistFilterId) {
+  const tid = String(therapistFilterId || '').trim();
+  if (!tid) return true;
+  const primary = resolvePrimaryTherapistId(item);
+  if (primary === tid) return true;
+  return patientHasTherapistSlots(item, tid);
 }
 
 /**
@@ -274,6 +454,7 @@ export function renderMonthlyUnitsTable(aggregated) {
 
   const { daysInMonth, patientMap } = aggregated;
   const rawPatients = Object.values(patientMap);
+  syncMonthlyTherapistFilterSelect(rawPatients);
   const counts = countMonthlyQuickFilters(rawPatients);
 
   if (rawPatients.length === 0) {
@@ -283,7 +464,11 @@ export function renderMonthlyUnitsTable(aggregated) {
   }
 
   const filterKey = monthlyState.quickFilter || MONTHLY_QUICK_FILTERS.ALL;
-  const filtered = rawPatients.filter((item) => matchesMonthlyQuickFilter(item, filterKey));
+  const therapistFilterId = String(monthlyState.therapistFilterId || '').trim();
+  const filtered = rawPatients.filter((item) => (
+    matchesMonthlyQuickFilter(item, filterKey)
+    && matchesTherapistFilter(item, therapistFilterId)
+  ));
   const patients = sortPatients(filtered, monthlyState.sortKey);
   syncMonthlyQuickFilterBar(counts, patients.length);
   const year = monthlyState.year;
@@ -299,7 +484,13 @@ export function renderMonthlyUnitsTable(aggregated) {
       [MONTHLY_QUICK_FILTERS.PLAN_MISSING]: '計画書未算定の該当患者はいません（算定漏れなし）',
       [MONTHLY_QUICK_FILTERS.ALL]: '対象月のデータはありません',
     };
-    container.innerHTML = `<div style="padding:24px; text-align:center; color:#94a3b8; font-size:0.85rem;">${sanitizeHtml(labels[filterKey] || labels.ALL)}</div>`;
+    let emptyMsg = labels[filterKey] || labels.ALL;
+    if (therapistFilterId) {
+      const t = getTherapistById(therapistFilterId);
+      const tLabel = t ? `${getTherapistRole(t.id, t.name)} ${t.name}` : therapistFilterId;
+      emptyMsg = `担当「${tLabel}」× 現在の絞り込みに該当する患者はいません`;
+    }
+    container.innerHTML = `<div style="padding:24px; text-align:center; color:#94a3b8; font-size:0.85rem;">${sanitizeHtml(emptyMsg)}</div>`;
     return;
   }
 

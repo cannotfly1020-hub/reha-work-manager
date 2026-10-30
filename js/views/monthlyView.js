@@ -18,6 +18,7 @@ export function initMonthlyView() {
   const btnPrev = document.getElementById('btnPrevMonth');
   const btnNext = document.getElementById('btnNextMonth');
   const sortSelect = document.getElementById('monthlySortSelect');
+  const therapistFilterSelect = document.getElementById('monthlyTherapistFilterSelect');
   const todayCard = document.getElementById('kpiTodayRevenueCard');
   const quickFilterBar = document.getElementById('monthlyQuickFilterBar');
 
@@ -50,6 +51,16 @@ export function initMonthlyView() {
   sortSelect?.addEventListener('change', (e) => {
     monthlyState.sortKey = e.target.value;
     // 並び替えのみ：再集計不要、テーブルだけ再描画
+    if (monthlyState.lastAggregated) {
+      renderMonthlyUnitsTable(monthlyState.lastAggregated);
+    } else {
+      renderMonthlyView();
+    }
+  });
+
+  // 担当セラピスト絞り込み（クイックフィルター・ソートと併用／再集計不要）
+  therapistFilterSelect?.addEventListener('change', (e) => {
+    monthlyState.therapistFilterId = String(e.target.value || '').trim();
     if (monthlyState.lastAggregated) {
       renderMonthlyUnitsTable(monthlyState.lastAggregated);
     } else {

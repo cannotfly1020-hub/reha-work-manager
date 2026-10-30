@@ -23,5 +23,7 @@ export const monthlyState = {
   sortKey: 'CATEGORY',
   /** @type {MonthlyQuickFilter} */
   quickFilter: MONTHLY_QUICK_FILTERS.ALL,
+  /** 担当セラピスト絞り込み（空文字＝全員） */
+  therapistFilterId: '',
   lastAggregated: null,
 };
