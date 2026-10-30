@@ -4,7 +4,10 @@
 
 import { TIME_SLOTS, REHA_RULES, AM_SLOT_COUNT, TOTAL_SLOT_COUNT } from '../../config/rules.js';
 import { sanitizeHtml, safeParseInt } from '../../core/dataNormalizer.js';
-import { getActiveTherapists } from '../../store/therapistStore.js';
+import {
+  getActiveTherapists, getTherapistById,
+  isTherapistLunchSlot, resolveTherapistLunchBreak
+} from '../../store/therapistStore.js';
 import { getPatientById } from '../../store/patientStore.js';
 import {
   getDailySchedule, moveScheduleSlot, swapScheduleSlots, checkSwapConflict,
@@ -30,7 +33,31 @@ import { openAnalgesiaModal } from '../modals/analgesiaModal.js';
 import { scheduleState } from './scheduleState.js';
 import { renderScheduleView } from '../scheduleView.js';
 
-function buildTaskCardHtml(cellData, tId, slotId) {
+/**
+ * セラピスト×スロットが昼休み時間帯か
+ * @param {object|null} therapist
+ * @param {string} slotId
+ * @returns {boolean}
+ */
+function isLunchBreakCell(therapist, slotId) {
+  const slot = TIME_SLOTS.find((s) => s.id === slotId);
+  if (!slot || !therapist) return false;
+  return isTherapistLunchSlot(therapist, slot.start);
+}
+
+/**
+ * 昼休み時間帯への配置時の注意トースト（拒絶せず許容）
+ * @param {string} therapistId
+ * @param {string} slotId
+ */
+function warnLunchBreakPlacement(therapistId, slotId) {
+  const therapist = getTherapistById(therapistId) || { id: therapistId };
+  if (!isLunchBreakCell(therapist, slotId)) return;
+  const lunch = resolveTherapistLunchBreak(therapist);
+  showToast(`⚠️ 昼休み時間帯への配置です（${lunch.start}〜${lunch.end}）`, 'warn');
+}
+
+function buildTaskCardHtml(cellData, tId, slotId, isLunch = false) {
   const u = Math.min(24, Math.max(1, safeParseInt(cellData.slotsCount || cellData.units, 1)));
   const calculatedHeight = (52 * u) - 5;
   const title = cellData.title || '';
@@ -53,8 +80,9 @@ function buildTaskCardHtml(cellData, tId, slotId) {
   const halfSlots = AM_SLOT_COUNT || 12;
   const fullSlots = TOTAL_SLOT_COUNT || 27;
   const durationLabel = u >= fullSlots ? '終日' : (u >= halfSlots ? '半日' : `${u * 20}分`);
+  const lunchCls = isLunch ? ' cell-lunch-break' : '';
   return `
-    <div class="cell-slot" data-therapist="${tId}" data-slot="${slotId}" data-occupied="1">
+    <div class="cell-slot${lunchCls}" data-therapist="${tId}" data-slot="${slotId}" data-occupied="1">
       <div class="reha-slot-card ${cardClass} card-unit-${u}" draggable="true" data-therapist="${tId}" data-slot="${slotId}"
            style="height:${calculatedHeight}px !important; max-height:${calculatedHeight}px !important; box-sizing:border-box; overflow:hidden; cursor:grab;">
         <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -81,7 +109,7 @@ function buildQuickUnitButtonsHtml(currentUnits) {
     </div>`;
 }
 
-export function buildSlotCardHtml(p, u, cellData, tId, slotId) {
+export function buildSlotCardHtml(p, u, cellData, tId, slotId, isLunch = false) {
   const isOut = p.category === 'OUTPATIENT';
   const cardClass = isOut ? 'card-outpatient' : 'card-inpatient';
   const disRule = REHA_RULES.LIMIT_DAYS[p.diseaseType] || REHA_RULES.LIMIT_DAYS.ANALGESIA;
@@ -109,9 +137,10 @@ export function buildSlotCardHtml(p, u, cellData, tId, slotId) {
   // 1セル高さ52pxに対して、u単位（uコマ）分の高さを算出し、下枠線と重ならないよう -5px を適用
   // 1単位: 47px / 2単位: 99px / 3単位: 151px / 4単位: 203px
   const calculatedHeight = (52 * u) - 5;
+  const lunchCls = isLunch ? ' cell-lunch-break' : '';
 
   return `
-    <div class="cell-slot" data-therapist="${tId}" data-slot="${slotId}" data-occupied="1">
+    <div class="cell-slot${lunchCls}" data-therapist="${tId}" data-slot="${slotId}" data-occupied="1">
       <div class="reha-slot-card ${cardClass} card-unit-${u}" draggable="true" data-therapist="${tId}" data-slot="${slotId}"
            style="height:${calculatedHeight}px !important; max-height:${calculatedHeight}px !important; box-sizing:border-box; overflow:hidden; cursor:grab;">
         <div style="display:flex; justify-content:space-between; align-items:center; gap:4px;">
@@ -168,23 +197,28 @@ export function renderTimetableGrid() {
     therapists.forEach((t) => {
       const tId = t.id;
       const cellData = schedule[tId]?.[slot.id];
+      const isLunch = isTherapistLunchSlot(t, slot.start);
+      const lunchCls = isLunch ? ' cell-lunch-break' : '';
+      const lunchTitle = isLunch
+        ? ` title="昼休み ${resolveTherapistLunchBreak(t).start}〜${resolveTherapistLunchBreak(t).end}"`
+        : '';
 
       if (coveredUntil[tId] > index) {
-        html += `<div class="cell-slot slot-covered-placeholder"></div>`;
+        html += `<div class="cell-slot slot-covered-placeholder${lunchCls}"${lunchTitle}></div>`;
         return;
       }
 
       if (cellData && isNonPatientBlock(cellData)) {
         const u = getSlotSpan(cellData);
         coveredUntil[tId] = index + u;
-        html += buildTaskCardHtml(cellData, tId, slot.id);
+        html += buildTaskCardHtml(cellData, tId, slot.id, isLunch);
       } else if (cellData && cellData.patientId) {
         const p = getPatientById(cellData.patientId) || { name: '未登録', category: 'OUTPATIENT', diseaseType: 'LOCOMOTIVE' };
         const u = Math.min(4, Math.max(1, safeParseInt(cellData.units, 1)));
         coveredUntil[tId] = index + u;
-        html += buildSlotCardHtml(p, u, cellData, tId, slot.id);
+        html += buildSlotCardHtml(p, u, cellData, tId, slot.id, isLunch);
       } else {
-        html += `<div class="cell-slot" data-therapist="${tId}" data-slot="${slot.id}"><button class="empty-slot-btn" data-therapist="${tId}" data-slot="${slot.id}">＋ 追加</button></div>`;
+        html += `<div class="cell-slot${lunchCls}" data-therapist="${tId}" data-slot="${slot.id}"${lunchTitle}><button class="empty-slot-btn" data-therapist="${tId}" data-slot="${slot.id}">＋ 追加</button></div>`;
       }
     });
 
@@ -280,6 +314,7 @@ function placePatientInstant(targetTId, targetSId, patientId) {
   } else {
     showToast(`${patient.name} を ${units}単位で配置しました`, 'success');
   }
+  warnLunchBreakPlacement(targetTId, targetSId);
 
   if (typeof window.triggerDailyBackup === 'function') {
     window.triggerDailyBackup();
@@ -530,6 +565,9 @@ function attachGridEventListeners(gridEl) {
           const nameA = getPatientById(sourceItem.patientId)?.name || '患者A';
           const nameB = getPatientById(targetItem.patientId)?.name || '患者B';
           showToast(`${nameA} 様 と ${nameB} 様 の時間割を入れ替えました`, 'success');
+          // 入れ替え先が昼休みの場合は双方の新位置を注意喚起（拒絶しない）
+          warnLunchBreakPlacement(targetTId, targetSId);
+          warnLunchBreakPlacement(fromTherapist, fromSlot);
 
           if (typeof window.triggerDailyBackup === 'function') {
             window.triggerDailyBackup();
@@ -565,6 +603,7 @@ function attachGridEventListeners(gridEl) {
           return;
         }
         showToast('コマを移動しました', 'success');
+        warnLunchBreakPlacement(targetTId, targetSId);
 
         if (typeof window.triggerDailyBackup === 'function') {
           window.triggerDailyBackup();

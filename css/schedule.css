@@ -331,6 +331,41 @@ border-right: 1px solid #94a3b8;
 position: relative;
 padding: 2px 4px;
 }
+/* スタッフ別昼休み時間帯ハイライト（交代休憩・誤配置防止ガイド） */
+.cell-slot.cell-lunch-break {
+background-color: #fff7ed;
+background-image: repeating-linear-gradient(
+  -45deg,
+  transparent,
+  transparent 5px,
+  rgba(251, 146, 60, 0.10) 5px,
+  rgba(251, 146, 60, 0.10) 10px
+);
+}
+.cell-slot.cell-lunch-break:not([data-occupied="1"])::after {
+content: "🍽 昼休";
+position: absolute;
+inset: 0;
+display: flex;
+align-items: center;
+justify-content: center;
+font-size: 0.62rem;
+font-weight: 800;
+color: #c2410c;
+opacity: 0.28;
+pointer-events: none;
+letter-spacing: 0.04em;
+z-index: 0;
+}
+.cell-slot.cell-lunch-break .empty-slot-btn,
+.cell-slot.cell-lunch-break .reha-slot-card {
+position: relative;
+z-index: 1;
+}
+.cell-slot.cell-lunch-break:hover .empty-slot-btn {
+background: rgba(255, 247, 237, 0.92);
+border-color: #fdba74;
+}
 .empty-slot-btn {
 width: 100%;
 height: 100%;

@@ -1,5 +1,5 @@
 // js/store/therapistStore.js
-// セラピストマスター管理・LocalStorage永続化・ステータス管理（稼働中/休職/退職）・新規追加・増員対応（200行制限準拠）
+// セラピストマスター管理・LocalStorage永続化・ステータス管理（稼働中/休職/退職）・昼休み時間帯・新規追加・増員対応
 
 import { normalizeString } from '../core/dataNormalizer.js';
 import { storageGet } from '../core/storageAdapter.js';
@@ -17,6 +17,25 @@ export const THERAPIST_STATUS = {
 };
 
 /**
+ * 昼休み時間帯のデフォルト（交代制未設定時のフォールバック）
+ */
+export const DEFAULT_LUNCH_BREAK = Object.freeze({
+  start: '12:00',
+  end: '13:00'
+});
+
+/**
+ * スタッフ設定UI用・20分刻みの昼休み候補時刻
+ */
+export const LUNCH_BREAK_TIME_OPTIONS = Object.freeze([
+  '11:00', '11:20', '11:40',
+  '12:00', '12:20', '12:40',
+  '13:00', '13:20', '13:40',
+  '14:00', '14:20', '14:40',
+  '15:00'
+]);
+
+/**
  * 新規追加時のカラーパレット候補
  */
 const DEFAULT_COLORS = ['#0284c7', '#0d9488', '#7c3aed', '#ea580c', '#059669', '#d97706', '#dc2626', '#4f46e5'];
@@ -25,35 +44,109 @@ const DEFAULT_COLORS = ['#0284c7', '#0d9488', '#7c3aed', '#ea580c', '#059669', '
  * 初期デフォルトセラピスト一覧
  */
 const DEFAULT_THERAPISTS = [
-  { id: 'A', name: 'PT A', color: '#0284c7', status: THERAPIST_STATUS.ACTIVE },
-  { id: 'B', name: 'PT B', color: '#0d9488', status: THERAPIST_STATUS.ACTIVE },
-  { id: 'C', name: 'PT C', color: '#7c3aed', status: THERAPIST_STATUS.ACTIVE }
+  {
+    id: 'A', name: 'PT A', color: '#0284c7', status: THERAPIST_STATUS.ACTIVE,
+    lunchStart: DEFAULT_LUNCH_BREAK.start, lunchEnd: DEFAULT_LUNCH_BREAK.end
+  },
+  {
+    id: 'B', name: 'PT B', color: '#0d9488', status: THERAPIST_STATUS.ACTIVE,
+    lunchStart: DEFAULT_LUNCH_BREAK.start, lunchEnd: DEFAULT_LUNCH_BREAK.end
+  },
+  {
+    id: 'C', name: 'PT C', color: '#7c3aed', status: THERAPIST_STATUS.ACTIVE,
+    lunchStart: DEFAULT_LUNCH_BREAK.start, lunchEnd: DEFAULT_LUNCH_BREAK.end
+  }
 ];
 
 /**
+ * HH:MM 形式に正規化（不正は空文字）
+ * @param {string} value
+ * @returns {string}
+ */
+function normalizeClockHm(value) {
+  const s = String(value || '').trim();
+  const m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return '';
+  const hh = Math.min(23, Math.max(0, Number(m[1])));
+  const mm = Math.min(59, Math.max(0, Number(m[2])));
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+/**
+ * セラピストの昼休み時間帯を安全に解決（未設定・不正時はデフォルト）
+ * @param {object|null|undefined} therapistOrPartial
+ * @returns {{ start: string, end: string }}
+ */
+export function resolveTherapistLunchBreak(therapistOrPartial) {
+  const start = normalizeClockHm(
+    therapistOrPartial?.lunchStart
+    || therapistOrPartial?.breakStartTime
+    || DEFAULT_LUNCH_BREAK.start
+  ) || DEFAULT_LUNCH_BREAK.start;
+  const end = normalizeClockHm(
+    therapistOrPartial?.lunchEnd
+    || therapistOrPartial?.breakEndTime
+    || DEFAULT_LUNCH_BREAK.end
+  ) || DEFAULT_LUNCH_BREAK.end;
+
+  // 終了が開始以下（同じ・逆転）の場合はデフォルトへフォールバック
+  if (end <= start) {
+    return { start: DEFAULT_LUNCH_BREAK.start, end: DEFAULT_LUNCH_BREAK.end };
+  }
+  return { start, end };
+}
+
+/**
+ * スロット開始時刻が当該セラピストの昼休み時間帯に含まれるか
+ * （[start, end) 半開区間: 12:00〜13:00 → 12:00/12:20/12:40 が対象）
+ * @param {object|null|undefined} therapist
+ * @param {string} slotStartTime HH:MM
+ * @returns {boolean}
+ */
+export function isTherapistLunchSlot(therapist, slotStartTime) {
+  const lunch = resolveTherapistLunchBreak(therapist);
+  const start = normalizeClockHm(slotStartTime);
+  if (!start) return false;
+  return start >= lunch.start && start < lunch.end;
+}
+
+/**
+ * 読み込み時の正規化（status / color / lunch を補完）
+ * @param {object} t
+ * @param {number} idx
+ * @returns {object}
+ */
+function normalizeTherapistRecord(t, idx = 0) {
+  const lunch = resolveTherapistLunchBreak(t);
+  return {
+    ...t,
+    status: t.status || THERAPIST_STATUS.ACTIVE,
+    color: t.color || DEFAULT_COLORS[idx % DEFAULT_COLORS.length],
+    lunchStart: lunch.start,
+    lunchEnd: lunch.end
+  };
+}
+
+/**
  * 現在登録されている全セラピストを取得する
- * （既存データに status がない場合は互換性のため自動で '稼働中' を補完）
- * @returns {Array<{id: string, name: string, color: string, status: string}>}
+ * （既存データに status / lunch がない場合は互換性のため自動補完）
+ * @returns {Array<{id: string, name: string, color: string, status: string, lunchStart: string, lunchEnd: string}>}
  */
 export function getAllTherapists() {
   try {
     const raw = storageGet(STORAGE_KEY);
     if (!raw) {
       saveAllTherapists(DEFAULT_THERAPISTS);
-      return JSON.parse(JSON.stringify(DEFAULT_THERAPISTS));
+      return JSON.parse(JSON.stringify(DEFAULT_THERAPISTS)).map((t, idx) => normalizeTherapistRecord(t, idx));
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      return parsed.map((t, idx) => ({
-        ...t,
-        status: t.status || THERAPIST_STATUS.ACTIVE,
-        color: t.color || DEFAULT_COLORS[idx % DEFAULT_COLORS.length]
-      }));
+      return parsed.map((t, idx) => normalizeTherapistRecord(t, idx));
     }
-    return JSON.parse(JSON.stringify(DEFAULT_THERAPISTS));
+    return JSON.parse(JSON.stringify(DEFAULT_THERAPISTS)).map((t, idx) => normalizeTherapistRecord(t, idx));
   } catch (error) {
     console.error('getAllTherapists error:', error);
-    return JSON.parse(JSON.stringify(DEFAULT_THERAPISTS));
+    return JSON.parse(JSON.stringify(DEFAULT_THERAPISTS)).map((t, idx) => normalizeTherapistRecord(t, idx));
   }
 }
 
@@ -124,7 +217,9 @@ export function addTherapist(name = '', status = THERAPIST_STATUS.ACTIVE) {
     id: nextId,
     name: cleanName,
     color,
-    status: validStatus
+    status: validStatus,
+    lunchStart: DEFAULT_LUNCH_BREAK.start,
+    lunchEnd: DEFAULT_LUNCH_BREAK.end
   };
 
   list.push(newTherapist);
@@ -204,6 +299,18 @@ export function updateTherapistSettings(updateMap) {
         if (entry.status !== undefined && Object.values(THERAPIST_STATUS).includes(entry.status)) {
           if (entry.status !== t.status) {
             t.status = entry.status;
+            changed = true;
+          }
+        }
+        if (entry.lunchStart !== undefined || entry.lunchEnd !== undefined
+          || entry.breakStartTime !== undefined || entry.breakEndTime !== undefined) {
+          const lunch = resolveTherapistLunchBreak({
+            lunchStart: entry.lunchStart !== undefined ? entry.lunchStart : (entry.breakStartTime !== undefined ? entry.breakStartTime : t.lunchStart),
+            lunchEnd: entry.lunchEnd !== undefined ? entry.lunchEnd : (entry.breakEndTime !== undefined ? entry.breakEndTime : t.lunchEnd)
+          });
+          if (lunch.start !== t.lunchStart || lunch.end !== t.lunchEnd) {
+            t.lunchStart = lunch.start;
+            t.lunchEnd = lunch.end;
             changed = true;
           }
         }

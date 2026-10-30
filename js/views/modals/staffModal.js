@@ -5,7 +5,8 @@
 import { sanitizeHtml } from '../../core/dataNormalizer.js';
 import {
   getAllTherapists, addTherapist, updateTherapistSettings,
-  saveAllTherapists, THERAPIST_STATUS
+  saveAllTherapists, THERAPIST_STATUS,
+  DEFAULT_LUNCH_BREAK, LUNCH_BREAK_TIME_OPTIONS, resolveTherapistLunchBreak
 } from '../../store/therapistStore.js';
 import { showToast } from '../../ui/toast.js';
 import { getAssistantSettings, saveAssistantSettings } from '../../store/assistantStore.js';
@@ -197,9 +198,18 @@ export function setupStaffSettingsModalListeners(onUpdate) {
 
   btnReset?.addEventListener('click', () => {
     const defaultList = [
-      { id: 'A', name: 'PT A', color: '#0284c7', status: THERAPIST_STATUS.ACTIVE },
-      { id: 'B', name: 'PT B', color: '#0d9488', status: THERAPIST_STATUS.ACTIVE },
-      { id: 'C', name: 'PT C', color: '#7c3aed', status: THERAPIST_STATUS.ACTIVE }
+      {
+        id: 'A', name: 'PT A', color: '#0284c7', status: THERAPIST_STATUS.ACTIVE,
+        lunchStart: DEFAULT_LUNCH_BREAK.start, lunchEnd: DEFAULT_LUNCH_BREAK.end
+      },
+      {
+        id: 'B', name: 'PT B', color: '#0d9488', status: THERAPIST_STATUS.ACTIVE,
+        lunchStart: DEFAULT_LUNCH_BREAK.start, lunchEnd: DEFAULT_LUNCH_BREAK.end
+      },
+      {
+        id: 'C', name: 'PT C', color: '#7c3aed', status: THERAPIST_STATUS.ACTIVE,
+        lunchStart: DEFAULT_LUNCH_BREAK.start, lunchEnd: DEFAULT_LUNCH_BREAK.end
+      }
     ];
     const staffReset = saveAllTherapists(defaultList);
     const assistantReset = saveAssistantSettings('', '');
@@ -228,10 +238,18 @@ export function setupStaffSettingsModalListeners(onUpdate) {
       const tId = row.dataset.therapistId;
       const nameInput = row.querySelector('.staff-name-input');
       const statusSelect = row.querySelector('.staff-status-select');
+      const lunchStartSelect = row.querySelector('.staff-lunch-start');
+      const lunchEndSelect = row.querySelector('.staff-lunch-end');
       if (tId && nameInput && statusSelect) {
+        const lunch = resolveTherapistLunchBreak({
+          lunchStart: lunchStartSelect?.value,
+          lunchEnd: lunchEndSelect?.value
+        });
         updateMap[tId] = {
           name: nameInput.value.trim(),
-          status: statusSelect.value
+          status: statusSelect.value,
+          lunchStart: lunch.start,
+          lunchEnd: lunch.end
         };
       }
     });
@@ -289,31 +307,56 @@ export function renderStaffSettingsFields() {
   const currentStaffList = allTherapists.filter((t) => t.status !== THERAPIST_STATUS.RETIRED && matchesKeyword(t));
   const retiredStaffList = allTherapists.filter((t) => t.status === THERAPIST_STATUS.RETIRED && matchesKeyword(t));
 
+  const buildLunchOptionsHtml = (selectedValue) => {
+    const selected = String(selectedValue || '');
+    const opts = LUNCH_BREAK_TIME_OPTIONS.slice();
+    if (selected && !opts.includes(selected)) opts.unshift(selected);
+    return opts.map((tm) => (
+      `<option value="${tm}" ${tm === selected ? 'selected' : ''}>${tm}</option>`
+    )).join('');
+  };
+
   const buildRowHtml = (t) => {
     const isRetired = t.status === THERAPIST_STATUS.RETIRED;
     const isLeave = t.status === THERAPIST_STATUS.LEAVE;
     const statusBg = isRetired ? '#f1f5f9' : (isLeave ? '#fffbeb' : '#f0fdf4');
     const statusCol = isRetired ? '#64748b' : (isLeave ? '#b45309' : '#15803d');
+    const lunch = resolveTherapistLunchBreak(t);
 
     return `
       <div class="staff-item-row" data-therapist-id="${t.id}"
-           style="display:flex; align-items:center; justify-content:space-between; gap:10px; background:#fff; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px;">
-        <div style="display:flex; align-items:center; gap:6px; min-width:56px;">
-          <span style="width:10px; height:10px; border-radius:50%; background:${t.color || '#0284c7'}; display:inline-block;"></span>
-          <strong style="font-size:0.82rem; color:#0f172a;">枠 ${t.id}</strong>
+           style="display:flex; flex-direction:column; gap:6px; background:#fff; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+          <div style="display:flex; align-items:center; gap:6px; min-width:56px;">
+            <span style="width:10px; height:10px; border-radius:50%; background:${t.color || '#0284c7'}; display:inline-block;"></span>
+            <strong style="font-size:0.82rem; color:#0f172a;">枠 ${t.id}</strong>
+          </div>
+          <div style="flex:1;">
+            <input type="text" class="staff-name-input" value="${sanitizeHtml(t.name)}"
+                   placeholder="セラピスト氏名"
+                   style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; font-weight:600;">
+          </div>
+          <div style="width:105px;">
+            <select class="staff-status-select"
+                    style="width:100%; padding:5px 6px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.78rem; font-weight:700; background:${statusBg}; color:${statusCol}; cursor:pointer;">
+              <option value="${THERAPIST_STATUS.ACTIVE}" ${t.status === THERAPIST_STATUS.ACTIVE ? 'selected' : ''}>● 稼働中</option>
+              <option value="${THERAPIST_STATUS.LEAVE}" ${t.status === THERAPIST_STATUS.LEAVE ? 'selected' : ''}>▲ 休職</option>
+              <option value="${THERAPIST_STATUS.RETIRED}" ${t.status === THERAPIST_STATUS.RETIRED ? 'selected' : ''}>■ 退職</option>
+            </select>
+          </div>
         </div>
-        <div style="flex:1;">
-          <input type="text" class="staff-name-input" value="${sanitizeHtml(t.name)}"
-                 placeholder="セラピスト氏名"
-                 style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; font-weight:600;">
-        </div>
-        <div style="width:105px;">
-          <select class="staff-status-select"
-                  style="width:100%; padding:5px 6px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.78rem; font-weight:700; background:${statusBg}; color:${statusCol}; cursor:pointer;">
-            <option value="${THERAPIST_STATUS.ACTIVE}" ${t.status === THERAPIST_STATUS.ACTIVE ? 'selected' : ''}>● 稼働中</option>
-            <option value="${THERAPIST_STATUS.LEAVE}" ${t.status === THERAPIST_STATUS.LEAVE ? 'selected' : ''}>▲ 休職</option>
-            <option value="${THERAPIST_STATUS.RETIRED}" ${t.status === THERAPIST_STATUS.RETIRED ? 'selected' : ''}>■ 退職</option>
+        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding-left:16px;">
+          <span style="font-size:0.72rem; font-weight:700; color:#9a3412; white-space:nowrap;">🍽️ 昼休み</span>
+          <select class="staff-lunch-start" title="昼休み開始"
+                  style="padding:4px 6px; border:1px solid #fdba74; border-radius:4px; font-size:0.75rem; font-weight:700; background:#fff7ed; color:#9a3412; cursor:pointer;">
+            ${buildLunchOptionsHtml(lunch.start)}
           </select>
+          <span style="font-size:0.72rem; font-weight:700; color:#78716c;">〜</span>
+          <select class="staff-lunch-end" title="昼休み終了"
+                  style="padding:4px 6px; border:1px solid #fdba74; border-radius:4px; font-size:0.75rem; font-weight:700; background:#fff7ed; color:#9a3412; cursor:pointer;">
+            ${buildLunchOptionsHtml(lunch.end)}
+          </select>
+          <span style="font-size:0.65rem; color:#a8a29e; font-weight:600;">交代休憩（本日時間割にハイライト）</span>
         </div>
       </div>
     `;
