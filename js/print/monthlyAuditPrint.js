@@ -115,18 +115,45 @@ function resolveCareInsuranceDisplay(patient) {
 }
 
 /**
- * 疾患表示ラベル
+ * 疾患表示ラベル（点検・計画書転記用の短表記）
  * @param {object} patient
- * @returns {string}
+ * @returns {{ label: string, isDisuse: boolean }}
  */
 function resolveDiseaseLabel(patient) {
-  if (!patient) return '—';
-  if (patient.diseaseType === 'ANALGESIA') return '消炎鎮痛';
+  if (!patient) return { label: '—', isDisuse: false };
+  const type = String(patient.diseaseType || '').toUpperCase();
+  if (type === 'DISUSE') return { label: '廃用', isDisuse: true };
+  if (type === 'CEREBROVASCULAR') return { label: '脳血管', isDisuse: false };
+  if (type === 'LOCOMOTIVE') return { label: '運動器', isDisuse: false };
+  if (type === 'ANALGESIA') return { label: '消炎', isDisuse: false };
+  if (type === 'CARDIOVASCULAR' || type === 'CARDIAC') return { label: '心大血管', isDisuse: false };
+  if (type === 'RESPIRATORY') return { label: '呼吸器', isDisuse: false };
   const rule = REHA_RULES.LIMIT_DAYS?.[patient.diseaseType];
   const typeLabel = rule?.shortLabel || rule?.label || patient.diseaseType || '';
   const freeName = String(patient.diseaseName || patient.disease || '').trim();
-  if (freeName && typeLabel) return `${typeLabel}/${freeName}`;
-  return freeName || typeLabel || '—';
+  if (typeLabel) {
+    const short = String(typeLabel).replace(/[ⅠⅡⅢIV]/g, '').trim();
+    return { label: freeName ? `${short}/${freeName}` : short, isDisuse: false };
+  }
+  return { label: freeName || '—', isDisuse: false };
+}
+
+/**
+ * 実施回数（単位>0の日数）と総単位
+ * @param {Record<number, number>|Array<number>|null|undefined} dailyUnitsMap
+ * @returns {{ totalUnits: number, sessionDays: number }}
+ */
+function aggregatePatientMonthlyStats(dailyUnitsMap) {
+  let totalUnits = 0;
+  let sessionDays = 0;
+  for (let day = 1; day <= 31; day += 1) {
+    const units = Number(dailyUnitsMap?.[day] || 0);
+    if (units > 0) {
+      totalUnits += units;
+      sessionDays += 1;
+    }
+  }
+  return { totalUnits, sessionDays };
 }
 
 /**
@@ -260,10 +287,20 @@ export function printMonthlyAuditSheet({
     const planCount = specific ? specific.planCount : (item.planCount || 0);
     const planLabel = planCount > 0 ? `済${planCount}` : '未';
     const cat = resolveCategoryLabel(p);
-    const disease = resolveDiseaseLabel(p);
+    const diseaseInfo = resolveDiseaseLabel(p);
     const therapistLabel = resolveTherapistLabel(item, tid || null, therapistsMaster);
     const care = resolveCareInsuranceDisplay(p);
     const deadlines = resolveDeadlineLabels(p, monthEnd);
+
+    /** @type {Record<number, number>} */
+    const statsDaily = {};
+    for (let d = 1; d <= daysInMonth; d += 1) {
+      statsDaily[d] = therapistFocus
+        ? (daily[d] || 0)
+        : (item.dailyRehaUnits?.[d] || item.dailyUnits?.[d] || 0);
+    }
+    const monthlyStats = aggregatePatientMonthlyStats(statsDaily);
+    const sessionDays = monthlyStats.sessionDays;
 
     let dayCells = '';
     for (let d = 1; d <= 31; d += 1) {
@@ -271,12 +308,7 @@ export function printMonthlyAuditSheet({
         dayCells += '<td class="d empty">-</td>';
         continue;
       }
-      let u = 0;
-      if (therapistFocus) {
-        u = daily[d] || 0;
-      } else {
-        u = item.dailyRehaUnits?.[d] || item.dailyUnits?.[d] || 0;
-      }
+      const u = statsDaily[d] || 0;
       const dt = new Date(y, m - 1, d);
       const dow = dt.getDay();
       const cls = dow === 0 ? 'sun' : (dow === 6 ? 'sat' : '');
@@ -288,6 +320,7 @@ export function printMonthlyAuditSheet({
     const totalCell = therapistFocus && totalOwn !== totalAll
       ? `<span class="own">${totalOwn}</span><span class="all">/${totalAll}</span>`
       : `<strong>${totalOwn}</strong>`;
+    const diseaseCls = diseaseInfo.isDisuse ? 'meta disease disuse' : 'meta disease';
 
     bodyRows += `
       <tr>
@@ -296,7 +329,8 @@ export function printMonthlyAuditSheet({
         <td class="meta id">${sanitizeHtml(p.id || '')}</td>
         <td class="meta name">${sanitizeHtml(p.name || '—')}</td>
         <td class="meta cat">${sanitizeHtml(cat)}</td>
-        <td class="meta disease">${sanitizeHtml(disease)}</td>
+        <td class="${diseaseCls}">${sanitizeHtml(diseaseInfo.label)}</td>
+        <td class="meta sess" title="実施回数 ${sessionDays}回 / 総単位 ${monthlyStats.totalUnits}">${sessionDays}</td>
         <td class="meta th">${sanitizeHtml(therapistLabel)}</td>
         <td class="meta lim">${sanitizeHtml(deadlines.limit)}</td>
         <td class="meta early">${sanitizeHtml(deadlines.early)}</td>
@@ -431,8 +465,23 @@ export function printMonthlyAuditSheet({
     .meta.id { width: 38px; font-size: 5.5pt; color: #64748b; }
     .meta.name { width: 52px; font-size: 7pt; font-weight: 800; }
     .meta.cat { width: 14px; text-align: center !important; padding-left: 0 !important; }
-    .meta.disease { width: 48px; font-size: 5.5pt; }
-    .meta.th { width: 42px; font-size: 5.5pt; color: #0369a1; }
+    .meta.disease { width: 36px; font-size: 5.5pt; font-weight: 800; }
+    .meta.disease.disuse {
+      background: #fff7ed !important;
+      color: #9a3412 !important;
+      border-left: 2px solid #ea580c;
+      font-weight: 900;
+    }
+    .meta.sess {
+      width: 22px;
+      text-align: center !important;
+      padding-left: 0 !important;
+      font-size: 7pt;
+      font-weight: 900;
+      color: #0f172a;
+      background: #f8fafc;
+    }
+    .meta.th { width: 40px; font-size: 5.5pt; color: #0369a1; }
     .meta.lim { width: 48px; font-size: 5.2pt; }
     .meta.early { width: 58px; font-size: 5pt; }
     .meta.care { width: 40px; font-size: 5.2pt; }
@@ -487,7 +536,7 @@ export function printMonthlyAuditSheet({
     </div>
   </div>
   <div class="hint">
-    ※ 左端の「□ 点検」「□ 計画」に赤ペンでチェック。日別は${therapistFocus ? '選択セラピストの当人実施単位' : '患者の個別リハ単位'}を表示。行の途中切れ防止・各ページに日付ヘッダー反復。
+    ※ 左端の「□ 点検」「□ 計画」に赤ペンでチェック。疾患名・実施回数（単位&gt;0の日数）を印字。日別は${therapistFocus ? '選択セラピストの当人実施単位' : '患者の個別リハ単位'}を表示。行の途中切れ防止・各ページに日付ヘッダー反復。
   </div>
   <table class="audit">
     <thead>
@@ -498,6 +547,7 @@ export function printMonthlyAuditSheet({
         <th class="meta name" rowspan="2">氏名</th>
         <th class="meta cat" rowspan="2">区</th>
         <th class="meta disease" rowspan="2">疾患</th>
+        <th class="meta sess" rowspan="2" title="実施回数（単位&gt;0の日数）">回数</th>
         <th class="meta th" rowspan="2">担当</th>
         <th class="meta lim" rowspan="2">算定期限</th>
         <th class="meta early" rowspan="2">早期加算</th>

@@ -13,6 +13,74 @@ import { showToast } from '../../ui/toast.js';
 const ROLE_SORT_ORDER = Object.freeze({ PT: 1, OT: 2, ST: 3 });
 
 /**
+ * 患者の当月実施回数（日数）と総単位を集計
+ * （単位 > 0 の日を「実施1回」としてカウント）
+ * @param {Record<number, number>|Array<number>|null|undefined} dailyUnitsMap
+ * @returns {{ totalUnits: number, sessionDays: number }}
+ */
+export function aggregatePatientMonthlyStats(dailyUnitsMap) {
+  let totalUnits = 0;
+  let sessionDays = 0;
+  for (let day = 1; day <= 31; day += 1) {
+    const units = Number(dailyUnitsMap?.[day] || 0);
+    if (units > 0) {
+      totalUnits += units;
+      sessionDays += 1;
+    }
+  }
+  return { totalUnits, sessionDays };
+}
+
+/**
+ * 疾患区分の短ラベル／バッジ用クラス（廃用は高視認）
+ * @param {object} patient
+ * @returns {{ label: string, className: string, isDisuse: boolean }}
+ */
+export function resolveDiseaseDisplay(patient) {
+  const type = String(patient?.diseaseType || '').toUpperCase();
+  if (type === 'DISUSE') {
+    return { label: '廃用', className: 'disease-tag disease-tag-disuse', isDisuse: true };
+  }
+  if (type === 'CEREBROVASCULAR') {
+    return { label: '脳血管', className: 'disease-tag disease-tag-cerebro', isDisuse: false };
+  }
+  if (type === 'LOCOMOTIVE') {
+    return { label: '運動器', className: 'disease-tag disease-tag-loco', isDisuse: false };
+  }
+  if (type === 'ANALGESIA') {
+    return { label: '消炎', className: 'disease-tag disease-tag-analg', isDisuse: false };
+  }
+  if (type === 'CARDIOVASCULAR' || type === 'CARDIAC') {
+    return { label: '心大血管', className: 'disease-tag disease-tag-cardio', isDisuse: false };
+  }
+  if (type === 'RESPIRATORY') {
+    return { label: '呼吸器', className: 'disease-tag disease-tag-resp', isDisuse: false };
+  }
+  if (type === 'CANCER') {
+    return { label: 'がん', className: 'disease-tag', isDisuse: false };
+  }
+  const rule = REHA_RULES.LIMIT_DAYS?.[patient?.diseaseType];
+  if (rule?.shortLabel) {
+    const short = String(rule.shortLabel).replace(/[ⅠⅡⅢIVⅠ-Ⅲ]/g, '').trim() || rule.tag || '他';
+    return { label: short, className: 'disease-tag', isDisuse: false };
+  }
+  return { label: '—', className: 'disease-tag disease-tag-unknown', isDisuse: false };
+}
+
+/**
+ * 疾患バッジHTML
+ * @param {object} patient
+ * @returns {string}
+ */
+export function buildDiseaseBadgeHtml(patient) {
+  const d = resolveDiseaseDisplay(patient);
+  const title = sanitizeHtml(
+    patient?.diseaseName || patient?.disease || REHA_RULES.LIMIT_DAYS?.[patient?.diseaseType]?.fullName || d.label
+  );
+  return `<span class="${d.className}" title="${title}">${sanitizeHtml(d.label)}</span>`;
+}
+
+/**
  * 患者の担当セラピストIDを解決する
  * 優先: 患者マスター主担当 → 当月スロットで最多単位のセラピスト
  * @param {object} item aggregate patientMap entry
@@ -621,18 +689,19 @@ export function renderMonthlyUnitsTable(aggregated) {
     return;
   }
 
-  const totalColWidth = therapistFocus ? '72px' : '44px';
+  const totalColWidth = therapistFocus ? '72px' : '48px';
   const totalColLabel = therapistFocus ? '当人/全体' : '当月計';
 
   let html = `
     <table class="modern-table table-monthly${therapistFocus ? ' table-monthly-therapist-focus' : ''}">
       <thead>
         <tr>
-          <th class="col-fixed" style="width:128px;">氏名</th>
-          <th style="width:32px;">区分</th>
+          <th class="col-fixed" style="width:118px;">氏名・疾患</th>
+          <th style="width:24px;">区</th>
+          <th style="width:34px;" title="リハビリ実施日数（単位&gt;0の日）">回数</th>
           <th style="width:${totalColWidth};">${totalColLabel}</th>
-          <th style="width:42px;">計画書</th>
-          <th style="width:52px;">提出用</th>
+          <th style="width:36px;">計画</th>
+          <th style="width:48px;">提出</th>
   `;
   for (let d = 1; d <= daysInMonth; d++) {
     html += `<th>${d}</th>`;
@@ -647,6 +716,8 @@ export function renderMonthlyUnitsTable(aggregated) {
     const specific = therapistFocus
       ? calculateTherapistSpecificUnits(item, therapistFilterId)
       : null;
+    const diseaseBadge = buildDiseaseBadgeHtml(p);
+    const diseaseMeta = resolveDiseaseDisplay(p);
 
     let catBadge = isOut
       ? '<span style="color:#2563eb; font-weight:700;">外</span>'
@@ -660,6 +731,13 @@ export function renderMonthlyUnitsTable(aggregated) {
     for (let day = 1; day <= daysInMonth; day += 1) {
       dailyUnitsMap[day] = item.dailyRehaUnits?.[day] || 0;
     }
+    // 実施回数: セラピスト絞り込み時は当人日別、それ以外は患者全体の個別リハ日別
+    const statsSource = (therapistFocus && specific)
+      ? specific.dailyUnits
+      : dailyUnitsMap;
+    const monthlyStats = aggregatePatientMonthlyStats(statsSource);
+    const sessionDays = monthlyStats.sessionDays;
+
     const violation = checkMonth13UnitsViolation(p, monthlyState.year, monthlyState.month, dailyUnitsMap);
     const isNearLimit = !violation.isOver13
       && violation.reason !== 'WITHIN_LIMIT'
@@ -677,19 +755,20 @@ export function renderMonthlyUnitsTable(aggregated) {
       totalTitle = '個別13単位制限設定中';
     }
 
-    let totalBadge = `<strong>${item.totalUnits}</strong>`;
+    const sessionTitle = `実施回数: ${sessionDays}回 / 総単位: ${monthlyStats.totalUnits}単位`;
+    let totalBadge = `<strong title="${sanitizeHtml(sessionTitle)}">${item.totalUnits}</strong>`;
     if (therapistFocus && specific) {
       const ownU = specific.totalUnits;
       const allU = item.rehaTotalUnits || item.totalUnits || 0;
       const warnMark = violation.isOver13 ? '⚠️' : '';
       totalBadge = `
-        <span class="total-therapist-own" title="${sanitizeHtml(totalTitle || `当人取得 ${ownU}単位 / 患者全体 ${allU}単位`)}">当人:${ownU}${warnMark}</span>
+        <span class="total-therapist-own" title="${sanitizeHtml(totalTitle || `${sessionTitle}（当人 ${ownU} / 全体 ${allU}）`)}">当人:${ownU}${warnMark}</span>
         <span class="total-therapist-all">全体:${allU}</span>
       `;
     } else if (violation.isOver13) {
-      totalBadge = `<span style="color:#dc2626; font-weight:800;" title="${sanitizeHtml(totalTitle)}">${item.totalUnits}⚠️</span>`;
+      totalBadge = `<span style="color:#dc2626; font-weight:800;" title="${sanitizeHtml(totalTitle || sessionTitle)}">${item.totalUnits}⚠️</span>`;
     } else if (isNearLimit) {
-      totalBadge = `<span style="background:#fef3c7; color:#b45309; padding:1px 3px; border-radius:3px; font-weight:700;" title="${sanitizeHtml(totalTitle)}">${item.totalUnits}</span>`;
+      totalBadge = `<span style="background:#fef3c7; color:#b45309; padding:1px 3px; border-radius:3px; font-weight:700;" title="${sanitizeHtml(totalTitle || sessionTitle)}">${item.totalUnits}</span>`;
     }
 
     const planCountForBadge = (therapistFocus && specific)
@@ -710,18 +789,29 @@ export function renderMonthlyUnitsTable(aggregated) {
       ? `<span class="${dischargeInfo.isPastOrToday ? 'badge-monthly-discharged' : 'badge-monthly-discharge-planned'}" title="退院予定日: ${sanitizeHtml(dischargeInfo.dateStr)}">${sanitizeHtml(dischargeInfo.label)}</span>`
       : '';
 
+    const sessionBadge = `
+      <span class="session-days-badge" title="${sanitizeHtml(sessionTitle)}">${sessionDays}<span class="session-days-unit">回</span></span>
+    `;
+
     html += `
-      <tr class="${hasEarly ? 'row-has-early' : ''}${dischargeInfo ? ' row-has-discharge' : ''}" data-target-id="early-${p.id}" style="${hasEarly ? 'cursor:pointer;' : ''}">
-        <td class="col-fixed"><strong>${sanitizeHtml(p.name)}</strong>${earlyBadge}${dischargeBadgeHtml ? `<br>${dischargeBadgeHtml}` : ''}</td>
+      <tr class="${hasEarly ? 'row-has-early' : ''}${dischargeInfo ? ' row-has-discharge' : ''}${diseaseMeta.isDisuse ? ' row-disease-disuse' : ''}" data-target-id="early-${p.id}" style="${hasEarly ? 'cursor:pointer;' : ''}">
+        <td class="col-fixed">
+          <div class="monthly-name-cell">
+            <strong class="monthly-patient-name">${sanitizeHtml(p.name)}</strong>${earlyBadge}
+            ${diseaseBadge}
+          </div>
+          ${dischargeBadgeHtml ? `<div class="monthly-name-sub">${dischargeBadgeHtml}</div>` : ''}
+        </td>
         <td>${catBadge}</td>
+        <td class="col-session-days">${sessionBadge}</td>
         <td>${totalBadge}</td>
         <td>${planBadge}</td>
         <td style="text-align:center; vertical-align:middle;">
           <button type="button" class="btn btn-xs btn-outline-primary btn-print-patient"
             data-patient-id="${sanitizeHtml(p.id)}"
             title="退院・医事課提出用A4印刷"
-            style="padding:2px 6px; font-size:0.68rem; font-weight:800; border:1px solid #0284c7; background:#fff; color:#0369a1; border-radius:4px; cursor:pointer; white-space:nowrap;">
-            🖨️ 印刷
+            style="padding:2px 5px; font-size:0.65rem; font-weight:800; border:1px solid #0284c7; background:#fff; color:#0369a1; border-radius:4px; cursor:pointer; white-space:nowrap;">
+            🖨️
           </button>
         </td>
     `;
@@ -761,6 +851,7 @@ export function renderMonthlyUnitsTable(aggregated) {
         <tr id="early-${p.id}" class="sub-row-early" style="display:none;">
           <td class="col-fixed" style="font-size:0.72rem; color:#7c3aed; font-weight:700; padding-left:14px;">↳ 早</td>
           <td style="font-size:0.7rem; color:#7c3aed;">加</td>
+          <td style="color:#cbd5e1;">-</td>
           <td style="font-weight:700; color:#7c3aed;">${earlyTotalShow}</td>
           <td style="color:#cbd5e1;">-</td>
           <td style="color:#cbd5e1;">-</td>
