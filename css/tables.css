@@ -28,14 +28,14 @@ background-color: #f1f5f9;
 }
 
 /* 月間単位・収益：臨床動線順クイックフィルター */
-/* ========== 月間単位・収益 ヘッダー1行統合（操作左＋KPI右） ========== */
+/* ========== 月間単位・収益 ヘッダー（短縮ラベル＋衝突防止） ========== */
 .monthly-header-row,
 .monthly-toolbar-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  flex-wrap: nowrap;
+  gap: 12px;
+  flex-wrap: wrap; /* 狭幅では下段へ逃がし、重なりを防止 */
   margin-bottom: 12px;
   width: 100%;
   box-sizing: border-box;
@@ -45,9 +45,10 @@ background-color: #f1f5f9;
 .monthly-toolbar {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: nowrap;
+  gap: 6px;
+  flex-wrap: wrap;
   flex: 1 1 auto;
+  flex-shrink: 1;
   min-width: 0;
   box-sizing: border-box;
 }
@@ -69,7 +70,9 @@ background-color: #f1f5f9;
 }
 .monthly-tb-btn,
 .monthly-tb-month,
-.monthly-tb-select {
+.monthly-tb-select,
+#monthlySortSelect,
+#monthlyTherapistFilterSelect {
   box-sizing: border-box;
   height: 36px;
   min-height: 36px;
@@ -120,35 +123,40 @@ background-color: #f1f5f9;
 }
 .monthly-tb-month:focus,
 .monthly-tb-select:focus,
+#monthlySortSelect:focus,
+#monthlyTherapistFilterSelect:focus,
 .monthly-tb-btn:focus-visible {
   outline: 2px solid #7dd3fc;
   outline-offset: 1px;
 }
-.monthly-tb-select {
+.monthly-tb-select,
+#monthlySortSelect,
+#monthlyTherapistFilterSelect {
   appearance: none;
   -webkit-appearance: none;
-  padding: 0 26px 0 10px;
+  padding: 0 24px 0 8px;
   border: 1px solid #cbd5e1;
   background-color: #fff;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748b' d='M2.5 4.5L6 8l3.5-3.5'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 8px center;
   color: #334155;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
+  width: auto;
 }
-.monthly-tb-select-sort {
-  width: 210px;
-  min-width: 170px;
-  max-width: 240px;
-  flex: 0 1 210px;
+.monthly-tb-select-sort,
+#monthlySortSelect {
+  min-width: 88px;
+  max-width: 140px;
+  flex: 0 1 140px;
 }
-.monthly-tb-select-therapist {
-  width: 130px;
-  min-width: 120px;
-  max-width: 160px;
-  flex: 0 1 130px;
+.monthly-tb-select-therapist,
+#monthlyTherapistFilterSelect {
+  min-width: 96px;
+  max-width: 120px;
+  flex: 0 1 120px;
 }
 .monthly-tb-btn-print {
   padding: 0 14px;
@@ -167,10 +175,11 @@ background-color: #f1f5f9;
 .monthly-kpi-group {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: nowrap;
   flex: 0 0 auto;
-  margin-left: auto;
+  flex-shrink: 0;
+  margin-left: auto; /* 右寄せを維持 */
   box-sizing: border-box;
 }
 .monthly-kpi-card,
@@ -231,12 +240,7 @@ background-color: #f1f5f9;
   font-weight: 600;
   color: #64748b;
 }
-/* 極狭幅のみ折り返し許可（通常デスクトップは常に1行） */
 @media (max-width: 1100px) {
-  .monthly-tb-select-sort {
-    width: 160px;
-    min-width: 140px;
-  }
   .monthly-tb-month {
     width: 136px;
     min-width: 128px;
@@ -248,14 +252,8 @@ background-color: #f1f5f9;
   }
 }
 @media (max-width: 900px) {
-  .monthly-header-row,
-  .monthly-toolbar-row {
-    flex-wrap: wrap;
-    align-items: flex-start;
-  }
   .monthly-controls-left,
   .monthly-toolbar {
-    flex-wrap: wrap;
     width: 100%;
   }
   .monthly-kpi-right,
