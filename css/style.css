@@ -359,3 +359,53 @@
   color: #0369a1;
   font-weight: 700;
 }
+
+/* ===== 月間ツールバー衝突防止（style.css 後読み込みで確実に勝つ） ===== */
+#viewMonthly .monthly-header-row {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) max-content !important;
+  align-items: center !important;
+  column-gap: 10px !important;
+  height: 36px !important;
+  max-height: 36px !important;
+  overflow: hidden !important;
+  min-width: 0 !important;
+}
+#viewMonthly .monthly-controls-left {
+  grid-column: 1 !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  z-index: 0 !important;
+}
+#viewMonthly .monthly-kpi-right {
+  grid-column: 2 !important;
+  flex-shrink: 0 !important;
+  z-index: 1 !important;
+  justify-self: end !important;
+}
+#viewMonthly .monthly-tb-btn,
+#viewMonthly .monthly-tb-month,
+#viewMonthly .monthly-tb-select,
+#viewMonthly .monthly-shown-badge,
+#viewMonthly .monthly-kpi-card {
+  height: 36px !important;
+  max-height: 36px !important;
+}
+@media (max-width: 1100px) {
+  #viewMonthly .monthly-header-row {
+    grid-template-columns: 1fr !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  #viewMonthly .monthly-controls-left,
+  #viewMonthly .monthly-kpi-right {
+    grid-column: 1 !important;
+    width: 100% !important;
+  }
+  #viewMonthly .monthly-kpi-right {
+    justify-content: flex-end !important;
+  }
+}

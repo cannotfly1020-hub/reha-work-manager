@@ -22,13 +22,15 @@ import {
 import { renderDailyDiaryPreview } from './monthly/diaryPreview.js';
 
 export function initMonthlyView() {
-  const monthInput = document.getElementById('monthlyMonthInput');
+  const monthInput = document.getElementById('monthPicker')
+    || document.getElementById('monthlyMonthInput');
   const btnPrev = document.getElementById('btnPrevMonth');
   const btnNext = document.getElementById('btnNextMonth');
   const sortSelect = document.getElementById('monthlySortSelect');
   const filterSelect = document.getElementById('monthlyFilterSelect');
   const btnAuditPrint = document.getElementById('btnMonthlyAuditPrint');
   const todayCard = document.getElementById('kpiTodayRevenueCard');
+  const btnDailyRevenueDetail = document.getElementById('btnDailyRevenueDetail');
 
   if (monthInput) {
     monthInput.value = `${monthlyState.year}-${String(monthlyState.month).padStart(2, '0')}`;
@@ -103,8 +105,17 @@ export function initMonthlyView() {
     });
   });
 
-  todayCard?.addEventListener('click', () => {
-    openRevenueBreakdownModal();
+  const openTodayRevenue = () => openRevenueBreakdownModal();
+  todayCard?.addEventListener('click', openTodayRevenue);
+  todayCard?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openTodayRevenue();
+    }
+  });
+  btnDailyRevenueDetail?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openTodayRevenue();
   });
 
   // 初期セレクト値を状態と同期
@@ -119,7 +130,8 @@ export function initMonthlyView() {
 }
 
 function syncMonthInput() {
-  const input = document.getElementById('monthlyMonthInput');
+  const input = document.getElementById('monthPicker')
+    || document.getElementById('monthlyMonthInput');
   if (input) input.value = `${monthlyState.year}-${String(monthlyState.month).padStart(2, '0')}`;
 }
 
