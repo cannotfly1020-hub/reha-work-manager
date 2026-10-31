@@ -4,8 +4,9 @@
 
 import { sanitizeHtml } from '../core/dataNormalizer.js';
 import { REHA_RULES } from '../config/rules.js';
-import { calculatePatientDeadlines } from '../core/deadlineCalc.js';
+import { calculatePatientDeadlines, evaluateEarlyBonusPhase } from '../core/deadlineCalc.js';
 import { getTherapistRole } from '../core/therapistRoleUtil.js';
+import { getEarlyBaseDate } from '../excel/sheetUtils.js';
 import { getAllTherapists, getTherapistById } from '../store/therapistStore.js';
 import { formatOperatorLabel } from '../store/operatorStore.js';
 import { showToast } from '../ui/toast.js';
@@ -80,6 +81,93 @@ function fmtSlash(dateStr) {
   const s = dateStr.trim();
   if (!s) return '—';
   return s.replace(/-/g, '/');
+}
+
+/**
+ * YYYY-MM-DD → M/D（帳票コンパクト用）
+ * @param {string} dateStr
+ * @returns {string}
+ */
+function fmtMd(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return '';
+  const parts = dateStr.trim().split('-');
+  if (parts.length !== 3) return dateStr.trim();
+  return `${Number(parts[1])}/${Number(parts[2])}`;
+}
+
+/**
+ * 日付配列を M/D,M/D 形式に連結（空は —）
+ * @param {string[]} dates
+ * @returns {string}
+ */
+function fmtMdList(dates) {
+  const list = (Array.isArray(dates) ? dates : []).map(fmtMd).filter(Boolean);
+  return list.length ? list.join(',') : '—';
+}
+
+/**
+ * 日別スロットから早期加算Ⅰ・Ⅱ算定日および計画書算定日を収集
+ * ※個別リハExcel（individualRehaSheet.analyzePatientItem）と同じ判定:
+ *   - 早期: getEarlyBaseDate + evaluateEarlyBonusPhase(…, slot.date, 'INPATIENT')
+ *   - 計画: slot.billingPlan がある日の slot.date
+ * @param {object} item aggregate patientMap entry
+ * @param {{ therapistId?: string|null }} [opts]
+ * @returns {{ early1Dates: string[], early2Dates: string[], planDates: string[] }}
+ */
+function collectEarlyAndPlanDatesFromSlots(item, opts = {}) {
+  const early1Dates = [];
+  const early2Dates = [];
+  const planDates = [];
+  const seen1 = new Set();
+  const seen2 = new Set();
+  const seenPlan = new Set();
+
+  const p = item?.patient || {};
+  const isIn = p.category === 'INPATIENT';
+  const baseEarlyDate = getEarlyBaseDate(p);
+  const tidFilter = String(opts?.therapistId || '').trim();
+  const filterTherapist = Boolean(tidFilter && tidFilter !== 'ALL');
+
+  (item?.slots || []).forEach((s) => {
+    if (!s || s.isAnalgesia || !s.date) return;
+    if (filterTherapist) {
+      const sid = String(s.therapist || s.therapistId || '').trim();
+      if (sid !== tidFilter) return;
+    }
+
+    // 計画書算定日: billingPlan 付きスロットの実施日（Excel planByDay と同値源）
+    if (s.billingPlan) {
+      const d = String(s.date);
+      if (!seenPlan.has(d)) {
+        seenPlan.add(d);
+        planDates.push(d);
+      }
+    }
+
+    // 早期加算算定日: 入院かつ起算日あり、単位>0 の実施日を PHASE で分類
+    if (!isIn || !baseEarlyDate) return;
+    const u = Number(s.units || s.unit || 0);
+    if (u <= 0) return;
+    const ph = evaluateEarlyBonusPhase(baseEarlyDate, s.date, 'INPATIENT');
+    if (ph.phase === 'PHASE_1') {
+      const d = String(s.date);
+      if (!seen1.has(d)) {
+        seen1.add(d);
+        early1Dates.push(d);
+      }
+    } else if (ph.phase === 'PHASE_2') {
+      const d = String(s.date);
+      if (!seen2.has(d)) {
+        seen2.add(d);
+        early2Dates.push(d);
+      }
+    }
+  });
+
+  early1Dates.sort();
+  early2Dates.sort();
+  planDates.sort();
+  return { early1Dates, early2Dates, planDates };
 }
 
 /**
@@ -183,36 +271,56 @@ function resolveTherapistLabel(item, selectedTherapistId, therapistsMaster) {
 }
 
 /**
- * 算定期限・早期加算の短縮表示
+ * 算定期限の短縮表示
  * @param {object} patient
  * @param {string} monthEnd
- * @returns {{ limit: string, early: string }}
+ * @returns {string}
  */
-function resolveDeadlineLabels(patient, monthEnd) {
+function resolveLimitLabel(patient, monthEnd) {
   const isAnalgesia = patient?.diseaseType === 'ANALGESIA';
-  const isOut = patient?.category === 'OUTPATIENT';
   const deadlines = calculatePatientDeadlines(patient, monthEnd);
 
-  let limit = '上限なし';
-  if (isAnalgesia) {
-    limit = '対象外';
-  } else if (deadlines?.limitDateStr) {
+  if (isAnalgesia) return '対象外';
+  if (deadlines?.limitDateStr) {
     const exceeded = deadlines.isLimitExceeded ? '超' : '';
-    limit = `${fmtSlash(deadlines.limitDateStr)}${exceeded}`;
+    return `${fmtSlash(deadlines.limitDateStr)}${exceeded}`;
   }
+  return '上限なし';
+}
 
-  let early = '—';
+/**
+ * 早期加算Ⅰ・Ⅱの算定日ラベル（当月スロット実績）
+ * @param {object} patient
+ * @param {{ early1Dates: string[], early2Dates: string[] }} auditDates
+ * @returns {{ label: string, hasAny: boolean }}
+ */
+function resolveEarlyCalcLabel(patient, auditDates) {
+  const isAnalgesia = patient?.diseaseType === 'ANALGESIA';
+  const isOut = patient?.category === 'OUTPATIENT';
   if (isOut || isAnalgesia) {
-    early = '対象外';
-  } else if (deadlines?.earlyPhase1EndDateStr || deadlines?.earlyPhase2EndDateStr) {
-    const e1 = fmtSlash(deadlines.earlyPhase1EndDateStr);
-    const e2 = fmtSlash(deadlines.earlyPhase2EndDateStr);
-    early = `Ⅰ${e1} / Ⅱ${e2}`;
-  } else if (!patient?.earlyBonusStartDate && !patient?.admissionDate) {
-    early = '起算未設定';
+    return { label: '対象外', hasAny: false };
   }
+  if (!getEarlyBaseDate(patient)) {
+    return { label: '起算未設定', hasAny: false };
+  }
+  const e1 = fmtMdList(auditDates?.early1Dates);
+  const e2 = fmtMdList(auditDates?.early2Dates);
+  const hasAny = (auditDates?.early1Dates?.length > 0) || (auditDates?.early2Dates?.length > 0);
+  return {
+    label: `Ⅰ${e1} Ⅱ${e2}`,
+    hasAny
+  };
+}
 
-  return { limit, early };
+/**
+ * 計画書算定日ラベル（slot.billingPlan の実施日）
+ * @param {string[]} planDates
+ * @returns {{ label: string, hasAny: boolean }}
+ */
+function resolvePlanCalcLabel(planDates) {
+  const list = Array.isArray(planDates) ? planDates : [];
+  if (!list.length) return { label: '未', hasAny: false };
+  return { label: fmtMdList(list), hasAny: true };
 }
 
 /**
@@ -284,13 +392,16 @@ export function printMonthlyAuditSheet({
     const daily = specific?.dailyUnits || {};
     const totalOwn = specific ? specific.totalUnits : (item.rehaTotalUnits || item.totalUnits || 0);
     const totalAll = item.rehaTotalUnits || item.totalUnits || 0;
-    const planCount = specific ? specific.planCount : (item.planCount || 0);
-    const planLabel = planCount > 0 ? `済${planCount}` : '未';
+    const auditDates = collectEarlyAndPlanDatesFromSlots(item, {
+      therapistId: therapistFocus ? tid : null
+    });
+    const earlyCalc = resolveEarlyCalcLabel(p, auditDates);
+    const planCalc = resolvePlanCalcLabel(auditDates.planDates);
     const cat = resolveCategoryLabel(p);
     const diseaseInfo = resolveDiseaseLabel(p);
     const therapistLabel = resolveTherapistLabel(item, tid || null, therapistsMaster);
     const care = resolveCareInsuranceDisplay(p);
-    const deadlines = resolveDeadlineLabels(p, monthEnd);
+    const limitLabel = resolveLimitLabel(p, monthEnd);
 
     /** @type {Record<number, number>} */
     const statsDaily = {};
@@ -332,12 +443,12 @@ export function printMonthlyAuditSheet({
         <td class="${diseaseCls}">${sanitizeHtml(diseaseInfo.label)}</td>
         <td class="meta sess" title="実施回数 ${sessionDays}回 / 総単位 ${monthlyStats.totalUnits}">${sessionDays}</td>
         <td class="meta th">${sanitizeHtml(therapistLabel)}</td>
-        <td class="meta lim">${sanitizeHtml(deadlines.limit)}</td>
-        <td class="meta early">${sanitizeHtml(deadlines.early)}</td>
+        <td class="meta lim">${sanitizeHtml(limitLabel)}</td>
+        <td class="meta early ${earlyCalc.hasAny ? 'ok' : ''}" title="早期加算Ⅰ・Ⅱの算定日（当月スロット実績）">${sanitizeHtml(earlyCalc.label)}</td>
         <td class="meta care">${sanitizeHtml(care)}</td>
         ${dayCells}
         <td class="tot">${totalCell}</td>
-        <td class="plan ${planCount > 0 ? 'ok' : 'ng'}">${sanitizeHtml(planLabel)}</td>
+        <td class="plan ${planCalc.hasAny ? 'ok' : 'ng'}" title="計画書算定日（billingPlan 付きスロット）">${sanitizeHtml(planCalc.label)}</td>
         <td class="no">${idx + 1}</td>
       </tr>`;
   });
@@ -483,7 +594,14 @@ export function printMonthlyAuditSheet({
     }
     .meta.th { width: 40px; font-size: 5.5pt; color: #0369a1; }
     .meta.lim { width: 48px; font-size: 5.2pt; }
-    .meta.early { width: 58px; font-size: 5pt; }
+    .meta.early {
+      width: 72px;
+      font-size: 4.8pt;
+      line-height: 1.15;
+      white-space: normal;
+      word-break: break-all;
+    }
+    .meta.early.ok { background: #ecfdf5; color: #047857; font-weight: 700; }
     .meta.care { width: 40px; font-size: 5.2pt; }
     td.d, th.d { width: 14px; }
     td.d.sat { background: #eff6ff; }
@@ -494,7 +612,14 @@ export function printMonthlyAuditSheet({
     .tot { width: 28px; font-weight: 800; background: #f8fafc; }
     .tot .own { color: #0369a1; font-weight: 800; }
     .tot .all { color: #64748b; font-size: 5pt; font-weight: 600; }
-    .plan { width: 22px; font-weight: 800; }
+    .plan {
+      width: 36px;
+      font-weight: 800;
+      font-size: 5pt;
+      white-space: normal;
+      word-break: break-all;
+      line-height: 1.15;
+    }
     .plan.ok { background: #e0f2fe; color: #0369a1; }
     .plan.ng { background: #fef2f2; color: #b91c1c; }
     .no { width: 16px; color: #94a3b8; font-size: 5.5pt; }
@@ -536,7 +661,7 @@ export function printMonthlyAuditSheet({
     </div>
   </div>
   <div class="hint">
-    ※ 左端の「□ 点検」「□ 計画」に赤ペンでチェック。疾患名・実施回数（単位&gt;0の日数）を印字。日別は${therapistFocus ? '選択セラピストの当人実施単位' : '患者の個別リハ単位'}を表示。行の途中切れ防止・各ページに日付ヘッダー反復。
+    ※ 左端の「□ 点検」「□ 計画」に赤ペンでチェック。「早ⅠⅡ算定日」は当月スロットを evaluateEarlyBonusPhase で分類した実施日、「計画算定日」は billingPlan 付きスロットの実施日。日別は${therapistFocus ? '選択セラピストの当人実施単位' : '患者の個別リハ単位'}を表示。
   </div>
   <table class="audit">
     <thead>
@@ -550,11 +675,11 @@ export function printMonthlyAuditSheet({
         <th class="meta sess" rowspan="2" title="実施回数（単位&gt;0の日数）">回数</th>
         <th class="meta th" rowspan="2">担当</th>
         <th class="meta lim" rowspan="2">算定期限</th>
-        <th class="meta early" rowspan="2">早期加算</th>
+        <th class="meta early" rowspan="2" title="当月スロットの早期加算Ⅰ・Ⅱ算定日">早ⅠⅡ算定日</th>
         <th class="meta care" rowspan="2">介護認定</th>
         ${dayHeaderCells}
         <th class="tot" rowspan="2">計${therapistFocus ? '<br>当/全' : ''}</th>
-        <th class="plan" rowspan="2">計画</th>
+        <th class="plan" rowspan="2" title="billingPlan 付きスロットの実施日">計画算定日</th>
         <th class="no" rowspan="2">#</th>
       </tr>
       <tr>
