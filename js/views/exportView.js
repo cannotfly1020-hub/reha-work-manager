@@ -2,7 +2,10 @@
 // VIEW 5: Excel原本出力・バックアップ＆復元・Electron PC自動保存状態・アーカイブ状態表示
 
 import { aggregateFromAppSchedule } from '../store/scheduleStore.js';
-import { loadMonthOnDemand, loadYearOnDemand, getArchiveStats } from '../store/archiveManager.js';
+import {
+  loadMonthOnDemand, loadYearOnDemand, loadFiscalYearOnDemand, getArchiveStats
+} from '../store/archiveManager.js';
+import { resolveFiscalStartYear } from '../excel/sheets/yearlyTrendSheet.js';
 import { safeParseInt } from '../core/dataNormalizer.js';
 import { showToast } from '../ui/toast.js';
 import {
@@ -119,6 +122,10 @@ async function handleExportUketsuke(monthInput) {
   showToast(`${year}年${month}月 受付提出用Excelを集計・生成中...`, 'info');
   try {
     await loadMonthOnDemand(year, month);
+    // 年間推移シート用: 診療報酬年度（4月〜翌3月）を先読み
+    const fiscalStart = resolveFiscalStartYear(year, month);
+    await loadFiscalYearOnDemand(fiscalStart);
+    // カレンダー年も可能な範囲で補完（他シート互換）
     await loadYearOnDemand(year);
     refreshArchiveStatusUi();
 

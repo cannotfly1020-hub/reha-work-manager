@@ -14,7 +14,8 @@ export function generateUketsukeWorkbook(aggregated) {
   const wb = window.XLSX.utils.book_new();
 
   writeExecutiveSummarySheet(wb, aggregated);
-  writeYearlyTrendSheet(wb, aggregated.year);
+  // 診療報酬年度（4月〜3月）マトリクス。基準月で年度を決定
+  writeYearlyTrendSheet(wb, aggregated.year, aggregated.month);
 
   // 個別リハ: 最大12物理タブ。当月切替は通常期間／減算期間で日割り分割出力
   const individualTabs = writeIndividualRehaSheets(wb, aggregated);

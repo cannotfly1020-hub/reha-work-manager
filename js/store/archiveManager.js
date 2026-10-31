@@ -145,6 +145,22 @@ export async function loadYearOnDemand(year) {
 }
 
 /**
+ * 診療報酬年度（4月〜翌3月）をハイドレート
+ * @param {number} fiscalStartYear 年度開始年（4月の西暦）
+ */
+export async function loadFiscalYearOnDemand(fiscalStartYear) {
+  const y0 = Number(fiscalStartYear);
+  if (!y0) return;
+  for (let m = 4; m <= 12; m += 1) {
+    await loadMonthOnDemand(y0, m);
+  }
+  const y1 = y0 + 1;
+  for (let m = 1; m <= 3; m += 1) {
+    await loadMonthOnDemand(y1, m);
+  }
+}
+
+/**
  * 表示中月＋アクティブ窓以外のオンデマンドキャッシュをメモリから外す
  * @param {number} viewYear
  * @param {number} viewMonth

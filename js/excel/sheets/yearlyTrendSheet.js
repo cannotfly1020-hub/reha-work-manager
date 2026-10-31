@@ -1,195 +1,652 @@
 // js/excel/sheets/yearlyTrendSheet.js
-// 年間推移
+// 年間推移（点数票準拠・診療報酬年度 4月〜3月マトリクス）
+// 列: 大区分 / 疾患・項目 / 指標 / 4月〜3月 / 年度合計
+// ※既存の個別リハ患者シート・20名分割・PT/OT結合は本ファイルでは触らない
 
 import { REHA_RULES } from '../../config/rules.js';
 import { evaluateEarlyBonusPhase, getDailyBasePoints } from '../../core/deadlineCalc.js';
 import { aggregateFromAppSchedule } from '../../store/scheduleStore.js';
 import {
-  STYLES, getEarlyBaseDate,
-  setStyledCell, setSheetCols, updateSheetRange, appendOrReplaceSheet,
+  STYLES, getEarlyBaseDate, thinBorder,
+  setStyledCell, updateSheetRange, appendOrReplaceSheet,
   applyA4LandscapePrintSetup, YEARLY_TREND_SHEET
 } from '../sheetUtils.js';
 
-export function writeYearlyTrendSheet(wb, targetYear) {
-  const ws = {};
-  const months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-  const rowHeights = [];
+/** 呼吸器リハ（マスター未登録時のフォールバック点数） */
+const RESPIRATORY_FALLBACK_POINTS = 85;
 
-  const monthlyData = months.map((m) => {
-    try {
-      return aggregateFromAppSchedule(targetYear, m);
-    } catch (_) {
-      return { patientMap: {}, dailyBreakdown: {} };
-    }
-  });
+/** 診療報酬年度の月順（4月始まり） */
+const FISCAL_MONTHS = Object.freeze([4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3]);
 
-  const statsList = months.map(() => ({
-    inUnits: 0, outUnits: 0, totalUnits: 0,
-    analgesiaCount: 0,
-    inAmount: 0, outAmount: 0, totalAmount: 0,
-    inLoco: 0, inCerebro: 0, inDisuse: 0,
-    outLoco: 0, outCerebro: 0, outDisuse: 0
-  }));
+/**
+ * 対象年月から診療報酬年度の開始年（4月の西暦年）を求める
+ * @param {number} year
+ * @param {number} [month=4]
+ * @returns {number}
+ */
+export function resolveFiscalStartYear(year, month = 4) {
+  const y = Number(year) || new Date().getFullYear();
+  const m = Number(month) || 4;
+  return m >= 4 ? y : y - 1;
+}
 
-  monthlyData.forEach((mAgg, mIdx) => {
-    const st = statsList[mIdx];
-    Object.values(mAgg.patientMap || {}).forEach((item) => {
-      const p = item.patient;
-      const isInput = p.category === 'INPATIENT';
-      const baseEarlyDate = getEarlyBaseDate(p);
+/**
+ * 年度内インデックス(0=4月) → { calendarYear, month }
+ * @param {number} fiscalStartYear
+ * @param {number} fiscalIndex 0..11
+ */
+function fiscalIndexToYm(fiscalStartYear, fiscalIndex) {
+  const month = FISCAL_MONTHS[fiscalIndex];
+  const calendarYear = month >= 4 ? fiscalStartYear : fiscalStartYear + 1;
+  return { calendarYear, month };
+}
 
-      item.slots.forEach((s) => {
-        if (s.isAnalgesia) {
-          if (!isInput) {
-            st.analgesiaCount += 1;
-            st.outAmount += 35 * 10;
-            st.totalAmount += 35 * 10;
-          }
-          return;
+function emptyDiseaseBucket() {
+  return { units: 0, points: 0, count: 0 };
+}
+
+function emptyMonthStats() {
+  return {
+    in: {
+      CEREBROVASCULAR: emptyDiseaseBucket(),
+      DISUSE: emptyDiseaseBucket(),
+      LOCOMOTIVE: emptyDiseaseBucket(),
+      RESPIRATORY: emptyDiseaseBucket(),
+      units: 0,
+      points: 0
+    },
+    out: {
+      CEREBROVASCULAR: emptyDiseaseBucket(),
+      DISUSE: emptyDiseaseBucket(),
+      LOCOMOTIVE: emptyDiseaseBucket(),
+      ANALGESIA: emptyDiseaseBucket(),
+      units: 0,
+      points: 0
+    },
+    early: emptyDiseaseBucket(),
+    plan: emptyDiseaseBucket(),
+    grandUnits: 0,
+    grandPoints: 0
+  };
+}
+
+function resolveDiseaseKey(patient) {
+  const t = String(patient?.diseaseType || '').toUpperCase();
+  if (t === 'CEREBROVASCULAR' || t === 'DISUSE' || t === 'LOCOMOTIVE' || t === 'RESPIRATORY' || t === 'ANALGESIA') {
+    return t;
+  }
+  if (t === 'CARDIAC' || t === 'CARDIOVASCULAR') return 'CEREBROVASCULAR';
+  if (t.includes('RESP')) return 'RESPIRATORY';
+  return 'LOCOMOTIVE';
+}
+
+/**
+ * 1ヶ月分の入外・疾患別・加算実績を集計（単位 / 点数）
+ * @param {object} aggregated
+ * @returns {ReturnType<typeof emptyMonthStats>}
+ */
+function aggregateMonthTrendStats(aggregated) {
+  const st = emptyMonthStats();
+  Object.values(aggregated?.patientMap || {}).forEach((item) => {
+    const p = item?.patient;
+    if (!p) return;
+    const isIn = p.category === 'INPATIENT';
+    const baseEarlyDate = getEarlyBaseDate(p);
+
+    (item.slots || []).forEach((s) => {
+      if (!s) return;
+
+      // 消炎鎮痛等処置（外来件数）
+      if (s.isAnalgesia || p.diseaseType === 'ANALGESIA') {
+        if (!isIn) {
+          const pts = Number(REHA_RULES.LIMIT_DAYS.ANALGESIA?.defaultPoints) || 35;
+          st.out.ANALGESIA.count += 1;
+          st.out.ANALGESIA.points += pts;
+          st.out.points += pts;
+          st.grandPoints += pts;
         }
+        return;
+      }
 
-        const u = s.units || 1;
-        const dType = (p.diseaseType && p.diseaseType !== 'ANALGESIA') ? p.diseaseType : 'LOCOMOTIVE';
-        const unitPts = getDailyBasePoints(p, s.date).points
-          || REHA_RULES.LIMIT_DAYS[dType]?.defaultPoints
-          || 170;
-        const yen = u * unitPts * 10;
+      const u = Number(s.units) || 1;
+      const dKey = resolveDiseaseKey(p);
+      const rate = getDailyBasePoints(p, s.date);
+      let unitPts = Number(rate?.points);
+      if (!Number.isFinite(unitPts) || unitPts <= 0) {
+        if (dKey === 'RESPIRATORY') unitPts = RESPIRATORY_FALLBACK_POINTS;
+        else unitPts = Number(REHA_RULES.LIMIT_DAYS[dKey]?.defaultPoints) || 170;
+      }
+      const linePts = u * unitPts;
 
-        if (isInput) {
-          st.inUnits += u;
-          st.inAmount += yen;
-          if (dType === 'LOCOMOTIVE') st.inLoco += u;
-          else if (dType === 'CEREBROVASCULAR') st.inCerebro += u;
-          else if (dType === 'DISUSE') st.inDisuse += u;
+      if (isIn) {
+        const inKey = st.in[dKey] ? dKey : 'LOCOMOTIVE';
+        st.in[inKey].units += u;
+        st.in[inKey].points += linePts;
+        st.in.units += u;
+        st.in.points += linePts;
+      } else {
+        if (dKey === 'ANALGESIA') {
+          st.out.ANALGESIA.count += 1;
+          st.out.ANALGESIA.points += linePts;
+        } else if (st.out[dKey]) {
+          st.out[dKey].units += u;
+          st.out[dKey].points += linePts;
         } else {
-          st.outUnits += u;
-          st.outAmount += yen;
-          if (dType === 'LOCOMOTIVE') st.outLoco += u;
-          else if (dType === 'CEREBROVASCULAR') st.outCerebro += u;
-          else if (dType === 'DISUSE') st.outDisuse += u;
+          st.out.LOCOMOTIVE.units += u;
+          st.out.LOCOMOTIVE.points += linePts;
         }
+        st.out.units += u;
+        st.out.points += linePts;
+      }
 
-        st.totalUnits += u;
-        st.totalAmount += yen;
+      st.grandUnits += u;
+      st.grandPoints += linePts;
 
-        if (s.billingPlan && REHA_RULES.PLAN_POINTS[s.billingPlan]) {
-          const pPts = REHA_RULES.PLAN_POINTS[s.billingPlan];
-          const pYen = pPts * 10;
-          if (isInput) st.inAmount += pYen;
-          else st.outAmount += pYen;
-          st.totalAmount += pYen;
+      // 計画評価料
+      if (s.billingPlan && REHA_RULES.PLAN_POINTS[s.billingPlan]) {
+        const pPts = Number(REHA_RULES.PLAN_POINTS[s.billingPlan]) || 0;
+        st.plan.count += 1;
+        st.plan.points += pPts;
+        st.grandPoints += pPts;
+      }
+
+      // 早期加算（入院のみ）
+      if (isIn && baseEarlyDate && s.date) {
+        const ph = evaluateEarlyBonusPhase(baseEarlyDate, s.date, 'INPATIENT');
+        if (ph.points > 0) {
+          const ePts = ph.points * u;
+          st.early.units += u;
+          st.early.count += 1;
+          st.early.points += ePts;
+          st.grandPoints += ePts;
         }
-
-        if (isInput && baseEarlyDate && s.date) {
-          const ph = evaluateEarlyBonusPhase(baseEarlyDate, s.date, 'INPATIENT');
-          if (ph.points > 0) {
-            const eYen = ph.points * u * 10;
-            st.inAmount += eYen;
-            st.totalAmount += eYen;
-          }
-        }
-      });
+      }
     });
   });
+  return st;
+}
 
-  setStyledCell(ws, 0, 0, `【${targetYear}年 リハビリテーション科 年間推移表 (1月〜12月 グラフ自動作成対応マトリクス)】`, {
+/**
+ * 年度12ヶ月分の統計配列を構築
+ * @param {number} fiscalStartYear
+ * @returns {ReturnType<typeof emptyMonthStats>[]}
+ */
+function buildFiscalYearStats(fiscalStartYear) {
+  return FISCAL_MONTHS.map((_, idx) => {
+    const { calendarYear, month } = fiscalIndexToYm(fiscalStartYear, idx);
+    try {
+      const agg = aggregateFromAppSchedule(calendarYear, month);
+      return aggregateMonthTrendStats(agg);
+    } catch (_) {
+      return emptyMonthStats();
+    }
+  });
+}
+
+function styleHeader() {
+  return {
+    font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: 'FFFFFF' } },
+    fill: { fgColor: { rgb: '1E293B' } },
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+    border: thinBorder()
+  };
+}
+
+function styleCat(fillRgb) {
+  return {
+    font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '0F172A' } },
+    fill: { fgColor: { rgb: fillRgb } },
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+    border: thinBorder()
+  };
+}
+
+function styleItem(zebra) {
+  return {
+    font: { name: 'Meiryo UI', sz: 8.5 },
+    fill: zebra ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } },
+    alignment: { horizontal: 'left', vertical: 'center' },
+    border: thinBorder()
+  };
+}
+
+function styleMetric(zebra) {
+  return {
+    font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: '475569' } },
+    fill: zebra ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: thinBorder()
+  };
+}
+
+function styleNum(zebra, emphasize) {
+  return {
+    font: {
+      name: 'Meiryo UI',
+      sz: 8.5,
+      bold: !!emphasize,
+      color: { rgb: emphasize ? '0F172A' : '334155' }
+    },
+    fill: zebra ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } },
+    alignment: { horizontal: 'right', vertical: 'center' },
+    border: thinBorder(),
+    numFmt: '#,##0'
+  };
+}
+
+function styleSubTotal() {
+  return {
+    font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '0F172A' } },
+    fill: { fgColor: { rgb: 'E2E8F0' } },
+    alignment: { horizontal: 'right', vertical: 'center' },
+    border: {
+      top: { style: 'thin', color: { rgb: '64748B' } },
+      bottom: { style: 'double', color: { rgb: '334155' } },
+      left: { style: 'thin', color: { rgb: 'CBD5E1' } },
+      right: { style: 'thin', color: { rgb: 'CBD5E1' } }
+    },
+    numFmt: '#,##0'
+  };
+}
+
+function styleGrand() {
+  return {
+    font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: 'FFFFFF' } },
+    fill: { fgColor: { rgb: '0F172A' } },
+    alignment: { horizontal: 'right', vertical: 'center' },
+    border: {
+      top: { style: 'thin', color: { rgb: '0F172A' } },
+      bottom: { style: 'double', color: { rgb: '0F172A' } },
+      left: { style: 'thin', color: { rgb: '0F172A' } },
+      right: { style: 'thin', color: { rgb: '0F172A' } }
+    },
+    numFmt: '#,##0'
+  };
+}
+
+function sumArr(arr) {
+  return arr.reduce((a, b) => a + (Number(b) || 0), 0);
+}
+
+/**
+ * 1指標行を書き込む（月12列 + 合計）
+ * @returns {number} nextRow
+ */
+function writeMetricRow(ws, row, merges, opts) {
+  const {
+    catLabel, catFill, itemLabel, metricLabel,
+    monthValues, zebra, isSubtotal, isGrand, mergeCatRows
+  } = opts;
+
+  const total = sumArr(monthValues);
+  const catStyle = isGrand
+    ? { ...styleGrand(), alignment: { horizontal: 'center', vertical: 'center', wrapText: true } }
+    : (isSubtotal
+      ? { ...styleSubTotal(), alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, fill: { fgColor: { rgb: 'E2E8F0' } } }
+      : styleCat(catFill));
+  const itemStyle = isGrand
+    ? { ...styleGrand(), alignment: { horizontal: 'left', vertical: 'center' } }
+    : (isSubtotal
+      ? { ...styleSubTotal(), alignment: { horizontal: 'left', vertical: 'center' } }
+      : styleItem(zebra));
+  const metricStyle = isGrand
+    ? { ...styleGrand(), alignment: { horizontal: 'center', vertical: 'center' } }
+    : (isSubtotal
+      ? { ...styleSubTotal(), alignment: { horizontal: 'center', vertical: 'center' } }
+      : styleMetric(zebra));
+  const numStyle = isGrand ? styleGrand() : (isSubtotal ? styleSubTotal() : styleNum(zebra, false));
+  const totalStyle = isGrand ? styleGrand() : (isSubtotal ? styleSubTotal() : styleNum(zebra, true));
+
+  setStyledCell(ws, row, 0, catLabel || '', catStyle);
+  setStyledCell(ws, row, 1, itemLabel || '', itemStyle);
+  setStyledCell(ws, row, 2, metricLabel || '', metricStyle);
+  monthValues.forEach((v, i) => {
+    setStyledCell(ws, row, 3 + i, Number(v) || 0, numStyle);
+  });
+  setStyledCell(ws, row, 15, total, totalStyle);
+
+  if (mergeCatRows && mergeCatRows > 1) {
+    merges.push({ s: { r: row, c: 0 }, e: { r: row + mergeCatRows - 1, c: 0 } });
+  }
+  return row + 1;
+}
+
+/**
+ * 年間推移シートを生成（点数票準拠・A4横 fitToWidth=1）
+ * @param {Object} wb
+ * @param {number} year 基準年（集計月の西暦）
+ * @param {number} [month] 基準月（1-12）。省略時は4月扱い＝その年の年度
+ */
+export function writeYearlyTrendSheet(wb, year, month) {
+  const fiscalStartYear = resolveFiscalStartYear(year, month || 4);
+  const fiscalEndYear = fiscalStartYear + 1;
+  const statsList = buildFiscalYearStats(fiscalStartYear);
+
+  const ws = {};
+  const merges = [];
+  const rowHeights = [];
+  let r = 0;
+
+  // タイトル
+  setStyledCell(ws, r, 0, `【${fiscalStartYear}年度 リハビリテーション科 年間推移（${fiscalStartYear}年4月〜${fiscalEndYear}年3月）】`, {
     font: { name: 'Meiryo UI', sz: 12, bold: true, color: { rgb: '0F172A' } }
   });
-  rowHeights[0] = 30;
+  merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 15 } });
+  rowHeights[r] = 28;
+  r += 1;
 
-  setStyledCell(ws, 1, 0, `💡【グラフのワンクリック作成方法】 下記の「表①」または「表②」の範囲を選び、キーボードの「Alt + F1」（またはメニューの「挿入」→「おすすめグラフ」）を押すと、一瞬で綺麗な折れ線・棒グラフが完成します。`, {
-    font: { name: 'Meiryo UI', sz: 8.5, color: { rgb: '0369A1' }, bold: true }
+  setStyledCell(ws, r, 0, '点数票準拠マトリクス／大区分×疾患・項目×指標（単位数・点数）／A4横・横幅1ページ収容', {
+    font: { name: 'Meiryo UI', sz: 8, color: { rgb: '64748B' } }
   });
-  rowHeights[1] = 20;
+  merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: 15 } });
+  rowHeights[r] = 18;
+  r += 1;
 
-  // 表①：単位数推移
-  setStyledCell(ws, 3, 0, '■ 表①：月別 リハビリ実施単位数 推移 (棒グラフ用)', {
-    font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: '1E40AF' } }
+  // ヘッダー
+  const headerRow = r;
+  const headers = [
+    '大区分', '疾患・項目名', '指標',
+    '4月', '5月', '6月', '7月', '8月', '9月',
+    '10月', '11月', '12月', '1月', '2月', '3月',
+    '年度合計'
+  ];
+  headers.forEach((h, c) => setStyledCell(ws, headerRow, c, h, styleHeader()));
+  rowHeights[headerRow] = 22;
+  r = headerRow + 1;
+
+  const monthVals = (picker) => statsList.map((st) => picker(st));
+
+  // —— 入院（8行: 4疾患 × 単位/点数）——
+  const inStart = r;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '入院',
+    catFill: 'FEF3C7',
+    itemLabel: '脳血管疾患等リハビリテーション料',
+    metricLabel: '単位数',
+    monthValues: monthVals((s) => s.in.CEREBROVASCULAR.units),
+    zebra: false,
+    mergeCatRows: 8
   });
-  rowHeights[3] = 24;
-
-  const t1Headers = ['対象月', '入院 単位数', '外来 単位数', '個別リハ 合計単位', '消炎鎮痛 (件数)'];
-  t1Headers.forEach((h, cIdx) => {
-    setStyledCell(ws, 4, cIdx, h, { ...STYLES.headerNavy, fill: { fgColor: { rgb: '1E3A8A' } } });
+  rowHeights[r - 1] = 18;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '',
+    catFill: 'FEF3C7',
+    itemLabel: '脳血管疾患等リハビリテーション料',
+    metricLabel: '点数',
+    monthValues: monthVals((s) => s.in.CEREBROVASCULAR.points),
+    zebra: true
   });
-  rowHeights[4] = 24;
-
-  let rIdx = 5;
-  let sumInU = 0, sumOutU = 0, sumTotU = 0, sumAnaC = 0;
-
-  months.forEach((m, idx) => {
-    const st = statsList[idx];
-    const bg = (idx % 2 === 1) ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } };
-
-    setStyledCell(ws, rIdx, 0, `${m}月`, { ...STYLES.cellCenter, font: { bold: true }, fill: bg });
-    setStyledCell(ws, rIdx, 1, st.inUnits, { ...STYLES.cellRight, fill: bg, numFmt: '#,##0' });
-    setStyledCell(ws, rIdx, 2, st.outUnits, { ...STYLES.cellRight, fill: bg, numFmt: '#,##0' });
-    setStyledCell(ws, rIdx, 3, st.totalUnits, { ...STYLES.cellRight, fill: bg, font: { bold: true, color: { rgb: '1E40AF' } }, numFmt: '#,##0' });
-    setStyledCell(ws, rIdx, 4, st.analgesiaCount, { ...STYLES.cellRight, fill: bg, numFmt: '#,##0', font: { color: { rgb: '15803D' } } });
-
-    sumInU += st.inUnits;
-    sumOutU += st.outUnits;
-    sumTotU += st.totalUnits;
-    sumAnaC += st.analgesiaCount;
-
-    rowHeights[rIdx] = 20;
-    rIdx++;
+  rowHeights[r - 1] = 18;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '',
+    catFill: 'FEF3C7',
+    itemLabel: '廃用症候群リハビリテーション料',
+    metricLabel: '単位数',
+    monthValues: monthVals((s) => s.in.DISUSE.units),
+    zebra: false
   });
-
-  setStyledCell(ws, rIdx, 0, '年間合計', { ...STYLES.cellSubTotal, alignment: { horizontal: 'center' } });
-  setStyledCell(ws, rIdx, 1, sumInU, { ...STYLES.cellSubTotal, alignment: { horizontal: 'right' }, numFmt: '#,##0' });
-  setStyledCell(ws, rIdx, 2, sumOutU, { ...STYLES.cellSubTotal, alignment: { horizontal: 'right' }, numFmt: '#,##0' });
-  setStyledCell(ws, rIdx, 3, sumTotU, { ...STYLES.cellSubTotal, alignment: { horizontal: 'right' }, numFmt: '#,##0', font: { bold: true, color: { rgb: '1E40AF' } } });
-  setStyledCell(ws, rIdx, 4, sumAnaC, { ...STYLES.cellSubTotal, alignment: { horizontal: 'right' }, numFmt: '#,##0', font: { bold: true, color: { rgb: '15803D' } } });
-  rowHeights[rIdx] = 24;
-  rIdx++;
-
-  // 表②：売上推移
-  rIdx++;
-  rowHeights[rIdx - 1] = 14;
-
-  setStyledCell(ws, rIdx, 0, '■ 表②：月別 リハビリ科 売上金額 推移 (折れ線グラフ用)', {
-    font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: '065F46' } }
+  rowHeights[r - 1] = 18;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '',
+    catFill: 'FEF3C7',
+    itemLabel: '廃用症候群リハビリテーション料',
+    metricLabel: '点数',
+    monthValues: monthVals((s) => s.in.DISUSE.points),
+    zebra: true
   });
-  rowHeights[rIdx] = 24;
-  rIdx++;
-
-  const t2Headers = ['対象月', '入院 売上 (¥)', '外来 売上 (¥)', 'リハ科 総売上金額 (¥)'];
-  t2Headers.forEach((h, cIdx) => {
-    setStyledCell(ws, rIdx, cIdx, h, { ...STYLES.headerNavy, fill: { fgColor: { rgb: '065F46' } } });
+  rowHeights[r - 1] = 18;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '',
+    catFill: 'FEF3C7',
+    itemLabel: '運動器リハビリテーション料',
+    metricLabel: '単位数',
+    monthValues: monthVals((s) => s.in.LOCOMOTIVE.units),
+    zebra: false
   });
-  rowHeights[rIdx] = 24;
-  rIdx++;
-
-  let sumInY = 0, sumOutY = 0, sumTotY = 0;
-
-  months.forEach((m, idx) => {
-    const st = statsList[idx];
-    const bg = (idx % 2 === 1) ? STYLES.cellZebra : { fgColor: { rgb: 'FFFFFF' } };
-
-    setStyledCell(ws, rIdx, 0, `${m}月`, { ...STYLES.cellCenter, font: { bold: true }, fill: bg });
-    setStyledCell(ws, rIdx, 1, st.inAmount, { ...STYLES.cellRight, fill: bg, numFmt: '¥#,##0' });
-    setStyledCell(ws, rIdx, 2, st.outAmount, { ...STYLES.cellRight, fill: bg, numFmt: '¥#,##0' });
-    setStyledCell(ws, rIdx, 3, st.totalAmount, { ...STYLES.cellRight, fill: bg, font: { bold: true, color: { rgb: '047857' } }, numFmt: '¥#,##0' });
-
-    sumInY += st.inAmount;
-    sumOutY += st.outAmount;
-    sumTotY += st.totalAmount;
-
-    rowHeights[rIdx] = 20;
-    rIdx++;
+  rowHeights[r - 1] = 18;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '',
+    catFill: 'FEF3C7',
+    itemLabel: '運動器リハビリテーション料',
+    metricLabel: '点数',
+    monthValues: monthVals((s) => s.in.LOCOMOTIVE.points),
+    zebra: true
   });
+  rowHeights[r - 1] = 18;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '',
+    catFill: 'FEF3C7',
+    itemLabel: '呼吸器リハビリテーション料',
+    metricLabel: '単位数',
+    monthValues: monthVals((s) => s.in.RESPIRATORY.units),
+    zebra: false
+  });
+  rowHeights[r - 1] = 18;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '',
+    catFill: 'FEF3C7',
+    itemLabel: '呼吸器リハビリテーション料',
+    metricLabel: '点数',
+    monthValues: monthVals((s) => s.in.RESPIRATORY.points),
+    zebra: true
+  });
+  rowHeights[r - 1] = 18;
+  // 入院小計
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '入院',
+    catFill: 'E2E8F0',
+    itemLabel: '※ 小計：入院単位合計',
+    metricLabel: '単位数',
+    monthValues: monthVals((s) => s.in.units),
+    isSubtotal: true
+  });
+  rowHeights[r - 1] = 20;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '入院',
+    catFill: 'E2E8F0',
+    itemLabel: '※ 小計：入院点数合計',
+    metricLabel: '点数',
+    monthValues: monthVals((s) => s.in.points),
+    isSubtotal: true
+  });
+  rowHeights[r - 1] = 20;
+  // 入院カテゴリ結合は先頭8行のみ（小計は別表示）
+  void inStart;
 
-  setStyledCell(ws, rIdx, 0, '年間合計', { ...STYLES.cellSubTotal, alignment: { horizontal: 'center' } });
-  setStyledCell(ws, rIdx, 1, sumInY, { ...STYLES.cellSubTotal, alignment: { horizontal: 'right' }, numFmt: '¥#,##0' });
-  setStyledCell(ws, rIdx, 2, sumOutY, { ...STYLES.cellSubTotal, alignment: { horizontal: 'right' }, numFmt: '¥#,##0' });
-  setStyledCell(ws, rIdx, 3, sumTotY, { ...STYLES.cellSubTotal, alignment: { horizontal: 'right' }, numFmt: '¥#,##0', font: { bold: true, color: { rgb: '047857' } } });
-  rowHeights[rIdx] = 24;
+  // —— 外来 ——
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '外来',
+    catFill: 'DBEAFE',
+    itemLabel: '脳血管疾患等リハビリテーション料',
+    metricLabel: '単位数',
+    monthValues: monthVals((s) => s.out.CEREBROVASCULAR.units),
+    zebra: false,
+    mergeCatRows: 8
+  });
+  rowHeights[r - 1] = 18;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '',
+    catFill: 'DBEAFE',
+    itemLabel: '脳血管疾患等リハビリテーション料',
+    metricLabel: '点数',
+    monthValues: monthVals((s) => s.out.CEREBROVASCULAR.points),
+    zebra: true
+  });
+  rowHeights[r - 1] = 18;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '',
+    catFill: 'DBEAFE',
+    itemLabel: '廃用症候群リハビリテーション料',
+    metricLabel: '単位数',
+    monthValues: monthVals((s) => s.out.DISUSE.units),
+    zebra: false
+  });
+  rowHeights[r - 1] = 18;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '',
+    catFill: 'DBEAFE',
+    itemLabel: '廃用症候群リハビリテーション料',
+    metricLabel: '点数',
+    monthValues: monthVals((s) => s.out.DISUSE.points),
+    zebra: true
+  });
+  rowHeights[r - 1] = 18;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '',
+    catFill: 'DBEAFE',
+    itemLabel: '運動器リハビリテーション料',
+    metricLabel: '単位数',
+    monthValues: monthVals((s) => s.out.LOCOMOTIVE.units),
+    zebra: false
+  });
+  rowHeights[r - 1] = 18;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '',
+    catFill: 'DBEAFE',
+    itemLabel: '運動器リハビリテーション料',
+    metricLabel: '点数',
+    monthValues: monthVals((s) => s.out.LOCOMOTIVE.points),
+    zebra: true
+  });
+  rowHeights[r - 1] = 18;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '',
+    catFill: 'DBEAFE',
+    itemLabel: '消炎鎮痛等処置',
+    metricLabel: '件数',
+    monthValues: monthVals((s) => s.out.ANALGESIA.count),
+    zebra: false
+  });
+  rowHeights[r - 1] = 18;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '',
+    catFill: 'DBEAFE',
+    itemLabel: '消炎鎮痛等処置',
+    metricLabel: '点数',
+    monthValues: monthVals((s) => s.out.ANALGESIA.points),
+    zebra: true
+  });
+  rowHeights[r - 1] = 18;
 
-  setSheetCols(ws, [14, 18, 18, 22, 18]);
-  ws['!rows'] = rowHeights.map((h) => ({ hpt: h || 20 }));
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '外来',
+    catFill: 'E2E8F0',
+    itemLabel: '※ 小計：外来単位合計',
+    metricLabel: '単位数',
+    monthValues: monthVals((s) => s.out.units),
+    isSubtotal: true
+  });
+  rowHeights[r - 1] = 20;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '外来',
+    catFill: 'E2E8F0',
+    itemLabel: '※ 小計：外来点数合計',
+    metricLabel: '点数',
+    monthValues: monthVals((s) => s.out.points),
+    isSubtotal: true
+  });
+  rowHeights[r - 1] = 20;
 
+  // —— 加算・管理料 ——
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '加算・管理料',
+    catFill: 'D1FAE5',
+    itemLabel: '早期リハビリテーション加算',
+    metricLabel: '単位数',
+    monthValues: monthVals((s) => s.early.units),
+    zebra: false,
+    mergeCatRows: 4
+  });
+  rowHeights[r - 1] = 18;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '',
+    catFill: 'D1FAE5',
+    itemLabel: '早期リハビリテーション加算',
+    metricLabel: '点数',
+    monthValues: monthVals((s) => s.early.points),
+    zebra: true
+  });
+  rowHeights[r - 1] = 18;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '',
+    catFill: 'D1FAE5',
+    itemLabel: 'リハビリテーション総合計画評価料',
+    metricLabel: '件数',
+    monthValues: monthVals((s) => s.plan.count),
+    zebra: false
+  });
+  rowHeights[r - 1] = 18;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '',
+    catFill: 'D1FAE5',
+    itemLabel: 'リハビリテーション総合計画評価料',
+    metricLabel: '点数',
+    monthValues: monthVals((s) => s.plan.points),
+    zebra: true
+  });
+  rowHeights[r - 1] = 18;
+
+  // —— 総合計 ——
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '総合計',
+    catFill: '0F172A',
+    itemLabel: 'リハビリテーション科 総単位数',
+    metricLabel: '単位数',
+    monthValues: monthVals((s) => s.grandUnits),
+    isGrand: true,
+    mergeCatRows: 2
+  });
+  rowHeights[r - 1] = 22;
+  r = writeMetricRow(ws, r, merges, {
+    catLabel: '',
+    catFill: '0F172A',
+    itemLabel: '診療報酬 請求総点数',
+    metricLabel: '点数',
+    monthValues: monthVals((s) => s.grandPoints),
+    isGrand: true
+  });
+  rowHeights[r - 1] = 22;
+
+  // 列幅（A4横 fitToWidth=1 向けに詰める）
+  ws['!cols'] = [
+    { wch: 12 },  // 大区分
+    { wch: 28 },  // 疾患・項目
+    { wch: 7 },   // 指標
+    ...Array.from({ length: 12 }, () => ({ wch: 6.2 })),
+    { wch: 9 }    // 年度合計
+  ];
+  ws['!rows'] = rowHeights.map((h) => ({ hpt: h || 18 }));
+  ws['!merges'] = merges;
+  ws['!views'] = [{ showGridLines: true }];
+  ws['!freeze'] = { xSplit: 3, ySplit: headerRow + 1, topLeftCell: 'D4', activePane: 'bottomRight', state: 'frozen' };
+
+  // ★A4横・横幅1ページ絶対収容
   applyA4LandscapePrintSetup(ws, false);
+  ws['!margins'] = {
+    left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2
+  };
+  ws['!pageSetup'] = {
+    ...(ws['!pageSetup'] || {}),
+    paperSize: 9,
+    orientation: 'landscape',
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: 0,
+    scale: 100
+  };
+  ws['!sheetPr'] = { pageSetUpPr: { fitToPage: true } };
+  ws['!rehaPrintSetup'] = {
+    paperSize: 9,
+    orientation: 'landscape',
+    fitToWidth: 1,
+    fitToHeight: 0,
+    fitHeight: false,
+    scale: 100,
+    margins: {
+      left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2
+    }
+  };
+
   updateSheetRange(ws);
   appendOrReplaceSheet(wb, ws, YEARLY_TREND_SHEET);
 }

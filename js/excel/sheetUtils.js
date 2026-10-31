@@ -3,7 +3,7 @@
 // ★印刷デフォルト: A4横向きを OpenXML へ確実注入（xlsx-js-style は !pageSetup を書き出さないため ZIP 後処理で補強）
 
 export const SUMMARY_SHEET = 'レセプト収益サマリー';
-export const YEARLY_TREND_SHEET = '年間推移 (入外別)';
+export const YEARLY_TREND_SHEET = '年間推移';
 export const ANALGESIA_SHEET = '実施ﾘｽﾄ 消炎鎮痛';
 
 export const STYLES = {
