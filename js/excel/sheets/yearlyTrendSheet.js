@@ -403,7 +403,7 @@ export function writeYearlyTrendSheet(wb, year, _month) {
   const histNote = (calendarYear === 2026)
     ? '1〜9月=点数票確定値（fy2026_annual_historical_score_data）／10月=ライブ集計／11・12月=空欄'
     : '月次ライブ集計（履歴モジュール対象外年）';
-  setStyledCell(ws, r, 0, `点数票準拠／${histNote}／A4横・表=1ページ／グラフ=2ページ目`, {
+  setStyledCell(ws, r, 0, `点数票準拠／${histNote}／A4横 fitToWidth=1`, {
     font: { name: 'Meiryo UI', sz: 8.5, color: { rgb: '64748B' } }
   });
   merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: 15 } });
@@ -594,31 +594,18 @@ export function writeYearlyTrendSheet(wb, year, _month) {
   }));
   rowHeights[r - 1] = 17;
 
-  // 表領域を Excel 行30までに揃え、その直後で改ページ（2ページ目＝グラフ）
-  // r は次の空き行（0始まり）。最終データ行 = r-1 → Excel行 = r
-  while (r < 29) {
+  // 表を Excel 行30までに揃え、31〜33は空行、34行目からグラフ（手動改ページは使わない）
+  while (r < 30) {
     rowHeights[r] = rowHeights[r] || 4;
     r += 1;
   }
-  // Excel 行30（0始まり index 29）: ページ境界マーカー
-  const pageBreakExcelRow = 30;
-  const spacerRow0 = pageBreakExcelRow - 1;
-  setStyledCell(ws, spacerRow0, 0, '▼ 次ページ：主要疾患別（入院＋外来合算）単位数推移グラフ', {
-    font: { name: 'Meiryo UI', sz: 8, italic: true, color: { rgb: '64748B' } }
-  });
-  merges.push({ s: { r: spacerRow0, c: 0 }, e: { r: spacerRow0, c: 15 } });
-  rowHeights[spacerRow0] = 14;
-  r = Math.max(r, spacerRow0 + 1);
+  // Excel 31〜33（0始まり 30〜32）: 空行バッファ（セル・結合なし）
+  for (let emptyR = 30; emptyR <= 32; emptyR += 1) {
+    rowHeights[emptyR] = 12;
+  }
 
-  // —— Page 2: チャート ——
-  const chartCaptionRow = r;
-  setStyledCell(ws, chartCaptionRow, 0,
-    '■ 主要疾患別 単位数推移（1月〜12月／入院＋外来合算）　青=脳血管　橙=運動器　緑=廃用症候群　※静的画像', {
-      font: { name: 'Meiryo UI', sz: 10, bold: true, color: { rgb: '0F172A' } }
-    });
-  merges.push({ s: { r: chartCaptionRow, c: 0 }, e: { r: chartCaptionRow, c: 15 } });
-  rowHeights[chartCaptionRow] = 22;
-  const chartAnchorRow = chartCaptionRow + 1;
+  // Excel 34行目（0始まり 33）から合算グラフを配置（タイトルは PNG 内に描画済み）
+  const chartAnchorRow = 33;
 
   const pickCombinedUnits = (inKey, outKey) => statsList.map((s) => {
     if (s.isBlank) return 0;
@@ -641,7 +628,7 @@ export function writeYearlyTrendSheet(wb, year, _month) {
     });
     if (chart?.png) {
       ws['!rehaEmbeddedImages'] = [{
-        name: `${calendarYear}年_主要疾患別単位推移`,
+        name: 'disease_trend_chart',
         png: chart.png,
         fromCol: 0,
         fromRow: chartAnchorRow,
@@ -667,10 +654,8 @@ export function writeYearlyTrendSheet(wb, year, _month) {
   ws['!merges'] = merges;
   ws['!views'] = [{ showGridLines: true }];
   ws['!freeze'] = { xSplit: 3, ySplit: headerRow + 1, topLeftCell: 'D4', activePane: 'bottomRight', state: 'frozen' };
-  // 表（〜行30）の直後で改ページ → グラフは2ページ目
-  ws['!rehaRowBreaks'] = [pageBreakExcelRow];
+  // 手動 rowBreaks / pageBreak は注入しない（sheet XML 破損防止）
 
-  // 横1ページ固定。縦は改ページで自然分割（fitToHeight=0）し表の可読性を優先
   applyA4LandscapePrintSetup(ws, false);
   ws['!margins'] = {
     left: 0.3, right: 0.3, top: 0.35, bottom: 0.35, header: 0.15, footer: 0.15

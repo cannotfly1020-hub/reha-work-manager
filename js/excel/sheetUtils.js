@@ -339,62 +339,6 @@ export function injectA4LandscapeIntoSheetXml(xml, fitHeight = false, orientatio
 }
 
 /**
- * worksheet XML に手動横改ページ（rowBreaks）を注入する
- * OOXML 子要素順: pageMargins → pageSetup → headerFooter → rowBreaks → … → drawing
- * （pageMargins / pageSetup の前に入れると Excel が sheet XML を破棄する）
- * OOXML: brk@id = その行の直後で改ページ（1始まり）
- * @param {string} xml
- * @param {number[]} rowIdsAfter Excel行番号（1始まり）の配列
- * @returns {string}
- */
-export function injectRowBreaksIntoSheetXml(xml, rowIdsAfter) {
-  if (!xml || typeof xml !== 'string') return xml;
-  const ids = (Array.isArray(rowIdsAfter) ? rowIdsAfter : [])
-    .map((n) => Number(n))
-    .filter((n) => Number.isFinite(n) && n >= 1)
-    .map((n) => Math.floor(n));
-  if (!ids.length) return xml;
-
-  const uniq = [...new Set(ids)].sort((a, b) => a - b);
-  const brks = uniq
-    .map((id) => `<brk id="${id}" max="16383" man="1"/>`)
-    .join('');
-  const tag = `<rowBreaks count="${uniq.length}" manualBreakCount="${uniq.length}">${brks}</rowBreaks>`;
-
-  let out = xml;
-  if (/<rowBreaks\b[\s\S]*?<\/rowBreaks>/.test(out)) {
-    out = out.replace(/<rowBreaks\b[\s\S]*?<\/rowBreaks>/, tag);
-    return out;
-  }
-
-  // 正しい位置: headerFooter / pageSetup / pageMargins の「直後」、drawing 系の「直前」
-  if (/<headerFooter\b[^>]*\/>/.test(out)) {
-    out = out.replace(/(<headerFooter\b[^>]*\/>)/, `$1${tag}`);
-  } else if (/<\/headerFooter>/.test(out)) {
-    out = out.replace(/<\/headerFooter>/, `</headerFooter>${tag}`);
-  } else if (/<pageSetup\b[^>]*\/>/.test(out)) {
-    out = out.replace(/(<pageSetup\b[^>]*\/>)/, `$1${tag}`);
-  } else if (/<\/pageSetup>/.test(out)) {
-    out = out.replace(/<\/pageSetup>/, `</pageSetup>${tag}`);
-  } else if (/<pageMargins\b[^>]*\/>/.test(out)) {
-    out = out.replace(/(<pageMargins\b[^>]*\/>)/, `$1${tag}`);
-  } else if (/<\/pageMargins>/.test(out)) {
-    out = out.replace(/<\/pageMargins>/, `</pageMargins>${tag}`);
-  } else if (/<colBreaks\b/.test(out)) {
-    out = out.replace(/<colBreaks\b/, `${tag}<colBreaks`);
-  } else if (/<drawing\b/.test(out)) {
-    out = out.replace(/<drawing\b/, `${tag}<drawing`);
-  } else if (/<legacyDrawing\b/.test(out)) {
-    out = out.replace(/<legacyDrawing\b/, `${tag}<legacyDrawing`);
-  } else if (/<extLst\b/.test(out)) {
-    out = out.replace(/<extLst\b/, `${tag}<extLst`);
-  } else {
-    out = out.replace(/<\/worksheet>/, `${tag}</worksheet>`);
-  }
-  return out;
-}
-
-/**
  * STORE 方式の ZIP をエントリ配列へ展開する（圧縮エントリは非対応）
  * @param {Uint8Array} buf
  * @returns {{ name: string, data: Uint8Array, method: number }[]}
@@ -672,10 +616,7 @@ export function patchXlsxUint8ForA4Landscape(u8, wb) {
     const orientation = printSetup.orientation === 'portrait' ? 'portrait' : 'landscape';
     let xml = stringFromU8(entry.data);
     xml = injectA4LandscapeIntoSheetXml(xml, fitHeight, orientation);
-    const rowBreaks = (ws && Array.isArray(ws['!rehaRowBreaks'])) ? ws['!rehaRowBreaks'] : [];
-    if (rowBreaks.length) {
-      xml = injectRowBreaksIntoSheetXml(xml, rowBreaks);
-    }
+    // ※ rowBreaks / pageBreak の XML 注入は Excel 修復ダイアログの原因になるため行わない
     entry.data = u8FromString(xml);
     entry.method = 0;
 
