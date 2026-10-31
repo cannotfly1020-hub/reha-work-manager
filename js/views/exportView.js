@@ -122,11 +122,13 @@ async function handleExportUketsuke(monthInput) {
   showToast(`${year}年${month}月 受付提出用Excelを集計・生成中...`, 'info');
   try {
     await loadMonthOnDemand(year, month);
-    // 年間推移シート用: 診療報酬年度（4月〜翌3月）を先読み
-    const fiscalStart = resolveFiscalStartYear(year, month);
-    await loadFiscalYearOnDemand(fiscalStart);
-    // カレンダー年も可能な範囲で補完（他シート互換）
+    // 年間推移（暦年1〜12月）用に当該西暦年を先読み（10月ライブ集計含む）
     await loadYearOnDemand(year);
+    // 旧年度跨ぎ互換（未使用でも無害）
+    try {
+      const fiscalStart = resolveFiscalStartYear(year, month);
+      await loadFiscalYearOnDemand(fiscalStart);
+    } catch (_) { /* ignore */ }
     refreshArchiveStatusUi();
 
     const aggregated = aggregateFromAppSchedule(year, month);

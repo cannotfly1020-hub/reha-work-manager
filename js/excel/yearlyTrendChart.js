@@ -2,7 +2,13 @@
 // 年間推移シート埋め込み用コンボチャート（Canvas描画 → PNG）
 // 棒: 請求総点数 / 折れ線: 総単位数 ※マクロ不要・静的画像
 
-const MONTH_LABELS = Object.freeze([
+/** 暦年 1〜12月（デフォルト） */
+const MONTH_LABELS_CALENDAR = Object.freeze([
+  '1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'
+]);
+
+/** 旧・診療報酬年度（4月始まり）互換 */
+const MONTH_LABELS_FISCAL = Object.freeze([
   '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月', '1月', '2月', '3月'
 ]);
 
@@ -30,7 +36,9 @@ export function pngDataUrlToUint8(dataUrl) {
 /**
  * コンボチャートをオフスクリーンCanvasへ描画し PNG Uint8Array を返す
  * @param {{
- *   fiscalStartYear: number,
+ *   fiscalStartYear?: number,
+ *   calendarYear?: number,
+ *   calendarMode?: boolean,
  *   pointsByMonth: number[],
  *   unitsByMonth: number[],
  *   width?: number,
@@ -44,7 +52,9 @@ export function renderYearlyTrendChartPng(opts) {
   const height = Math.max(280, Number(opts?.height) || 360);
   const points = Array.isArray(opts?.pointsByMonth) ? opts.pointsByMonth.map((n) => Number(n) || 0) : [];
   const units = Array.isArray(opts?.unitsByMonth) ? opts.unitsByMonth.map((n) => Number(n) || 0) : [];
-  const fiscalStartYear = Number(opts?.fiscalStartYear) || new Date().getFullYear();
+  const calendarMode = opts?.calendarMode !== false;
+  const yearLabel = Number(opts?.calendarYear || opts?.fiscalStartYear) || new Date().getFullYear();
+  const MONTH_LABELS = calendarMode ? MONTH_LABELS_CALENDAR : MONTH_LABELS_FISCAL;
 
   const canvas = document.createElement('canvas');
   // HiDPI
@@ -79,7 +89,8 @@ export function renderYearlyTrendChartPng(opts) {
   ctx.fillStyle = '#0F172A';
   ctx.font = 'bold 15px "Meiryo UI", "Hiragino Sans", sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillText(`${fiscalStartYear}年度 リハビリ科 月次推移（請求総点数 × 総単位数）`, pad.left, 24);
+  const titleYear = calendarMode ? `${yearLabel}年` : `${yearLabel}年度`;
+  ctx.fillText(`${titleYear} リハビリ科 月次推移（請求総点数 × 総単位数）`, pad.left, 24);
 
   ctx.font = '11px "Meiryo UI", sans-serif';
   ctx.fillStyle = '#64748B';
