@@ -607,11 +607,12 @@ export function writeYearlyTrendSheet(wb, year, _month) {
     rowHeights[emptyR] = 12;
   }
 
-  // Excel 34行目（0始まり 33）から2グラフを左右配置
-  // 左=請求点数 / 右=3大疾患単位 ※rowBreaks 不使用・1 drawing に複数 PNG
+  // Excel 34行目（0始まり 33）から2グラフを左右対称配置（A4横2ページ目に収める）
+  // 左 A34=請求点数 / 右 I34=3大疾患単位 ※rowBreaks 不使用・1 drawing に複数 PNG
+  // Canvas 内部は 2倍（920×680）描画 → Excel ext は 460×340
   const chartAnchorRow = 33; // Excel row 34
   const chartW = 460;
-  const chartH = 320;
+  const chartH = 340;
 
   const monthNum = (picker) => statsList.map((s) => (s.isBlank ? 0 : (Number(picker(s)) || 0)));
   const pickCombinedUnits = (inKey, outKey) => statsList.map((s) => {
@@ -635,16 +636,17 @@ export function writeYearlyTrendSheet(wb, year, _month) {
       inpatientPointsByMonth,
       outpatientPointsByMonth,
       width: chartW,
-      height: chartH
+      height: chartH,
+      pixelRatio: 2
     });
     if (revenueChart?.png) {
       embedded.push({
         name: 'revenue_points_chart',
         png: revenueChart.png,
-        fromCol: 0, // A列
+        fromCol: 0, // A34
         fromRow: chartAnchorRow,
-        widthPx: revenueChart.widthPx,
-        heightPx: revenueChart.heightPx
+        widthPx: chartW,
+        heightPx: chartH
       });
     }
     const diseaseChart = renderDiseaseUnitsChartPng({
@@ -654,21 +656,23 @@ export function writeYearlyTrendSheet(wb, year, _month) {
       locomotiveUnits,
       disuseUnits,
       width: chartW,
-      height: chartH
+      height: chartH,
+      pixelRatio: 2
     });
     if (diseaseChart?.png) {
       embedded.push({
         name: 'disease_units_chart',
         png: diseaseChart.png,
-        fromCol: 8, // I列
+        fromCol: 8, // I34
         fromRow: chartAnchorRow,
-        widthPx: diseaseChart.widthPx,
-        heightPx: diseaseChart.heightPx
+        widthPx: chartW,
+        heightPx: chartH
       });
     }
     if (embedded.length) {
       ws['!rehaEmbeddedImages'] = embedded;
-      for (let i = 0; i < 18; i += 1) {
+      // 340px ≈ 約18行分の余白を確保（印刷時ページ2に収める）
+      for (let i = 0; i < 20; i += 1) {
         rowHeights[chartAnchorRow + i] = rowHeights[chartAnchorRow + i] || 15;
       }
     }
@@ -687,11 +691,10 @@ export function writeYearlyTrendSheet(wb, year, _month) {
   ws['!merges'] = merges;
   ws['!views'] = [{ showGridLines: true }];
   ws['!freeze'] = { xSplit: 3, ySplit: headerRow + 1, topLeftCell: 'D4', activePane: 'bottomRight', state: 'frozen' };
-  // 手動 rowBreaks / pageBreak は注入しない（sheet XML 破損防止）
-
-  applyA4LandscapePrintSetup(ws, false);
+  // 手動 rowBreaks は使わない。fitToHeight=2 で 表=1枚 / グラフ=1枚 に収容
+  applyA4LandscapePrintSetup(ws, 2);
   ws['!margins'] = {
-    left: 0.3, right: 0.3, top: 0.35, bottom: 0.35, header: 0.15, footer: 0.15
+    left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2
   };
   ws['!pageSetup'] = {
     ...(ws['!pageSetup'] || {}),
@@ -699,7 +702,7 @@ export function writeYearlyTrendSheet(wb, year, _month) {
     orientation: 'landscape',
     fitToPage: true,
     fitToWidth: 1,
-    fitToHeight: 0,
+    fitToHeight: 2,
     scale: 100
   };
   ws['!sheetPr'] = { pageSetUpPr: { fitToPage: true } };
@@ -707,11 +710,11 @@ export function writeYearlyTrendSheet(wb, year, _month) {
     paperSize: 9,
     orientation: 'landscape',
     fitToWidth: 1,
-    fitToHeight: 0,
-    fitHeight: false,
+    fitToHeight: 2,
+    fitHeight: true,
     scale: 100,
     margins: {
-      left: 0.3, right: 0.3, top: 0.35, bottom: 0.35, header: 0.15, footer: 0.15
+      left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2
     }
   };
 

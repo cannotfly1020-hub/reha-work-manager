@@ -102,12 +102,14 @@ export function getEarlyBaseDate(p) {
  * ※ xlsx-js-style 0.18.x は OOXML へ orientation / paperSize を書き出さないため、
  *    ここでの !pageSetup 設定に加え、write フックで sheet XML へ pageSetup を注入する。
  * @param {Object} ws - SheetJS ワークシートオブジェクト
- * @param {boolean} [fitHeight=false] - 縦も1ページに収めるか（true=サマリー等、false=リスト系は縦自動改ページ）
+ * @param {boolean|number} [fitHeight=false] - true→縦1ページ / 数値→fitToHeight（例: 2=表+グラフの2枚）
  */
 export function applyA4LandscapePrintSetup(ws, fitHeight = false) {
   if (!ws) return;
 
-  const fitToHeight = fitHeight ? 1 : 0;
+  const fitToHeight = typeof fitHeight === 'number'
+    ? Math.max(0, Math.floor(fitHeight))
+    : (fitHeight ? 1 : 0);
 
   // 1. ページセットアップの有効化フラグ（fitToPage）
   ws['!sheetPr'] = {
@@ -122,7 +124,7 @@ export function applyA4LandscapePrintSetup(ws, fitHeight = false) {
     paperSize: 9,              // 9 = A4
     orientation: 'landscape',  // ★確実にデフォルトを「横向き」に固定
     fitToWidth: 1,             // 横幅は必ず1ページに収める
-    fitToHeight: fitToHeight,  // 縦のページ収容指定
+    fitToHeight: fitToHeight,  // 縦のページ収容指定（0=自動 / 1 / 2…）
     scale: 100,
     fitToPage: true
   };
@@ -137,14 +139,22 @@ export function applyA4LandscapePrintSetup(ws, fitHeight = false) {
     footer: 0.2
   };
 
-  // 4. ZIP後処理用メタ（シート順で fitHeight を復元）
+  // 4. ZIP後処理用メタ（シート順で fitToHeight を復元）
   ws['!rehaPrintSetup'] = {
     paperSize: 9,
     orientation: 'landscape',
     fitToWidth: 1,
     fitToHeight: fitToHeight,
-    fitHeight: !!fitHeight,
-    scale: 100
+    fitHeight: fitToHeight > 0,
+    scale: 100,
+    margins: {
+      left: 0.3,
+      right: 0.3,
+      top: 0.4,
+      bottom: 0.4,
+      header: 0.2,
+      footer: 0.2
+    }
   };
 
   installXlsxA4LandscapeWriteHook();
@@ -277,28 +287,28 @@ function stringFromU8(u8) {
 }
 
 /**
- * worksheet XML に A4 landscape の pageSetup / sheetPr を注入・上書きする
- * @param {string} xml
- * @param {boolean} fitHeight
- * @returns {string}
- */
-/**
  * worksheet XML に A4 の pageSetup / sheetPr を注入・上書きする
  * @param {string} xml
- * @param {boolean} [fitHeight=false]
+ * @param {boolean|number} [fitHeight=false] true→1 / 数値→そのまま fitToHeight
  * @param {'landscape'|'portrait'} [orientation='landscape']
+ * @param {{ left?: number, right?: number, top?: number, bottom?: number, header?: number, footer?: number }|null} [margins]
  * @returns {string}
  */
-export function injectA4LandscapeIntoSheetXml(xml, fitHeight = false, orientation = 'landscape') {
+export function injectA4LandscapeIntoSheetXml(xml, fitHeight = false, orientation = 'landscape', margins = null) {
   if (!xml || typeof xml !== 'string') return xml;
   let out = xml;
-  const fitH = fitHeight ? 1 : 0;
+  const fitH = typeof fitHeight === 'number'
+    ? Math.max(0, Math.floor(fitHeight))
+    : (fitHeight ? 1 : 0);
   const orient = orientation === 'portrait' ? 'portrait' : 'landscape';
   const pageSetupTag =
     `<pageSetup paperSize="9" orientation="${orient}" fitToWidth="1" fitToHeight="${fitH}" scale="100"/>`;
-  // 左右0.3"（約7.6mm）で印字幅確保。横はみ出しは fitToWidth=1 で強制抑制
+  const m = {
+    left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2,
+    ...(margins && typeof margins === 'object' ? margins : {})
+  };
   const pageMarginsTag =
-    '<pageMargins left="0.3" right="0.3" top="0.4" bottom="0.4" header="0.2" footer="0.2"/>';
+    `<pageMargins left="${m.left}" right="${m.right}" top="${m.top}" bottom="${m.bottom}" header="${m.header}" footer="${m.footer}"/>`;
 
   // sheetPr / pageSetUpPr（fitToPage）
   if (/<sheetPr\b[^>]*\/>/.test(out)) {
@@ -633,10 +643,12 @@ export function patchXlsxUint8ForA4Landscape(u8, wb) {
     const sheetName = wb && Array.isArray(wb.SheetNames) ? wb.SheetNames[idx] : null;
     const ws = (sheetName && wb.Sheets) ? wb.Sheets[sheetName] : null;
     const printSetup = (ws && ws['!rehaPrintSetup']) ? ws['!rehaPrintSetup'] : {};
-    const fitHeight = !!printSetup.fitHeight;
+    const fitToHeight = Number.isFinite(Number(printSetup.fitToHeight))
+      ? Math.max(0, Math.floor(Number(printSetup.fitToHeight)))
+      : (printSetup.fitHeight ? 1 : 0);
     const orientation = printSetup.orientation === 'portrait' ? 'portrait' : 'landscape';
     let xml = stringFromU8(entry.data);
-    xml = injectA4LandscapeIntoSheetXml(xml, fitHeight, orientation);
+    xml = injectA4LandscapeIntoSheetXml(xml, fitToHeight, orientation, printSetup.margins || null);
     // ※ rowBreaks / pageBreak の XML 注入は Excel 修復ダイアログの原因になるため行わない
     entry.data = u8FromString(xml);
     entry.method = 0;

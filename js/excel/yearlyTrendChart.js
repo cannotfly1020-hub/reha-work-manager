@@ -32,21 +32,24 @@ export function pngDataUrlToUint8(dataUrl) {
 }
 
 /**
- * @param {number} width
- * @param {number} height
+ * 表示サイズで描画し、内部は scale 倍（既定2倍＝920×680 等）で鮮明化。
+ * Excel 貼付の ext は表示サイズ（width/height）を返す。
+ * @param {number} width 表示幅 px
+ * @param {number} height 表示高さ px
+ * @param {number} [scale=2]
  * @returns {{ canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, width: number, height: number }|null}
  */
-function createHiDpiCanvas(width, height) {
+function createHiDpiCanvas(width, height, scale = 2) {
   if (typeof document === 'undefined') return null;
+  const s = Math.max(1, Number(scale) || 2);
   const canvas = document.createElement('canvas');
-  const dpr = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
-  canvas.width = Math.round(width * dpr);
-  canvas.height = Math.round(height * dpr);
+  canvas.width = Math.round(width * s);
+  canvas.height = Math.round(height * s);
   canvas.style.width = `${width}px`;
   canvas.style.height = `${height}px`;
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
-  ctx.scale(dpr, dpr);
+  ctx.scale(s, s);
   return { canvas, ctx, width, height };
 }
 
@@ -153,9 +156,9 @@ function drawLineSeries(ctx, values, color, pad, plotH, slot, yMax, markerR = 4)
  * }} opts
  */
 export function renderRevenuePointsChartPng(opts) {
-  const width = Math.max(400, Number(opts?.width) || 450);
-  const height = Math.max(260, Number(opts?.height) || 320);
-  const created = createHiDpiCanvas(width, height);
+  const width = Math.max(400, Number(opts?.width) || 460);
+  const height = Math.max(260, Number(opts?.height) || 340);
+  const created = createHiDpiCanvas(width, height, Number(opts?.pixelRatio) || 2);
   if (!created) return null;
   const { canvas, ctx } = created;
 
@@ -269,9 +272,9 @@ export function renderRevenuePointsChartPng(opts) {
  * }} opts
  */
 export function renderDiseaseUnitsChartPng(opts) {
-  const width = Math.max(400, Number(opts?.width) || 450);
-  const height = Math.max(260, Number(opts?.height) || 320);
-  const created = createHiDpiCanvas(width, height);
+  const width = Math.max(400, Number(opts?.width) || 460);
+  const height = Math.max(260, Number(opts?.height) || 340);
+  const created = createHiDpiCanvas(width, height, Number(opts?.pixelRatio) || 2);
   if (!created) return null;
   const { canvas, ctx } = created;
 
