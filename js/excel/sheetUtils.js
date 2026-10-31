@@ -340,6 +340,8 @@ export function injectA4LandscapeIntoSheetXml(xml, fitHeight = false, orientatio
 
 /**
  * worksheet XML に手動横改ページ（rowBreaks）を注入する
+ * OOXML 子要素順: pageMargins → pageSetup → headerFooter → rowBreaks → … → drawing
+ * （pageMargins / pageSetup の前に入れると Excel が sheet XML を破棄する）
  * OOXML: brk@id = その行の直後で改ページ（1始まり）
  * @param {string} xml
  * @param {number[]} rowIdsAfter Excel行番号（1始まり）の配列
@@ -362,14 +364,30 @@ export function injectRowBreaksIntoSheetXml(xml, rowIdsAfter) {
   let out = xml;
   if (/<rowBreaks\b[\s\S]*?<\/rowBreaks>/.test(out)) {
     out = out.replace(/<rowBreaks\b[\s\S]*?<\/rowBreaks>/, tag);
+    return out;
+  }
+
+  // 正しい位置: headerFooter / pageSetup / pageMargins の「直後」、drawing 系の「直前」
+  if (/<headerFooter\b[^>]*\/>/.test(out)) {
+    out = out.replace(/(<headerFooter\b[^>]*\/>)/, `$1${tag}`);
+  } else if (/<\/headerFooter>/.test(out)) {
+    out = out.replace(/<\/headerFooter>/, `</headerFooter>${tag}`);
+  } else if (/<pageSetup\b[^>]*\/>/.test(out)) {
+    out = out.replace(/(<pageSetup\b[^>]*\/>)/, `$1${tag}`);
+  } else if (/<\/pageSetup>/.test(out)) {
+    out = out.replace(/<\/pageSetup>/, `</pageSetup>${tag}`);
+  } else if (/<pageMargins\b[^>]*\/>/.test(out)) {
+    out = out.replace(/(<pageMargins\b[^>]*\/>)/, `$1${tag}`);
+  } else if (/<\/pageMargins>/.test(out)) {
+    out = out.replace(/<\/pageMargins>/, `</pageMargins>${tag}`);
   } else if (/<colBreaks\b/.test(out)) {
     out = out.replace(/<colBreaks\b/, `${tag}<colBreaks`);
-  } else if (/<pageMargins\b/.test(out)) {
-    out = out.replace(/<pageMargins\b/, `${tag}<pageMargins`);
-  } else if (/<pageSetup\b/.test(out)) {
-    out = out.replace(/<pageSetup\b/, `${tag}<pageSetup`);
   } else if (/<drawing\b/.test(out)) {
     out = out.replace(/<drawing\b/, `${tag}<drawing`);
+  } else if (/<legacyDrawing\b/.test(out)) {
+    out = out.replace(/<legacyDrawing\b/, `${tag}<legacyDrawing`);
+  } else if (/<extLst\b/.test(out)) {
+    out = out.replace(/<extLst\b/, `${tag}<extLst`);
   } else {
     out = out.replace(/<\/worksheet>/, `${tag}</worksheet>`);
   }
@@ -559,18 +577,28 @@ function injectPngDrawingIntoZipEntries(entries, sheetIndex, image) {
     );
   }
 
-  // worksheet に drawing 参照を追加
+  // worksheet に drawing 参照を追加（OOXML順: rowBreaks 等の後・extLst の前）
   let sheetXml = stringFromU8(sheetEntry.data);
-  // 名前空間 r が無ければ付与
-  if (!/xmlns:r=/.test(sheetXml)) {
+  // 名前空間 r が無ければ付与（既存属性は維持）
+  if (!/\sxmlns:r=/.test(sheetXml)) {
     sheetXml = sheetXml.replace(
-      /<worksheet\b([^>]*)>/,
-      '<worksheet$1 xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+      /<worksheet\b([^>]*?)(\/?)>/,
+      (m, attrs, selfClose) => {
+        if (selfClose) return m;
+        const trimmed = String(attrs || '').replace(/\s*$/, '');
+        return `<worksheet${trimmed} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">`;
+      }
     );
   }
   if (!/<drawing\b/.test(sheetXml)) {
     const drawingTag = `<drawing r:id="${drawingRid}"/>`;
-    if (/<\/worksheet>/.test(sheetXml)) {
+    if (/<legacyDrawing\b/.test(sheetXml)) {
+      sheetXml = sheetXml.replace(/<legacyDrawing\b/, `${drawingTag}<legacyDrawing`);
+    } else if (/<picture\b/.test(sheetXml)) {
+      sheetXml = sheetXml.replace(/<picture\b/, `${drawingTag}<picture`);
+    } else if (/<extLst\b/.test(sheetXml)) {
+      sheetXml = sheetXml.replace(/<extLst\b/, `${drawingTag}<extLst`);
+    } else if (/<\/worksheet>/.test(sheetXml)) {
       sheetXml = sheetXml.replace(/<\/worksheet>/, `${drawingTag}</worksheet>`);
     }
   }
