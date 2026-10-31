@@ -651,7 +651,8 @@ export function writeYearlyTrendSheet(wb, year, _month) {
 }
 
 /**
- * 年間推移グラフ専用シート（点数推移 ＋ 3大疾患単位・左右配置）
+ * 年間推移グラフ専用シート（点数推移 ＋ 3大疾患単位・上下2段）
+ * A4縦（portrait）1枚にジャストフィット
  * @param {Object} wb
  * @param {number} calendarYear
  * @param {ReturnType<typeof emptyMonthStats>[]} [statsListPrefetched]
@@ -672,15 +673,19 @@ export function writeYearlyTrendGraphSheet(wb, calendarYear, statsListPrefetched
   merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 15 } });
   rowHeights[0] = 22;
 
-  setStyledCell(ws, 1, 0, '左＝請求点数（棒:総点／折線:入院・外来）　右＝脳血管・運動器・廃用の単位推移　※A4横1枚', {
+  setStyledCell(ws, 1, 0, '上＝請求点数（棒:総点／折線:入院・外来）　下＝脳血管・運動器・廃用の単位推移　※A4縦1枚・上下2段', {
     font: { name: 'Meiryo UI', sz: 8.5, color: { rgb: '64748B' } }
   });
   merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: 15 } });
   rowHeights[1] = 16;
 
-  const chartAnchorRow = 2; // Excel 行3（タイトル下）
-  const chartW = 460;
-  const chartH = 340;
+  // A4縦の印字幅に合わせたワイドチャート（Canvas 2倍描画 → ext は表示サイズ）
+  // 上段 A3起点 / 下段 A24起点（400px ≈ 約20行@16pt）
+  const chartW = 680;
+  const chartH = 400;
+  const topAnchorRow = 2;   // Excel 行3
+  const bottomAnchorRow = 23; // Excel 行24（上段の下）
+  const rowSpanPerChart = 20;
 
   const monthNum = (picker) => statsList.map((s) => (s.isBlank ? 0 : (Number(picker(s)) || 0)));
   const pickCombinedUnits = (inKey, outKey) => statsList.map((s) => {
@@ -705,7 +710,7 @@ export function writeYearlyTrendGraphSheet(wb, calendarYear, statsListPrefetched
         name: 'revenue_points_chart',
         png: revenueChart.png,
         fromCol: 0,
-        fromRow: chartAnchorRow,
+        fromRow: topAnchorRow,
         widthPx: chartW,
         heightPx: chartH
       });
@@ -724,23 +729,23 @@ export function writeYearlyTrendGraphSheet(wb, calendarYear, statsListPrefetched
       embedded.push({
         name: 'disease_units_chart',
         png: diseaseChart.png,
-        fromCol: 8,
-        fromRow: chartAnchorRow,
+        fromCol: 0,
+        fromRow: bottomAnchorRow,
         widthPx: chartW,
         heightPx: chartH
       });
     }
     if (embedded.length) {
       ws['!rehaEmbeddedImages'] = embedded;
-      for (let i = 0; i < 20; i += 1) {
-        rowHeights[chartAnchorRow + i] = rowHeights[chartAnchorRow + i] || 16;
+      for (let i = 0; i < rowSpanPerChart; i += 1) {
+        rowHeights[topAnchorRow + i] = rowHeights[topAnchorRow + i] || 16;
+        rowHeights[bottomAnchorRow + i] = rowHeights[bottomAnchorRow + i] || 16;
       }
     }
   } catch (err) {
     console.warn('[yearlyTrendGraph] chart render skipped:', err);
   }
 
-  // 左右対称の見た目用に列幅を揃える（表シートと同系）
   ws['!cols'] = [
     { wch: 11 },
     { wch: 30 },
@@ -752,14 +757,16 @@ export function writeYearlyTrendGraphSheet(wb, calendarYear, statsListPrefetched
   ws['!merges'] = merges;
   ws['!views'] = [{ showGridLines: false }];
 
+  // A4縦・1枚収容（orientation は portrait。rowBreaks は使わない）
   applyA4LandscapePrintSetup(ws, 1);
-  ws['!margins'] = {
-    left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2
+  const portraitMargins = {
+    left: 0.35, right: 0.35, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2
   };
+  ws['!margins'] = { ...portraitMargins };
   ws['!pageSetup'] = {
     ...(ws['!pageSetup'] || {}),
     paperSize: 9,
-    orientation: 'landscape',
+    orientation: 'portrait',
     fitToPage: true,
     fitToWidth: 1,
     fitToHeight: 1,
@@ -768,14 +775,12 @@ export function writeYearlyTrendGraphSheet(wb, calendarYear, statsListPrefetched
   ws['!sheetPr'] = { pageSetUpPr: { fitToPage: true } };
   ws['!rehaPrintSetup'] = {
     paperSize: 9,
-    orientation: 'landscape',
+    orientation: 'portrait',
     fitToWidth: 1,
     fitToHeight: 1,
     fitHeight: true,
     scale: 100,
-    margins: {
-      left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2
-    }
+    margins: { ...portraitMargins }
   };
 
   updateSheetRange(ws);
