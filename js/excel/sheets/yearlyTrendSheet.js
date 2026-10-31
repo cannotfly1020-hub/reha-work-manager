@@ -13,7 +13,10 @@ import {
   setStyledCell, updateSheetRange, appendOrReplaceSheet,
   applyA4LandscapePrintSetup, YEARLY_TREND_SHEET
 } from '../sheetUtils.js';
-import { renderYearlyTrendChartPng } from '../yearlyTrendChart.js';
+import {
+  renderRevenuePointsChartPng,
+  renderDiseaseUnitsChartPng
+} from '../yearlyTrendChart.js';
 
 const RESPIRATORY_FALLBACK_POINTS = 85;
 
@@ -604,38 +607,67 @@ export function writeYearlyTrendSheet(wb, year, _month) {
     rowHeights[emptyR] = 12;
   }
 
-  // Excel 34行目（0始まり 33）から合算グラフを配置（タイトルは PNG 内に描画済み）
-  const chartAnchorRow = 33;
+  // Excel 34行目（0始まり 33）から2グラフを左右配置（rowBreaks 不使用）
+  const chartAnchorRow = 33; // Excel row 34
+  const chartW = 450;
+  const chartH = 320;
 
+  const monthNum = (picker) => statsList.map((s) => (s.isBlank ? 0 : (Number(picker(s)) || 0)));
   const pickCombinedUnits = (inKey, outKey) => statsList.map((s) => {
     if (s.isBlank) return 0;
     return (Number(s.in?.[inKey]?.units) || 0) + (Number(s.out?.[outKey]?.units) || 0);
   });
+
+  const grandPointsByMonth = monthNum((s) => s.grandPoints);
+  const inpatientPointsByMonth = monthNum((s) => s.in.points);
+  const outpatientPointsByMonth = monthNum((s) => s.out.points);
   const cerebrovascularUnits = pickCombinedUnits('CEREBROVASCULAR', 'CEREBROVASCULAR');
   const locomotiveUnits = pickCombinedUnits('LOCOMOTIVE', 'LOCOMOTIVE');
   const disuseUnits = pickCombinedUnits('DISUSE', 'DISUSE');
 
   try {
-    const chart = renderYearlyTrendChartPng({
+    const embedded = [];
+    const revenueChart = renderRevenuePointsChartPng({
       calendarYear,
-      fiscalStartYear: calendarYear,
+      calendarMode: true,
+      grandPointsByMonth,
+      inpatientPointsByMonth,
+      outpatientPointsByMonth,
+      width: chartW,
+      height: chartH
+    });
+    if (revenueChart?.png) {
+      embedded.push({
+        name: 'revenue_points_chart',
+        png: revenueChart.png,
+        fromCol: 0, // A列
+        fromRow: chartAnchorRow,
+        widthPx: revenueChart.widthPx,
+        heightPx: revenueChart.heightPx
+      });
+    }
+    const diseaseChart = renderDiseaseUnitsChartPng({
+      calendarYear,
       calendarMode: true,
       cerebrovascularUnits,
       locomotiveUnits,
       disuseUnits,
-      width: 960,
-      height: 420
+      width: chartW,
+      height: chartH
     });
-    if (chart?.png) {
-      ws['!rehaEmbeddedImages'] = [{
-        name: 'disease_trend_chart',
-        png: chart.png,
-        fromCol: 0,
+    if (diseaseChart?.png) {
+      embedded.push({
+        name: 'disease_units_chart',
+        png: diseaseChart.png,
+        fromCol: 8, // I列
         fromRow: chartAnchorRow,
-        widthPx: chart.widthPx,
-        heightPx: chart.heightPx
-      }];
-      for (let i = 0; i < 22; i += 1) {
+        widthPx: diseaseChart.widthPx,
+        heightPx: diseaseChart.heightPx
+      });
+    }
+    if (embedded.length) {
+      ws['!rehaEmbeddedImages'] = embedded;
+      for (let i = 0; i < 18; i += 1) {
         rowHeights[chartAnchorRow + i] = rowHeights[chartAnchorRow + i] || 15;
       }
     }

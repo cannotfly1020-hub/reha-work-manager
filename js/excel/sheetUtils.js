@@ -443,18 +443,22 @@ function buildStoreZip(entries) {
 
 /**
  * Content_Types / sheet rels / drawing へ PNG 埋め込みを追加
+ * 同一シートの複数画像は 1 つの drawing.xml にまとめる（Excel はシートあたり drawing 参照1つ）
  * @param {{ name: string, data: Uint8Array, method?: number }[]} entries
  * @param {number} sheetIndex 0始まり（sheet1.xml = 0）
- * @param {{ png: Uint8Array, fromCol: number, fromRow: number, widthPx: number, heightPx: number, name?: string }} image
+ * @param {{ png: Uint8Array, fromCol: number, fromRow: number, widthPx: number, heightPx: number, name?: string }|
+ *         { png: Uint8Array, fromCol: number, fromRow: number, widthPx: number, heightPx: number, name?: string }[]} imageOrList
  */
-function injectPngDrawingIntoZipEntries(entries, sheetIndex, image) {
-  if (!image?.png?.length) return;
+function injectPngDrawingIntoZipEntries(entries, sheetIndex, imageOrList) {
+  const images = (Array.isArray(imageOrList) ? imageOrList : [imageOrList])
+    .filter((img) => img?.png?.length);
+  if (!images.length) return;
+
   const sheetNum = sheetIndex + 1;
   const sheetPath = `xl/worksheets/sheet${sheetNum}.xml`;
   const sheetEntry = entries.find((e) => e.name === sheetPath);
   if (!sheetEntry) return;
 
-  // 既存 media / drawing の最大番号
   let maxImg = 0;
   let maxDrw = 0;
   entries.forEach((e) => {
@@ -463,43 +467,61 @@ function injectPngDrawingIntoZipEntries(entries, sheetIndex, image) {
     const dr = e.name.match(/^xl\/drawings\/drawing(\d+)\.xml$/i);
     if (dr) maxDrw = Math.max(maxDrw, parseInt(dr[1], 10) || 0);
   });
-  const imgN = maxImg + 1;
+
   const drwN = maxDrw + 1;
-  const mediaName = `xl/media/image${imgN}.png`;
   const drawingName = `xl/drawings/drawing${drwN}.xml`;
   const drawingRelsName = `xl/drawings/_rels/drawing${drwN}.xml.rels`;
   const sheetRelsName = `xl/worksheets/_rels/sheet${sheetNum}.xml.rels`;
 
-  const cx = Math.round((Number(image.widthPx) || 900) * 9525);
-  const cy = Math.round((Number(image.heightPx) || 360) * 9525);
-  const col = Math.max(0, Number(image.fromCol) || 0);
-  const row = Math.max(0, Number(image.fromRow) || 0);
-  const picName = String(image.name || `Chart${imgN}`).replace(/[<>&"']/g, '');
+  const mediaFiles = [];
+  const anchors = [];
+  const relParts = [];
+
+  images.forEach((image, idx) => {
+    const imgN = maxImg + 1 + idx;
+    const mediaName = `xl/media/image${imgN}.png`;
+    const rid = `rId${idx + 1}`;
+    const cx = Math.round((Number(image.widthPx) || 450) * 9525);
+    const cy = Math.round((Number(image.heightPx) || 320) * 9525);
+    const col = Math.max(0, Number(image.fromCol) || 0);
+    const row = Math.max(0, Number(image.fromRow) || 0);
+    const picName = String(image.name || `Chart${imgN}`).replace(/[<>&"']/g, '');
+    const picId = idx + 1;
+
+    mediaFiles.push({ name: mediaName, data: image.png });
+    relParts.push(
+      `<Relationship Id="${rid}"`
+      + ` Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"`
+      + ` Target="../media/image${imgN}.png"/>`
+    );
+    anchors.push(
+      `<xdr:oneCellAnchor>`
+      + `<xdr:from><xdr:col>${col}</xdr:col><xdr:colOff>0</xdr:colOff>`
+      + `<xdr:row>${row}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>`
+      + `<xdr:ext cx="${cx}" cy="${cy}"/>`
+      + `<xdr:pic>`
+      + `<xdr:nvPicPr><xdr:cNvPr id="${picId}" name="${picName}"/>`
+      + `<xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>`
+      + `<xdr:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>`
+      + `<xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>`
+      + `</xdr:pic><xdr:clientData/></xdr:oneCellAnchor>`
+    );
+  });
 
   const drawingXml =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
     + `<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"`
     + ` xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"`
     + ` xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">`
-    + `<xdr:oneCellAnchor>`
-    + `<xdr:from><xdr:col>${col}</xdr:col><xdr:colOff>0</xdr:colOff>`
-    + `<xdr:row>${row}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>`
-    + `<xdr:ext cx="${cx}" cy="${cy}"/>`
-    + `<xdr:pic>`
-    + `<xdr:nvPicPr><xdr:cNvPr id="1" name="${picName}"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>`
-    + `<xdr:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>`
-    + `<xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>`
-    + `</xdr:pic><xdr:clientData/></xdr:oneCellAnchor></xdr:wsDr>`;
+    + anchors.join('')
+    + `</xdr:wsDr>`;
 
   const drawingRelsXml =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
     + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`
-    + `<Relationship Id="rId1"`
-    + ` Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"`
-    + ` Target="../media/image${imgN}.png"/>`
+    + relParts.join('')
     + `</Relationships>`;
 
-  // sheet rels
   let sheetRelsEntry = entries.find((e) => e.name === sheetRelsName);
   let nextRid = 1;
   let sheetRelsXml = '';
@@ -521,9 +543,7 @@ function injectPngDrawingIntoZipEntries(entries, sheetIndex, image) {
     );
   }
 
-  // worksheet に drawing 参照を追加（OOXML順: rowBreaks 等の後・extLst の前）
   let sheetXml = stringFromU8(sheetEntry.data);
-  // 名前空間 r が無ければ付与（既存属性は維持）
   if (!/\sxmlns:r=/.test(sheetXml)) {
     sheetXml = sheetXml.replace(
       /<worksheet\b([^>]*?)(\/?)>/,
@@ -547,7 +567,6 @@ function injectPngDrawingIntoZipEntries(entries, sheetIndex, image) {
     }
   }
 
-  // Content_Types
   const ctEntry = entries.find((e) => e.name === '[Content_Types].xml');
   if (ctEntry) {
     let ct = stringFromU8(ctEntry.data);
@@ -577,7 +596,9 @@ function injectPngDrawingIntoZipEntries(entries, sheetIndex, image) {
     entries.push({ name: sheetRelsName, data: u8FromString(sheetRelsXml), method: 0 });
   }
 
-  entries.push({ name: mediaName, data: image.png, method: 0 });
+  mediaFiles.forEach((mf) => {
+    entries.push({ name: mf.name, data: mf.data, method: 0 });
+  });
   entries.push({ name: drawingName, data: u8FromString(drawingXml), method: 0 });
   entries.push({ name: drawingRelsName, data: u8FromString(drawingRelsXml), method: 0 });
 }
@@ -620,15 +641,15 @@ export function patchXlsxUint8ForA4Landscape(u8, wb) {
     entry.data = u8FromString(xml);
     entry.method = 0;
 
-    // 年間推移チャート等の静的PNG埋め込み
+    // 年間推移チャート等の静的PNG埋め込み（複数画像は1 drawing にまとめる）
     const images = (ws && Array.isArray(ws['!rehaEmbeddedImages'])) ? ws['!rehaEmbeddedImages'] : [];
-    images.forEach((img) => {
+    if (images.length) {
       try {
-        injectPngDrawingIntoZipEntries(entries, idx, img);
+        injectPngDrawingIntoZipEntries(entries, idx, images);
       } catch (err) {
         console.warn('[reha] sheet image embed failed:', err);
       }
-    });
+    }
   });
 
   // 元エントリ順を維持しつつ追加エントリを末尾へ

@@ -1,25 +1,17 @@
 // js/excel/yearlyTrendChart.js
 // 年間推移シート埋め込み用トレンドチャート（Canvas描画 → PNG）
-// 主要疾患（入院＋外来合算）単位数の月次推移 ※マクロ不要・静的画像
+// ①請求点数（棒＋折れ線） ②主要3疾患単位（折れ線） ※マクロ不要・静的画像
 
-/** 暦年 1〜12月（デフォルト） */
+/** 暦年 1〜12月 */
 const MONTH_LABELS_CALENDAR = Object.freeze([
   '1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'
 ]);
 
-/** 旧・診療報酬年度（4月始まり）互換 */
 const MONTH_LABELS_FISCAL = Object.freeze([
   '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月', '1月', '2月', '3月'
 ]);
 
-const DEFAULT_DISEASE_SERIES = Object.freeze([
-  { key: 'cerebrovascular', label: '脳血管', color: '#2563EB' },
-  { key: 'locomotive', label: '運動器', color: '#EA580C' },
-  { key: 'disuse', label: '廃用症候群', color: '#16A34A' }
-]);
-
 /**
- * dataURL (PNG) → Uint8Array
  * @param {string} dataUrl
  * @returns {Uint8Array|null}
  */
@@ -40,54 +32,12 @@ export function pngDataUrlToUint8(dataUrl) {
 }
 
 /**
- * 主要疾患（入院＋外来合算）単位数の折れ線チャートを描画
- * @param {{
- *   fiscalStartYear?: number,
- *   calendarYear?: number,
- *   calendarMode?: boolean,
- *   series?: { label: string, color: string, values: number[] }[],
- *   cerebrovascularUnits?: number[],
- *   locomotiveUnits?: number[],
- *   disuseUnits?: number[],
- *   width?: number,
- *   height?: number
- * }} opts
- * @returns {{ png: Uint8Array, widthPx: number, heightPx: number, dataUrl: string }|null}
+ * @param {number} width
+ * @param {number} height
+ * @returns {{ canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, width: number, height: number }|null}
  */
-export function renderYearlyTrendChartPng(opts) {
+function createHiDpiCanvas(width, height) {
   if (typeof document === 'undefined') return null;
-  const width = Math.max(720, Number(opts?.width) || 960);
-  const height = Math.max(320, Number(opts?.height) || 420);
-  const calendarMode = opts?.calendarMode !== false;
-  const yearLabel = Number(opts?.calendarYear || opts?.fiscalStartYear) || new Date().getFullYear();
-  const MONTH_LABELS = calendarMode ? MONTH_LABELS_CALENDAR : MONTH_LABELS_FISCAL;
-
-  let series = Array.isArray(opts?.series) ? opts.series.filter((s) => s && Array.isArray(s.values)) : [];
-  if (!series.length) {
-    series = [
-      {
-        label: DEFAULT_DISEASE_SERIES[0].label,
-        color: DEFAULT_DISEASE_SERIES[0].color,
-        values: Array.isArray(opts?.cerebrovascularUnits) ? opts.cerebrovascularUnits : []
-      },
-      {
-        label: DEFAULT_DISEASE_SERIES[1].label,
-        color: DEFAULT_DISEASE_SERIES[1].color,
-        values: Array.isArray(opts?.locomotiveUnits) ? opts.locomotiveUnits : []
-      },
-      {
-        label: DEFAULT_DISEASE_SERIES[2].label,
-        color: DEFAULT_DISEASE_SERIES[2].color,
-        values: Array.isArray(opts?.disuseUnits) ? opts.disuseUnits : []
-      }
-    ];
-  }
-  series = series.map((s, idx) => ({
-    label: String(s.label || DEFAULT_DISEASE_SERIES[idx]?.label || `系列${idx + 1}`),
-    color: String(s.color || DEFAULT_DISEASE_SERIES[idx]?.color || '#334155'),
-    values: (s.values || []).map((n) => Number(n) || 0)
-  }));
-
   const canvas = document.createElement('canvas');
   const dpr = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
   canvas.width = Math.round(width * dpr);
@@ -97,35 +47,41 @@ export function renderYearlyTrendChartPng(opts) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
   ctx.scale(dpr, dpr);
+  return { canvas, ctx, width, height };
+}
 
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(0, 0, width, height);
+/**
+ * @param {HTMLCanvasElement} canvas
+ * @param {number} width
+ * @param {number} height
+ */
+function canvasToResult(canvas, width, height) {
+  let dataUrl = '';
+  try {
+    dataUrl = canvas.toDataURL('image/png');
+  } catch (_) {
+    return null;
+  }
+  const png = pngDataUrlToUint8(dataUrl);
+  if (!png) return null;
+  return { png, widthPx: width, heightPx: height, dataUrl };
+}
 
-  const pad = { top: 52, right: 28, bottom: 56, left: 64 };
-  const plotW = width - pad.left - pad.right;
-  const plotH = height - pad.top - pad.bottom;
-  const n = 12;
-  const slot = plotW / n;
+function resolveMonthLabels(calendarMode) {
+  return calendarMode !== false ? MONTH_LABELS_CALENDAR : MONTH_LABELS_FISCAL;
+}
 
-  const allVals = series.flatMap((s) => s.values.slice(0, n));
-  const maxVal = Math.max(1, ...allVals, 1);
-  const yMax = maxVal * 1.18;
+function yearTitle(yearLabel, calendarMode) {
+  return calendarMode !== false ? `${yearLabel}年` : `${yearLabel}年度`;
+}
 
-  const titleYear = calendarMode ? `${yearLabel}年` : `${yearLabel}年度`;
-  ctx.fillStyle = '#0F172A';
-  ctx.font = 'bold 16px "Meiryo UI", "Hiragino Sans", sans-serif';
-  ctx.textAlign = 'left';
-  ctx.fillText(`${titleYear} 主要疾患別 単位数推移（入院＋外来合算）`, pad.left, 24);
-
-  ctx.font = '11px "Meiryo UI", sans-serif';
-  ctx.fillStyle = '#64748B';
-  ctx.fillText('脳血管／運動器／廃用症候群　※静的画像・マクロ不要', pad.left, 42);
-
+function drawPlotFrame(ctx, pad, plotW, plotH) {
   ctx.strokeStyle = '#E2E8F0';
   ctx.lineWidth = 1;
   ctx.strokeRect(pad.left, pad.top, plotW, plotH);
+}
 
-  const gridLines = 4;
+function drawYGrid(ctx, pad, plotW, plotH, yMax, gridLines = 4) {
   ctx.font = '10px "Meiryo UI", sans-serif';
   ctx.textAlign = 'right';
   for (let g = 0; g <= gridLines; g += 1) {
@@ -139,84 +95,266 @@ export function renderYearlyTrendChartPng(opts) {
     ctx.fillStyle = '#64748B';
     ctx.fillText(Math.round(yMax * t).toLocaleString('ja-JP'), pad.left - 8, y + 3);
   }
+}
 
-  // 折れ線＋マーカー
-  series.forEach((s) => {
-    ctx.strokeStyle = s.color;
-    ctx.lineWidth = 2.75;
-    ctx.beginPath();
-    for (let i = 0; i < n; i += 1) {
-      const v = s.values[i] || 0;
-      const x = pad.left + i * slot + slot / 2;
-      const y = pad.top + plotH - (v / yMax) * plotH;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-
-    for (let i = 0; i < n; i += 1) {
-      const v = s.values[i] || 0;
-      const x = pad.left + i * slot + slot / 2;
-      const y = pad.top + plotH - (v / yMax) * plotH;
-      ctx.beginPath();
-      ctx.fillStyle = '#FFFFFF';
-      ctx.arc(x, y, 4.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = s.color;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.fillStyle = s.color;
-      ctx.arc(x, y, 2.2, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  });
-
+function drawMonthLabels(ctx, pad, plotH, slot, labels) {
   ctx.fillStyle = '#475569';
   ctx.font = '11px "Meiryo UI", sans-serif';
   ctx.textAlign = 'center';
-  for (let i = 0; i < n; i += 1) {
+  for (let i = 0; i < 12; i += 1) {
     const x = pad.left + i * slot + slot / 2;
-    ctx.fillText(MONTH_LABELS[i], x, pad.top + plotH + 20);
+    ctx.fillText(labels[i], x, pad.top + plotH + 18);
+  }
+}
+
+function drawLineSeries(ctx, values, color, pad, plotH, slot, yMax, markerR = 4) {
+  const n = 12;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  for (let i = 0; i < n; i += 1) {
+    const v = values[i] || 0;
+    const x = pad.left + i * slot + slot / 2;
+    const y = pad.top + plotH - (v / yMax) * plotH;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  for (let i = 0; i < n; i += 1) {
+    const v = values[i] || 0;
+    const x = pad.left + i * slot + slot / 2;
+    const y = pad.top + plotH - (v / yMax) * plotH;
+    ctx.beginPath();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.arc(x, y, markerR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.fillStyle = color;
+    ctx.arc(x, y, markerR * 0.45, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+/**
+ * グラフ①: 月別請求点数・収益推移（棒＝総点数／折線＝入院・外来）
+ * @param {{
+ *   calendarYear?: number,
+ *   fiscalStartYear?: number,
+ *   calendarMode?: boolean,
+ *   grandPointsByMonth?: number[],
+ *   inpatientPointsByMonth?: number[],
+ *   outpatientPointsByMonth?: number[],
+ *   width?: number,
+ *   height?: number
+ * }} opts
+ */
+export function renderRevenuePointsChartPng(opts) {
+  const width = Math.max(400, Number(opts?.width) || 450);
+  const height = Math.max(260, Number(opts?.height) || 320);
+  const created = createHiDpiCanvas(width, height);
+  if (!created) return null;
+  const { canvas, ctx } = created;
+
+  const calendarMode = opts?.calendarMode !== false;
+  const yearLabel = Number(opts?.calendarYear || opts?.fiscalStartYear) || new Date().getFullYear();
+  const MONTH_LABELS = resolveMonthLabels(calendarMode);
+
+  const grand = (opts?.grandPointsByMonth || []).map((n) => Number(n) || 0);
+  const inpatient = (opts?.inpatientPointsByMonth || []).map((n) => Number(n) || 0);
+  const outpatient = (opts?.outpatientPointsByMonth || []).map((n) => Number(n) || 0);
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, width, height);
+
+  const pad = { top: 48, right: 16, bottom: 52, left: 56 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+  const n = 12;
+  const slot = plotW / n;
+  const barW = Math.max(8, slot * 0.55);
+  const yMax = Math.max(1, ...grand, ...inpatient, ...outpatient) * 1.18;
+
+  ctx.fillStyle = '#0F172A';
+  ctx.font = 'bold 13px "Meiryo UI", "Hiragino Sans", sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(`${yearTitle(yearLabel, calendarMode)} 月別 請求点数推移（入院・外来・総合計）`, pad.left, 20);
+
+  ctx.font = '10px "Meiryo UI", sans-serif';
+  ctx.fillStyle = '#64748B';
+  ctx.fillText('棒＝請求総点数　／　折線＝入院・外来点数', pad.left, 36);
+
+  drawPlotFrame(ctx, pad, plotW, plotH);
+  drawYGrid(ctx, pad, plotW, plotH, yMax);
+
+  // 棒: 請求総点数
+  for (let i = 0; i < n; i += 1) {
+    const v = grand[i] || 0;
+    const h = (v / yMax) * plotH;
+    const x = pad.left + i * slot + (slot - barW) / 2;
+    const y = pad.top + plotH - h;
+    const grad = ctx.createLinearGradient(0, y, 0, pad.top + plotH);
+    grad.addColorStop(0, '#BFDBFE');
+    grad.addColorStop(1, '#93C5FD');
+    ctx.fillStyle = grad;
+    ctx.fillRect(x, y, barW, Math.max(0, h));
   }
 
+  drawLineSeries(ctx, inpatient, '#0284C7', pad, plotH, slot, yMax, 3.5);
+  drawLineSeries(ctx, outpatient, '#059669', pad, plotH, slot, yMax, 3.5);
+  drawMonthLabels(ctx, pad, plotH, slot, MONTH_LABELS);
+
   // 凡例
-  const legendY = height - 16;
-  let legendX = pad.left;
-  ctx.font = '12px "Meiryo UI", sans-serif';
+  const legendY = height - 14;
+  let lx = pad.left;
+  ctx.font = '10px "Meiryo UI", sans-serif';
   ctx.textAlign = 'left';
-  series.forEach((s) => {
+  ctx.fillStyle = '#93C5FD';
+  ctx.fillRect(lx, legendY - 8, 12, 8);
+  ctx.fillStyle = '#334155';
+  ctx.fillText('請求総点数', lx + 16, legendY);
+  lx += 88;
+
+  [
+    { color: '#0284C7', label: '入院点数' },
+    { color: '#059669', label: '外来点数' }
+  ].forEach((s) => {
     ctx.strokeStyle = s.color;
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 2.2;
     ctx.beginPath();
-    ctx.moveTo(legendX, legendY - 4);
-    ctx.lineTo(legendX + 22, legendY - 4);
+    ctx.moveTo(lx, legendY - 4);
+    ctx.lineTo(lx + 18, legendY - 4);
     ctx.stroke();
     ctx.beginPath();
     ctx.fillStyle = s.color;
-    ctx.arc(legendX + 11, legendY - 4, 3.2, 0, Math.PI * 2);
+    ctx.arc(lx + 9, legendY - 4, 2.5, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#334155';
-    ctx.fillText(s.label, legendX + 28, legendY);
-    legendX += 120;
+    ctx.fillText(s.label, lx + 24, legendY);
+    lx += 78;
   });
 
   ctx.save();
-  ctx.translate(14, pad.top + plotH / 2);
+  ctx.translate(12, pad.top + plotH / 2);
   ctx.rotate(-Math.PI / 2);
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#475569';
-  ctx.font = 'bold 11px "Meiryo UI", sans-serif';
-  ctx.fillText('単位数（入院＋外来）', 0, 0);
+  ctx.fillStyle = '#64748B';
+  ctx.font = 'bold 10px "Meiryo UI", sans-serif';
+  ctx.fillText('請求点数（点）', 0, 0);
   ctx.restore();
 
-  let dataUrl = '';
-  try {
-    dataUrl = canvas.toDataURL('image/png');
-  } catch (_) {
-    return null;
+  return canvasToResult(canvas, width, height);
+}
+
+/**
+ * グラフ②: 主要3疾患 実施単位推移（入院＋外来合算）
+ * @param {{
+ *   calendarYear?: number,
+ *   fiscalStartYear?: number,
+ *   calendarMode?: boolean,
+ *   cerebrovascularUnits?: number[],
+ *   locomotiveUnits?: number[],
+ *   disuseUnits?: number[],
+ *   series?: { label: string, color: string, values: number[] }[],
+ *   width?: number,
+ *   height?: number
+ * }} opts
+ */
+export function renderDiseaseUnitsChartPng(opts) {
+  const width = Math.max(400, Number(opts?.width) || 450);
+  const height = Math.max(260, Number(opts?.height) || 320);
+  const created = createHiDpiCanvas(width, height);
+  if (!created) return null;
+  const { canvas, ctx } = created;
+
+  const calendarMode = opts?.calendarMode !== false;
+  const yearLabel = Number(opts?.calendarYear || opts?.fiscalStartYear) || new Date().getFullYear();
+  const MONTH_LABELS = resolveMonthLabels(calendarMode);
+
+  let series = Array.isArray(opts?.series) ? opts.series.filter((s) => s && Array.isArray(s.values)) : [];
+  if (!series.length) {
+    series = [
+      { label: '脳血管', color: '#2563EB', values: opts?.cerebrovascularUnits || [] },
+      { label: '運動器', color: '#EA580C', values: opts?.locomotiveUnits || [] },
+      { label: '廃用症候群', color: '#16A34A', values: opts?.disuseUnits || [] }
+    ];
   }
-  const png = pngDataUrlToUint8(dataUrl);
-  if (!png) return null;
-  return { png, widthPx: width, heightPx: height, dataUrl };
+  series = series.map((s, idx) => {
+    const defaults = [
+      { label: '脳血管', color: '#2563EB' },
+      { label: '運動器', color: '#EA580C' },
+      { label: '廃用症候群', color: '#16A34A' }
+    ];
+    return {
+      label: String(s.label || defaults[idx]?.label || `系列${idx + 1}`),
+      color: String(s.color || defaults[idx]?.color || '#334155'),
+      values: (s.values || []).map((n) => Number(n) || 0)
+    };
+  });
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, width, height);
+
+  const pad = { top: 48, right: 16, bottom: 52, left: 52 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+  const slot = plotW / 12;
+  const allVals = series.flatMap((s) => s.values.slice(0, 12));
+  const yMax = Math.max(1, ...allVals, 1) * 1.18;
+
+  ctx.fillStyle = '#0F172A';
+  ctx.font = 'bold 13px "Meiryo UI", "Hiragino Sans", sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(`${yearTitle(yearLabel, calendarMode)} 月別 3大疾患提供単位推移（入院＋外来）`, pad.left, 20);
+
+  ctx.font = '10px "Meiryo UI", sans-serif';
+  ctx.fillStyle = '#64748B';
+  ctx.fillText('脳血管／運動器／廃用症候群（入院＋外来合算）', pad.left, 36);
+
+  drawPlotFrame(ctx, pad, plotW, plotH);
+  drawYGrid(ctx, pad, plotW, plotH, yMax);
+  series.forEach((s) => drawLineSeries(ctx, s.values, s.color, pad, plotH, slot, yMax, 3.8));
+  drawMonthLabels(ctx, pad, plotH, slot, MONTH_LABELS);
+
+  const legendY = height - 14;
+  let lx = pad.left;
+  ctx.font = '10px "Meiryo UI", sans-serif';
+  ctx.textAlign = 'left';
+  series.forEach((s) => {
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(lx, legendY - 4);
+    ctx.lineTo(lx + 18, legendY - 4);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.fillStyle = s.color;
+    ctx.arc(lx + 9, legendY - 4, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#334155';
+    ctx.fillText(s.label, lx + 24, legendY);
+    lx += 100;
+  });
+
+  ctx.save();
+  ctx.translate(12, pad.top + plotH / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#64748B';
+  ctx.font = 'bold 10px "Meiryo UI", sans-serif';
+  ctx.fillText('実施単位数', 0, 0);
+  ctx.restore();
+
+  return canvasToResult(canvas, width, height);
+}
+
+/**
+ * 互換: 旧API名 → 疾患単位グラフ
+ * @param {Parameters<typeof renderDiseaseUnitsChartPng>[0]} opts
+ */
+export function renderYearlyTrendChartPng(opts) {
+  return renderDiseaseUnitsChartPng(opts);
 }
