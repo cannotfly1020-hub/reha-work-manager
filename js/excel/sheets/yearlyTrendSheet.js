@@ -242,7 +242,7 @@ function buildCalendarYearStats(calendarYear) {
 
 function styleHeader() {
   return {
-    font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: 'FFFFFF' } },
+    font: { name: 'Meiryo UI', sz: 10, bold: true, color: { rgb: 'FFFFFF' } },
     fill: { fgColor: { rgb: '1E293B' } },
     alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
     border: thinBorder()
@@ -251,7 +251,7 @@ function styleHeader() {
 
 function styleCat(fillRgb) {
   return {
-    font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '0F172A' } },
+    font: { name: 'Meiryo UI', sz: 10, bold: true, color: { rgb: '0F172A' } },
     fill: { fgColor: { rgb: fillRgb } },
     alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
     border: thinBorder()
@@ -260,18 +260,18 @@ function styleCat(fillRgb) {
 
 function styleItem(zebra) {
   return {
-    font: { name: 'Meiryo UI', sz: 8.5 },
+    font: { name: 'Meiryo UI', sz: 9.5 },
     fill: zebra ? { fgColor: { rgb: 'F8FAFC' } } : { fgColor: { rgb: 'FFFFFF' } },
-    alignment: { horizontal: 'left', vertical: 'center' },
+    alignment: { horizontal: 'left', vertical: 'center', shrinkToFit: true },
     border: thinBorder()
   };
 }
 
 function styleMetric(zebra) {
   return {
-    font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: '475569' } },
+    font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '475569' } },
     fill: zebra ? { fgColor: { rgb: 'F8FAFC' } } : { fgColor: { rgb: 'FFFFFF' } },
-    alignment: { horizontal: 'center', vertical: 'center' },
+    alignment: { horizontal: 'center', vertical: 'center', shrinkToFit: true },
     border: thinBorder()
   };
 }
@@ -280,12 +280,12 @@ function styleNum(zebra, emphasize) {
   return {
     font: {
       name: 'Meiryo UI',
-      sz: 8.5,
+      sz: 9.5,
       bold: !!emphasize,
       color: { rgb: emphasize ? '0F172A' : '334155' }
     },
     fill: zebra ? { fgColor: { rgb: 'F8FAFC' } } : { fgColor: { rgb: 'FFFFFF' } },
-    alignment: { horizontal: 'right', vertical: 'center' },
+    alignment: { horizontal: 'right', vertical: 'center', shrinkToFit: true },
     border: thinBorder(),
     numFmt: '#,##0'
   };
@@ -293,9 +293,9 @@ function styleNum(zebra, emphasize) {
 
 function styleSubTotal() {
   return {
-    font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '0F172A' } },
+    font: { name: 'Meiryo UI', sz: 10, bold: true, color: { rgb: '0F172A' } },
     fill: { fgColor: { rgb: 'E2E8F0' } },
-    alignment: { horizontal: 'right', vertical: 'center' },
+    alignment: { horizontal: 'right', vertical: 'center', shrinkToFit: true },
     border: {
       top: { style: 'thin', color: { rgb: '64748B' } },
       bottom: { style: 'double', color: { rgb: '334155' } },
@@ -308,9 +308,9 @@ function styleSubTotal() {
 
 function styleGrand() {
   return {
-    font: { name: 'Meiryo UI', sz: 9.5, bold: true, color: { rgb: 'FFFFFF' } },
+    font: { name: 'Meiryo UI', sz: 10.5, bold: true, color: { rgb: 'FFFFFF' } },
     fill: { fgColor: { rgb: '0F172A' } },
-    alignment: { horizontal: 'right', vertical: 'center' },
+    alignment: { horizontal: 'right', vertical: 'center', shrinkToFit: true },
     border: {
       top: { style: 'thin', color: { rgb: '0F172A' } },
       bottom: { style: 'double', color: { rgb: '0F172A' } },
@@ -397,17 +397,17 @@ export function writeYearlyTrendSheet(wb, year, _month) {
     font: { name: 'Meiryo UI', sz: 12, bold: true, color: { rgb: '0F172A' } }
   });
   merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 15 } });
-  rowHeights[r] = 28;
+  rowHeights[r] = 24;
   r += 1;
 
   const histNote = (calendarYear === 2026)
     ? '1〜9月=点数票確定値（fy2026_annual_historical_score_data）／10月=ライブ集計／11・12月=空欄'
     : '月次ライブ集計（履歴モジュール対象外年）';
-  setStyledCell(ws, r, 0, `点数票準拠／${histNote}／A4横 fitToWidth=1`, {
-    font: { name: 'Meiryo UI', sz: 8, color: { rgb: '64748B' } }
+  setStyledCell(ws, r, 0, `点数票準拠／${histNote}／A4横・表=1ページ／グラフ=2ページ目`, {
+    font: { name: 'Meiryo UI', sz: 8.5, color: { rgb: '64748B' } }
   });
   merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: 15 } });
-  rowHeights[r] = 18;
+  rowHeights[r] = 16;
   r += 1;
 
   const headerRow = r;
@@ -434,62 +434,62 @@ export function writeYearlyTrendSheet(wb, year, _month) {
     itemLabel: '脳血管疾患等リハビリテーション料', metricLabel: '単位数',
     monthValues: monthVals((s) => s.in.CEREBROVASCULAR.units), zebra: false, mergeCatRows: 8
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '', catFill: 'FEF3C7',
     itemLabel: '脳血管疾患等リハビリテーション料', metricLabel: '点数',
     monthValues: monthVals((s) => s.in.CEREBROVASCULAR.points), zebra: true
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '', catFill: 'FEF3C7',
     itemLabel: '廃用症候群リハビリテーション料', metricLabel: '単位数',
     monthValues: monthVals((s) => s.in.DISUSE.units), zebra: false
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '', catFill: 'FEF3C7',
     itemLabel: '廃用症候群リハビリテーション料', metricLabel: '点数',
     monthValues: monthVals((s) => s.in.DISUSE.points), zebra: true
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '', catFill: 'FEF3C7',
     itemLabel: '運動器リハビリテーション料', metricLabel: '単位数',
     monthValues: monthVals((s) => s.in.LOCOMOTIVE.units), zebra: false
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '', catFill: 'FEF3C7',
     itemLabel: '運動器リハビリテーション料', metricLabel: '点数',
     monthValues: monthVals((s) => s.in.LOCOMOTIVE.points), zebra: true
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '', catFill: 'FEF3C7',
     itemLabel: '呼吸器リハビリテーション料', metricLabel: '単位数',
     monthValues: monthVals((s) => s.in.RESPIRATORY.units), zebra: false
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '', catFill: 'FEF3C7',
     itemLabel: '呼吸器リハビリテーション料', metricLabel: '点数',
     monthValues: monthVals((s) => s.in.RESPIRATORY.points), zebra: true
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
 
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '入院', catFill: 'E2E8F0',
     itemLabel: '※ 小計：入院単位合計', metricLabel: '単位数',
     monthValues: monthVals((s) => s.in.units), isSubtotal: true
   }));
-  rowHeights[r - 1] = 20;
+  rowHeights[r - 1] = 17;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '入院', catFill: 'E2E8F0',
     itemLabel: '※ 小計：入院点数合計', metricLabel: '点数',
     monthValues: monthVals((s) => s.in.points), isSubtotal: true
   }));
-  rowHeights[r - 1] = 20;
+  rowHeights[r - 1] = 17;
 
   // —— 外来 ——
   r = writeMetricRow(ws, r, merges, rowOpts({
@@ -497,62 +497,62 @@ export function writeYearlyTrendSheet(wb, year, _month) {
     itemLabel: '脳血管疾患等リハビリテーション料', metricLabel: '単位数',
     monthValues: monthVals((s) => s.out.CEREBROVASCULAR.units), zebra: false, mergeCatRows: 8
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '', catFill: 'DBEAFE',
     itemLabel: '脳血管疾患等リハビリテーション料', metricLabel: '点数',
     monthValues: monthVals((s) => s.out.CEREBROVASCULAR.points), zebra: true
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '', catFill: 'DBEAFE',
     itemLabel: '廃用症候群リハビリテーション料', metricLabel: '単位数',
     monthValues: monthVals((s) => s.out.DISUSE.units), zebra: false
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '', catFill: 'DBEAFE',
     itemLabel: '廃用症候群リハビリテーション料', metricLabel: '点数',
     monthValues: monthVals((s) => s.out.DISUSE.points), zebra: true
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '', catFill: 'DBEAFE',
     itemLabel: '運動器リハビリテーション料', metricLabel: '単位数',
     monthValues: monthVals((s) => s.out.LOCOMOTIVE.units), zebra: false
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '', catFill: 'DBEAFE',
     itemLabel: '運動器リハビリテーション料', metricLabel: '点数',
     monthValues: monthVals((s) => s.out.LOCOMOTIVE.points), zebra: true
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '', catFill: 'DBEAFE',
     itemLabel: '消炎鎮痛等処置', metricLabel: '件数',
     monthValues: monthVals((s) => s.out.ANALGESIA.count), zebra: false
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '', catFill: 'DBEAFE',
     itemLabel: '消炎鎮痛等処置', metricLabel: '点数',
     monthValues: monthVals((s) => s.out.ANALGESIA.points), zebra: true
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
 
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '外来', catFill: 'E2E8F0',
     itemLabel: '※ 小計：外来単位合計', metricLabel: '単位数',
     monthValues: monthVals((s) => s.out.units), isSubtotal: true
   }));
-  rowHeights[r - 1] = 20;
+  rowHeights[r - 1] = 17;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '外来', catFill: 'E2E8F0',
     itemLabel: '※ 小計：外来点数合計', metricLabel: '点数',
     monthValues: monthVals((s) => s.out.points), isSubtotal: true
   }));
-  rowHeights[r - 1] = 20;
+  rowHeights[r - 1] = 17;
 
   // —— 加算 ——
   r = writeMetricRow(ws, r, merges, rowOpts({
@@ -560,25 +560,25 @@ export function writeYearlyTrendSheet(wb, year, _month) {
     itemLabel: '早期リハビリテーション加算', metricLabel: '単位数',
     monthValues: monthVals((s) => s.early.units), zebra: false, mergeCatRows: 4
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '', catFill: 'D1FAE5',
     itemLabel: '早期リハビリテーション加算', metricLabel: '点数',
     monthValues: monthVals((s) => s.early.points), zebra: true
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '', catFill: 'D1FAE5',
     itemLabel: 'リハビリテーション総合計画評価料', metricLabel: '件数',
     monthValues: monthVals((s) => s.plan.count), zebra: false
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '', catFill: 'D1FAE5',
     itemLabel: 'リハビリテーション総合計画評価料', metricLabel: '点数',
     monthValues: monthVals((s) => s.plan.points), zebra: true
   }));
-  rowHeights[r - 1] = 18;
+  rowHeights[r - 1] = 16;
 
   // —— 総合計 ——
   r = writeMetricRow(ws, r, merges, rowOpts({
@@ -586,43 +586,69 @@ export function writeYearlyTrendSheet(wb, year, _month) {
     itemLabel: 'リハビリテーション科 総単位数', metricLabel: '単位数',
     monthValues: monthVals((s) => s.grandUnits), isGrand: true, mergeCatRows: 2
   }));
-  rowHeights[r - 1] = 22;
+  rowHeights[r - 1] = 17;
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '', catFill: '0F172A',
     itemLabel: '診療報酬 請求総点数', metricLabel: '点数',
     monthValues: monthVals((s) => s.grandPoints), isGrand: true
   }));
-  rowHeights[r - 1] = 22;
+  rowHeights[r - 1] = 17;
 
-  const chartCaptionRow = r + 1;
-  setStyledCell(ws, chartCaptionRow, 0, '■ 月次推移グラフ（1月〜12月／棒: 請求総点数／折線: 総単位数）※静的画像・マクロ不要', {
-    font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '0369A1' } }
+  // 表領域を Excel 行30までに揃え、その直後で改ページ（2ページ目＝グラフ）
+  // r は次の空き行（0始まり）。最終データ行 = r-1 → Excel行 = r
+  while (r < 29) {
+    rowHeights[r] = rowHeights[r] || 4;
+    r += 1;
+  }
+  // Excel 行30（0始まり index 29）: ページ境界マーカー
+  const pageBreakExcelRow = 30;
+  const spacerRow0 = pageBreakExcelRow - 1;
+  setStyledCell(ws, spacerRow0, 0, '▼ 次ページ：主要疾患別（入院＋外来合算）単位数推移グラフ', {
+    font: { name: 'Meiryo UI', sz: 8, italic: true, color: { rgb: '64748B' } }
   });
-  rowHeights[chartCaptionRow] = 20;
+  merges.push({ s: { r: spacerRow0, c: 0 }, e: { r: spacerRow0, c: 15 } });
+  rowHeights[spacerRow0] = 14;
+  r = Math.max(r, spacerRow0 + 1);
+
+  // —— Page 2: チャート ——
+  const chartCaptionRow = r;
+  setStyledCell(ws, chartCaptionRow, 0,
+    '■ 主要疾患別 単位数推移（1月〜12月／入院＋外来合算）　青=脳血管　橙=運動器　緑=廃用症候群　※静的画像', {
+      font: { name: 'Meiryo UI', sz: 10, bold: true, color: { rgb: '0F172A' } }
+    });
+  merges.push({ s: { r: chartCaptionRow, c: 0 }, e: { r: chartCaptionRow, c: 15 } });
+  rowHeights[chartCaptionRow] = 22;
   const chartAnchorRow = chartCaptionRow + 1;
 
-  const pointsByMonth = statsList.map((s) => (s.isBlank ? 0 : s.grandPoints));
-  const unitsByMonth = statsList.map((s) => (s.isBlank ? 0 : s.grandUnits));
+  const pickCombinedUnits = (inKey, outKey) => statsList.map((s) => {
+    if (s.isBlank) return 0;
+    return (Number(s.in?.[inKey]?.units) || 0) + (Number(s.out?.[outKey]?.units) || 0);
+  });
+  const cerebrovascularUnits = pickCombinedUnits('CEREBROVASCULAR', 'CEREBROVASCULAR');
+  const locomotiveUnits = pickCombinedUnits('LOCOMOTIVE', 'LOCOMOTIVE');
+  const disuseUnits = pickCombinedUnits('DISUSE', 'DISUSE');
+
   try {
     const chart = renderYearlyTrendChartPng({
       calendarYear,
       fiscalStartYear: calendarYear,
-      pointsByMonth,
-      unitsByMonth,
-      width: 900,
-      height: 360,
-      calendarMode: true
+      calendarMode: true,
+      cerebrovascularUnits,
+      locomotiveUnits,
+      disuseUnits,
+      width: 960,
+      height: 420
     });
     if (chart?.png) {
       ws['!rehaEmbeddedImages'] = [{
-        name: `${calendarYear}年_年間推移チャート`,
+        name: `${calendarYear}年_主要疾患別単位推移`,
         png: chart.png,
         fromCol: 0,
         fromRow: chartAnchorRow,
         widthPx: chart.widthPx,
         heightPx: chart.heightPx
       }];
-      for (let i = 0; i < 18; i += 1) {
+      for (let i = 0; i < 22; i += 1) {
         rowHeights[chartAnchorRow + i] = rowHeights[chartAnchorRow + i] || 15;
       }
     }
@@ -631,20 +657,23 @@ export function writeYearlyTrendSheet(wb, year, _month) {
   }
 
   ws['!cols'] = [
-    { wch: 12 },
-    { wch: 28 },
-    { wch: 7 },
-    ...Array.from({ length: 12 }, () => ({ wch: 6.2 })),
-    { wch: 9 }
+    { wch: 11 },
+    { wch: 30 },
+    { wch: 6.5 },
+    ...Array.from({ length: 12 }, () => ({ wch: 8.2 })),
+    { wch: 12.5 }
   ];
-  ws['!rows'] = rowHeights.map((h) => ({ hpt: h || 18 }));
+  ws['!rows'] = rowHeights.map((h) => ({ hpt: h || 17 }));
   ws['!merges'] = merges;
   ws['!views'] = [{ showGridLines: true }];
   ws['!freeze'] = { xSplit: 3, ySplit: headerRow + 1, topLeftCell: 'D4', activePane: 'bottomRight', state: 'frozen' };
+  // 表（〜行30）の直後で改ページ → グラフは2ページ目
+  ws['!rehaRowBreaks'] = [pageBreakExcelRow];
 
+  // 横1ページ固定。縦は改ページで自然分割（fitToHeight=0）し表の可読性を優先
   applyA4LandscapePrintSetup(ws, false);
   ws['!margins'] = {
-    left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2
+    left: 0.3, right: 0.3, top: 0.35, bottom: 0.35, header: 0.15, footer: 0.15
   };
   ws['!pageSetup'] = {
     ...(ws['!pageSetup'] || {}),
@@ -664,7 +693,7 @@ export function writeYearlyTrendSheet(wb, year, _month) {
     fitHeight: false,
     scale: 100,
     margins: {
-      left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2
+      left: 0.3, right: 0.3, top: 0.35, bottom: 0.35, header: 0.15, footer: 0.15
     }
   };
 
