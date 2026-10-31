@@ -11,6 +11,7 @@ import {
   setStyledCell, updateSheetRange, appendOrReplaceSheet,
   applyA4LandscapePrintSetup, YEARLY_TREND_SHEET
 } from '../sheetUtils.js';
+import { renderYearlyTrendChartPng } from '../yearlyTrendChart.js';
 
 /** 呼吸器リハ（マスター未登録時のフォールバック点数） */
 const RESPIRATORY_FALLBACK_POINTS = 85;
@@ -606,6 +607,43 @@ export function writeYearlyTrendSheet(wb, year, month) {
     isGrand: true
   });
   rowHeights[r - 1] = 22;
+
+  // チャート配置用の余白行（表の直下）
+  const chartCaptionRow = r + 1;
+  setStyledCell(ws, chartCaptionRow, 0, '■ 月次推移グラフ（棒: 請求総点数／折線: 総単位数）※静的画像・マクロ不要', {
+    font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '0369A1' } }
+  });
+  rowHeights[chartCaptionRow] = 20;
+  const chartAnchorRow = chartCaptionRow + 1;
+
+  // コンボチャートを Canvas 描画 → PNG（ZIP後処理でシートへ埋め込み）
+  const pointsByMonth = statsList.map((s) => s.grandPoints);
+  const unitsByMonth = statsList.map((s) => s.grandUnits);
+  try {
+    const chart = renderYearlyTrendChartPng({
+      fiscalStartYear,
+      pointsByMonth,
+      unitsByMonth,
+      width: 900,
+      height: 360
+    });
+    if (chart?.png) {
+      ws['!rehaEmbeddedImages'] = [{
+        name: `${fiscalStartYear}年度_年間推移チャート`,
+        png: chart.png,
+        fromCol: 0,
+        fromRow: chartAnchorRow,
+        widthPx: chart.widthPx,
+        heightPx: chart.heightPx
+      }];
+      // 画像の見た目分の行高を確保（印刷時の重なり軽減）
+      for (let i = 0; i < 18; i += 1) {
+        rowHeights[chartAnchorRow + i] = rowHeights[chartAnchorRow + i] || 15;
+      }
+    }
+  } catch (err) {
+    console.warn('[yearlyTrend] chart render skipped:', err);
+  }
 
   // 列幅（A4横 fitToWidth=1 向けに詰める）
   ws['!cols'] = [
