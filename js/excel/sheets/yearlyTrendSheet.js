@@ -77,6 +77,9 @@ function resolveDiseaseKey(patient) {
 
 /**
  * 履歴モジュール1ヶ月分 → 内部stats
+ * 新スキーマ（点数票_2.xlsx スクリーンショット転記）:
+ *   grandTotalPoints / diseaseTotals.*.units / earlyBonusTotal.units
+ * 旧スキーマ（入外別 units/points）もフォールバック対応
  * @param {typeof ANNUAL_HISTORICAL_DATA_2026} hist
  * @param {number} month 1-9
  */
@@ -85,7 +88,28 @@ function statsFromHistorical(hist, month) {
   const m = Number(month);
   if (!hist || !m) return st;
 
-  // 入院
+  // —— 新スキーマ（原本スクリーンショット確定値）——
+  if (hist.grandTotalPoints || hist.diseaseTotals || hist.earlyBonusTotal) {
+    const cerebro = Number(hist.diseaseTotals?.cerebrovascular?.units?.[m]) || 0;
+    const loco = Number(hist.diseaseTotals?.locomotive?.units?.[m]) || 0;
+    const disuse = Number(hist.diseaseTotals?.disuse?.units?.[m]) || 0;
+    const early = Number(hist.earlyBonusTotal?.units?.[m]) || 0;
+    const grandPts = Number(hist.grandTotalPoints?.[m]) || 0;
+
+    // 原本は入院+外来合算の疾患別総単位 → 入院行に合算を載せ、外来は0（グラフの in+out 合算と一致）
+    st.in.CEREBROVASCULAR.units = cerebro;
+    st.in.LOCOMOTIVE.units = loco;
+    st.in.DISUSE.units = disuse;
+    st.in.units = cerebro + loco + disuse;
+
+    st.early.units = early;
+    st.grandUnits = st.in.units;
+    // 総点数は原本「総点数」を優先（入外・加算の内訳合算ではない）
+    st.grandPoints = grandPts;
+    return st;
+  }
+
+  // —— 旧スキーマ（入外別）——
   st.in.CEREBROVASCULAR.units = Number(hist.inpatient?.cerebrovascular?.units?.[m]) || 0;
   st.in.CEREBROVASCULAR.points = Number(hist.inpatient?.cerebrovascular?.points?.[m]) || 0;
   st.in.DISUSE.units = Number(hist.inpatient?.disuse?.units?.[m]) || 0;
@@ -97,7 +121,6 @@ function statsFromHistorical(hist, month) {
   st.in.units = st.in.CEREBROVASCULAR.units + st.in.DISUSE.units + st.in.LOCOMOTIVE.units + st.in.RESPIRATORY.units;
   st.in.points = st.in.CEREBROVASCULAR.points + st.in.DISUSE.points + st.in.LOCOMOTIVE.points + st.in.RESPIRATORY.points;
 
-  // 外来
   st.out.CEREBROVASCULAR.units = Number(hist.outpatient?.cerebrovascular?.units?.[m]) || 0;
   st.out.CEREBROVASCULAR.points = Number(hist.outpatient?.cerebrovascular?.points?.[m]) || 0;
   st.out.DISUSE.units = Number(hist.outpatient?.disuse?.units?.[m]) || 0;
@@ -110,7 +133,6 @@ function statsFromHistorical(hist, month) {
   st.out.points = st.out.CEREBROVASCULAR.points + st.out.DISUSE.points
     + st.out.LOCOMOTIVE.points + st.out.ANALGESIA.points;
 
-  // 加算
   st.early.units = Number(hist.additions?.earlyAddition?.units?.[m]) || 0;
   st.early.points = Number(hist.additions?.earlyAddition?.points?.[m]) || 0;
   st.plan.count = Number(hist.additions?.rehabPlan?.count?.[m]) || 0;
@@ -405,7 +427,7 @@ export function writeYearlyTrendSheet(wb, year, _month) {
   r += 1;
 
   const histNote = (calendarYear === 2026)
-    ? '1〜9月=点数票確定値（annualScoreHistorical2026）／10月=ライブ集計／11・12月=空欄'
+    ? '1〜9月=点数票_2.xlsx確定値（総点・3大疾患総単位・早期加算）／入外内訳なし＝入院行に合算／10月=ライブ／11・12月=空欄'
     : '月次ライブ集計（履歴モジュール対象外年）';
   setStyledCell(ws, r, 0, `点数票準拠／${histNote}／A4横1枚（表のみ）／グラフは「${YEARLY_TREND_GRAPH_SHEET}」シート`, {
     font: { name: 'Meiryo UI', sz: 8.5, color: { rgb: '64748B' } }
@@ -673,7 +695,7 @@ export function writeYearlyTrendGraphSheet(wb, calendarYear, statsListPrefetched
   merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 15 } });
   rowHeights[0] = 22;
 
-  setStyledCell(ws, 1, 0, '上＝請求点数（棒:総点／折線:入院・外来）　下＝脳血管・運動器・廃用の単位推移　※A4縦1枚・上下2段', {
+  setStyledCell(ws, 1, 0, '上＝請求総点数（1〜9月=点数票確定）　下＝3大疾患総単位（入外合算）　※A4縦1枚・上下2段', {
     font: { name: 'Meiryo UI', sz: 8.5, color: { rgb: '64748B' } }
   });
   merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: 15 } });
