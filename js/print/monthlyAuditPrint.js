@@ -96,13 +96,13 @@ function fmtMd(dateStr) {
 }
 
 /**
- * 日付配列を M/D,M/D 形式に連結（空は —）
+ * 日付配列を M/D,M/D 形式に連結（空は空文字）
  * @param {string[]} dates
  * @returns {string}
  */
 function fmtMdList(dates) {
   const list = (Array.isArray(dates) ? dates : []).map(fmtMd).filter(Boolean);
-  return list.length ? list.join(',') : '—';
+  return list.length ? list.join(',') : '';
 }
 
 /**
@@ -289,27 +289,21 @@ function resolveLimitLabel(patient, monthEnd) {
 }
 
 /**
- * 早期加算Ⅰ・Ⅱの算定日ラベル（当月スロット実績）
+ * 早期加算ⅠまたはⅡの算定日ラベル（列分離用）
+ * 対象外・起算未設定・算定なしはすべて「-」
  * @param {object} patient
- * @param {{ early1Dates: string[], early2Dates: string[] }} auditDates
+ * @param {string[]} dates
  * @returns {{ label: string, hasAny: boolean }}
  */
-function resolveEarlyCalcLabel(patient, auditDates) {
+function resolveEarlyPhaseColumnLabel(patient, dates) {
   const isAnalgesia = patient?.diseaseType === 'ANALGESIA';
   const isOut = patient?.category === 'OUTPATIENT';
-  if (isOut || isAnalgesia) {
-    return { label: '対象外', hasAny: false };
+  if (isOut || isAnalgesia || !getEarlyBaseDate(patient)) {
+    return { label: '-', hasAny: false };
   }
-  if (!getEarlyBaseDate(patient)) {
-    return { label: '起算未設定', hasAny: false };
-  }
-  const e1 = fmtMdList(auditDates?.early1Dates);
-  const e2 = fmtMdList(auditDates?.early2Dates);
-  const hasAny = (auditDates?.early1Dates?.length > 0) || (auditDates?.early2Dates?.length > 0);
-  return {
-    label: `Ⅰ${e1} Ⅱ${e2}`,
-    hasAny
-  };
+  const text = fmtMdList(dates);
+  if (!text) return { label: '-', hasAny: false };
+  return { label: text, hasAny: true };
 }
 
 /**
@@ -320,7 +314,8 @@ function resolveEarlyCalcLabel(patient, auditDates) {
 function resolvePlanCalcLabel(planDates) {
   const list = Array.isArray(planDates) ? planDates : [];
   if (!list.length) return { label: '未', hasAny: false };
-  return { label: fmtMdList(list), hasAny: true };
+  const text = fmtMdList(list);
+  return { label: text || '未', hasAny: true };
 }
 
 /**
@@ -395,7 +390,8 @@ export function printMonthlyAuditSheet({
     const auditDates = collectEarlyAndPlanDatesFromSlots(item, {
       therapistId: therapistFocus ? tid : null
     });
-    const earlyCalc = resolveEarlyCalcLabel(p, auditDates);
+    const early1Col = resolveEarlyPhaseColumnLabel(p, auditDates.early1Dates);
+    const early2Col = resolveEarlyPhaseColumnLabel(p, auditDates.early2Dates);
     const planCalc = resolvePlanCalcLabel(auditDates.planDates);
     const cat = resolveCategoryLabel(p);
     const diseaseInfo = resolveDiseaseLabel(p);
@@ -444,7 +440,8 @@ export function printMonthlyAuditSheet({
         <td class="meta sess" title="実施回数 ${sessionDays}回 / 総単位 ${monthlyStats.totalUnits}">${sessionDays}</td>
         <td class="meta th">${sanitizeHtml(therapistLabel)}</td>
         <td class="meta lim">${sanitizeHtml(limitLabel)}</td>
-        <td class="meta early ${earlyCalc.hasAny ? 'ok' : ''}" title="早期加算Ⅰ・Ⅱの算定日（当月スロット実績）">${sanitizeHtml(earlyCalc.label)}</td>
+        <td class="meta early e1 ${early1Col.hasAny ? 'ok' : 'empty'}" title="早期加算Ⅰ算定日">${sanitizeHtml(early1Col.label)}</td>
+        <td class="meta early e2 ${early2Col.hasAny ? 'ok' : 'empty'}" title="早期加算Ⅱ算定日">${sanitizeHtml(early2Col.label)}</td>
         <td class="meta care">${sanitizeHtml(care)}</td>
         ${dayCells}
         <td class="tot">${totalCell}</td>
@@ -569,14 +566,14 @@ export function printMonthlyAuditSheet({
     table.audit thead th.dow { background: #334155; font-weight: 700; font-size: 5.2pt; }
     table.audit thead th.dow.sat { background: #2563eb; }
     table.audit thead th.dow.sun { background: #e11d48; }
-    .chk { width: 22px; background: #fffbeb; }
+    .chk { width: 20px; background: #fffbeb; }
     .chk .box { font-size: 9pt; font-weight: 800; line-height: 1; display: block; }
-    .chk .chk-l { font-size: 5pt; color: #92400e; font-weight: 800; display: block; }
+    .chk .chk-l { font-size: 4.8pt; color: #92400e; font-weight: 800; display: block; }
     .meta { text-align: left !important; padding-left: 2px !important; font-weight: 700; }
-    .meta.id { width: 38px; font-size: 5.5pt; color: #64748b; }
-    .meta.name { width: 52px; font-size: 7pt; font-weight: 800; }
-    .meta.cat { width: 14px; text-align: center !important; padding-left: 0 !important; }
-    .meta.disease { width: 36px; font-size: 5.5pt; font-weight: 800; }
+    .meta.id { width: 30px; font-size: 5.2pt; color: #64748b; }
+    .meta.name { width: 44px; font-size: 6.5pt; font-weight: 800; }
+    .meta.cat { width: 12px; text-align: center !important; padding-left: 0 !important; }
+    .meta.disease { width: 32px; font-size: 5.2pt; font-weight: 800; }
     .meta.disease.disuse {
       background: #fff7ed !important;
       color: #9a3412 !important;
@@ -584,45 +581,51 @@ export function printMonthlyAuditSheet({
       font-weight: 900;
     }
     .meta.sess {
-      width: 22px;
+      width: 18px;
       text-align: center !important;
       padding-left: 0 !important;
-      font-size: 7pt;
+      font-size: 6.5pt;
       font-weight: 900;
       color: #0f172a;
       background: #f8fafc;
     }
-    .meta.th { width: 40px; font-size: 5.5pt; color: #0369a1; }
-    .meta.lim { width: 48px; font-size: 5.2pt; }
+    .meta.th { width: 32px; font-size: 5pt; color: #0369a1; }
+    .meta.lim { width: 38px; font-size: 4.8pt; }
     .meta.early {
-      width: 72px;
-      font-size: 4.8pt;
-      line-height: 1.15;
+      width: 36px;
+      font-size: 4.5pt;
+      line-height: 1.12;
       white-space: normal;
       word-break: break-all;
+      text-align: center !important;
+      padding-left: 1px !important;
+      padding-right: 1px !important;
     }
-    .meta.early.ok { background: #ecfdf5; color: #047857; font-weight: 700; }
-    .meta.care { width: 40px; font-size: 5.2pt; }
-    td.d, th.d { width: 14px; }
+    .meta.early.ok { font-weight: 700; }
+    .meta.early.e1.ok { background: #ecfdf5; color: #047857; }
+    .meta.early.e2.ok { background: #eff6ff; color: #1d4ed8; }
+    .meta.early.empty { color: #94a3b8; font-weight: 600; }
+    .meta.care { width: 32px; font-size: 4.8pt; }
+    td.d, th.d { width: 12.5px; }
     td.d.sat { background: #eff6ff; }
     td.d.sun { background: #fff1f2; }
     td.d.on strong { color: #0f172a; font-weight: 800; }
     td.d .dash { color: #cbd5e1; }
     td.d.empty, th.d.empty { background: #f1f5f9; color: #cbd5e1; }
-    .tot { width: 28px; font-weight: 800; background: #f8fafc; }
+    .tot { width: 24px; font-weight: 800; background: #f8fafc; }
     .tot .own { color: #0369a1; font-weight: 800; }
     .tot .all { color: #64748b; font-size: 5pt; font-weight: 600; }
     .plan {
-      width: 36px;
+      width: 30px;
       font-weight: 800;
-      font-size: 5pt;
+      font-size: 4.5pt;
       white-space: normal;
       word-break: break-all;
-      line-height: 1.15;
+      line-height: 1.12;
     }
     .plan.ok { background: #e0f2fe; color: #0369a1; }
     .plan.ng { background: #fef2f2; color: #b91c1c; }
-    .no { width: 16px; color: #94a3b8; font-size: 5.5pt; }
+    .no { width: 14px; color: #94a3b8; font-size: 5pt; }
     .footer {
       margin-top: 4px;
       display: flex;
@@ -661,7 +664,7 @@ export function printMonthlyAuditSheet({
     </div>
   </div>
   <div class="hint">
-    ※ 左端の「□ 点検」「□ 計画」に赤ペンでチェック。「早ⅠⅡ算定日」は当月スロットを evaluateEarlyBonusPhase で分類した実施日、「計画算定日」は billingPlan 付きスロットの実施日。日別は${therapistFocus ? '選択セラピストの当人実施単位' : '患者の個別リハ単位'}を表示。
+    ※ 左端の「□ 点検」「□ 計画」に赤ペンでチェック。「早期加算Ⅰ／Ⅱ」は当月スロットを PHASE_1 / PHASE_2 で分類した算定日（なしは -）。「計画算定日」は billingPlan 付きスロットの実施日。日別は${therapistFocus ? '選択セラピストの当人実施単位' : '患者の個別リハ単位'}を表示。
   </div>
   <table class="audit">
     <thead>
@@ -675,7 +678,8 @@ export function printMonthlyAuditSheet({
         <th class="meta sess" rowspan="2" title="実施回数（単位&gt;0の日数）">回数</th>
         <th class="meta th" rowspan="2">担当</th>
         <th class="meta lim" rowspan="2">算定期限</th>
-        <th class="meta early" rowspan="2" title="当月スロットの早期加算Ⅰ・Ⅱ算定日">早ⅠⅡ算定日</th>
+        <th class="meta early e1" rowspan="2" title="早期加算Ⅰ算定日（PHASE_1）">早期加算Ⅰ</th>
+        <th class="meta early e2" rowspan="2" title="早期加算Ⅱ算定日（PHASE_2）">早期加算Ⅱ</th>
         <th class="meta care" rowspan="2">介護認定</th>
         ${dayHeaderCells}
         <th class="tot" rowspan="2">計${therapistFocus ? '<br>当/全' : ''}</th>
