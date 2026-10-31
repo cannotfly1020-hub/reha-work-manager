@@ -1,11 +1,11 @@
 // js/excel/sheets/yearlyTrendSheet.js
 // 年間推移（点数票準拠・暦年 1月〜12月＋年間合計）
 // シート分離: 「年間推移」=数値表のみ / 「年間推移グラフ」=2グラフ専用
-// 2026年1〜9月: js/fy2026_annual_historical_score_data.js の確定値
+// 2026年1〜9月: js/annualScoreHistorical2026.js（= fy2026_annual_historical_score_data.js）の確定値
 // 10月: ライブ集計 / 11・12月: 空欄（見込み）
 // ※既存の個別リハ患者シート・20名分割・PT/OT結合は本ファイルでは触らない
 
-import { ANNUAL_HISTORICAL_DATA_2026 } from '../../fy2026_annual_historical_score_data.js';
+import { ANNUAL_HISTORICAL_DATA_2026 } from '../../annualScoreHistorical2026.js';
 import { REHA_RULES } from '../../config/rules.js';
 import { evaluateEarlyBonusPhase, getDailyBasePoints } from '../../core/deadlineCalc.js';
 import { aggregateFromAppSchedule } from '../../store/scheduleStore.js';
@@ -405,7 +405,7 @@ export function writeYearlyTrendSheet(wb, year, _month) {
   r += 1;
 
   const histNote = (calendarYear === 2026)
-    ? '1〜9月=点数票確定値（fy2026_annual_historical_score_data）／10月=ライブ集計／11・12月=空欄'
+    ? '1〜9月=点数票確定値（annualScoreHistorical2026）／10月=ライブ集計／11・12月=空欄'
     : '月次ライブ集計（履歴モジュール対象外年）';
   setStyledCell(ws, r, 0, `点数票準拠／${histNote}／A4横1枚（表のみ）／グラフは「${YEARLY_TREND_GRAPH_SHEET}」シート`, {
     font: { name: 'Meiryo UI', sz: 8.5, color: { rgb: '64748B' } }
