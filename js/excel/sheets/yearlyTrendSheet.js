@@ -607,9 +607,10 @@ export function writeYearlyTrendSheet(wb, year, _month) {
     rowHeights[emptyR] = 12;
   }
 
-  // Excel 34行目（0始まり 33）から2グラフを左右配置（rowBreaks 不使用）
+  // Excel 34行目（0始まり 33）から2グラフを左右配置
+  // 左=請求点数 / 右=3大疾患単位 ※rowBreaks 不使用・1 drawing に複数 PNG
   const chartAnchorRow = 33; // Excel row 34
-  const chartW = 450;
+  const chartW = 460;
   const chartH = 320;
 
   const monthNum = (picker) => statsList.map((s) => (s.isBlank ? 0 : (Number(picker(s)) || 0)));

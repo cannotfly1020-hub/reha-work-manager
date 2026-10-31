@@ -167,78 +167,83 @@ export function renderRevenuePointsChartPng(opts) {
   const inpatient = (opts?.inpatientPointsByMonth || []).map((n) => Number(n) || 0);
   const outpatient = (opts?.outpatientPointsByMonth || []).map((n) => Number(n) || 0);
 
-  ctx.fillStyle = '#FFFFFF';
+  // カード背景
+  ctx.fillStyle = '#F8FAFC';
   ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.strokeStyle = '#E2E8F0';
+  ctx.lineWidth = 1;
+  ctx.fillRect(4, 4, width - 8, height - 8);
+  ctx.strokeRect(4.5, 4.5, width - 9, height - 9);
 
-  const pad = { top: 48, right: 16, bottom: 52, left: 56 };
+  const pad = { top: 50, right: 14, bottom: 54, left: 58 };
   const plotW = width - pad.left - pad.right;
   const plotH = height - pad.top - pad.bottom;
   const n = 12;
   const slot = plotW / n;
-  const barW = Math.max(8, slot * 0.55);
+  const barW = Math.max(10, slot * 0.58);
   const yMax = Math.max(1, ...grand, ...inpatient, ...outpatient) * 1.18;
 
   ctx.fillStyle = '#0F172A';
-  ctx.font = 'bold 13px "Meiryo UI", "Hiragino Sans", sans-serif';
+  ctx.font = 'bold 12px "Meiryo UI", "Hiragino Sans", sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillText(`${yearTitle(yearLabel, calendarMode)} 月別 請求点数推移（入院・外来・総合計）`, pad.left, 20);
+  ctx.fillText(`【グラフ1】${yearTitle(yearLabel, calendarMode)} 請求点数推移`, pad.left, 22);
 
-  ctx.font = '10px "Meiryo UI", sans-serif';
+  ctx.font = '9.5px "Meiryo UI", sans-serif';
   ctx.fillStyle = '#64748B';
-  ctx.fillText('棒＝請求総点数　／　折線＝入院・外来点数', pad.left, 36);
+  ctx.fillText('棒＝請求総点数　／　青線＝入院点数　／　緑線＝外来点数', pad.left, 38);
 
   drawPlotFrame(ctx, pad, plotW, plotH);
   drawYGrid(ctx, pad, plotW, plotH, yMax);
 
-  // 棒: 請求総点数
+  // 棒: 請求総点数（グレー〜ライトブルー）
   for (let i = 0; i < n; i += 1) {
     const v = grand[i] || 0;
     const h = (v / yMax) * plotH;
     const x = pad.left + i * slot + (slot - barW) / 2;
     const y = pad.top + plotH - h;
     const grad = ctx.createLinearGradient(0, y, 0, pad.top + plotH);
-    grad.addColorStop(0, '#BFDBFE');
-    grad.addColorStop(1, '#93C5FD');
+    grad.addColorStop(0, '#CBD5E1');
+    grad.addColorStop(1, '#94A3B8');
     ctx.fillStyle = grad;
     ctx.fillRect(x, y, barW, Math.max(0, h));
   }
 
-  drawLineSeries(ctx, inpatient, '#0284C7', pad, plotH, slot, yMax, 3.5);
-  drawLineSeries(ctx, outpatient, '#059669', pad, plotH, slot, yMax, 3.5);
+  drawLineSeries(ctx, inpatient, '#0284C7', pad, plotH, slot, yMax, 3.8);
+  drawLineSeries(ctx, outpatient, '#059669', pad, plotH, slot, yMax, 3.8);
   drawMonthLabels(ctx, pad, plotH, slot, MONTH_LABELS);
 
-  // 凡例
-  const legendY = height - 14;
+  const legendY = height - 16;
   let lx = pad.left;
   ctx.font = '10px "Meiryo UI", sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillStyle = '#93C5FD';
+  ctx.fillStyle = '#94A3B8';
   ctx.fillRect(lx, legendY - 8, 12, 8);
   ctx.fillStyle = '#334155';
   ctx.fillText('請求総点数', lx + 16, legendY);
-  lx += 88;
+  lx += 90;
 
   [
     { color: '#0284C7', label: '入院点数' },
     { color: '#059669', label: '外来点数' }
   ].forEach((s) => {
     ctx.strokeStyle = s.color;
-    ctx.lineWidth = 2.2;
+    ctx.lineWidth = 2.4;
     ctx.beginPath();
     ctx.moveTo(lx, legendY - 4);
     ctx.lineTo(lx + 18, legendY - 4);
     ctx.stroke();
     ctx.beginPath();
     ctx.fillStyle = s.color;
-    ctx.arc(lx + 9, legendY - 4, 2.5, 0, Math.PI * 2);
+    ctx.arc(lx + 9, legendY - 4, 2.6, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#334155';
     ctx.fillText(s.label, lx + 24, legendY);
-    lx += 78;
+    lx += 82;
   });
 
   ctx.save();
-  ctx.translate(12, pad.top + plotH / 2);
+  ctx.translate(14, pad.top + plotH / 2);
   ctx.rotate(-Math.PI / 2);
   ctx.textAlign = 'center';
   ctx.fillStyle = '#64748B';
@@ -295,10 +300,15 @@ export function renderDiseaseUnitsChartPng(opts) {
     };
   });
 
-  ctx.fillStyle = '#FFFFFF';
+  ctx.fillStyle = '#F8FAFC';
   ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.strokeStyle = '#E2E8F0';
+  ctx.lineWidth = 1;
+  ctx.fillRect(4, 4, width - 8, height - 8);
+  ctx.strokeRect(4.5, 4.5, width - 9, height - 9);
 
-  const pad = { top: 48, right: 16, bottom: 52, left: 52 };
+  const pad = { top: 50, right: 14, bottom: 54, left: 52 };
   const plotW = width - pad.left - pad.right;
   const plotH = height - pad.top - pad.bottom;
   const slot = plotW / 12;
@@ -306,41 +316,41 @@ export function renderDiseaseUnitsChartPng(opts) {
   const yMax = Math.max(1, ...allVals, 1) * 1.18;
 
   ctx.fillStyle = '#0F172A';
-  ctx.font = 'bold 13px "Meiryo UI", "Hiragino Sans", sans-serif';
+  ctx.font = 'bold 12px "Meiryo UI", "Hiragino Sans", sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillText(`${yearTitle(yearLabel, calendarMode)} 月別 3大疾患提供単位推移（入院＋外来）`, pad.left, 20);
+  ctx.fillText(`【グラフ2】${yearTitle(yearLabel, calendarMode)} 3大疾患 単位推移`, pad.left, 22);
 
-  ctx.font = '10px "Meiryo UI", sans-serif';
+  ctx.font = '9.5px "Meiryo UI", sans-serif';
   ctx.fillStyle = '#64748B';
-  ctx.fillText('脳血管／運動器／廃用症候群（入院＋外来合算）', pad.left, 36);
+  ctx.fillText('青＝脳血管　橙＝運動器　緑＝廃用　（いずれも入院＋外来合算単位）', pad.left, 38);
 
   drawPlotFrame(ctx, pad, plotW, plotH);
   drawYGrid(ctx, pad, plotW, plotH, yMax);
   series.forEach((s) => drawLineSeries(ctx, s.values, s.color, pad, plotH, slot, yMax, 3.8));
   drawMonthLabels(ctx, pad, plotH, slot, MONTH_LABELS);
 
-  const legendY = height - 14;
+  const legendY = height - 16;
   let lx = pad.left;
   ctx.font = '10px "Meiryo UI", sans-serif';
   ctx.textAlign = 'left';
   series.forEach((s) => {
     ctx.strokeStyle = s.color;
-    ctx.lineWidth = 2.2;
+    ctx.lineWidth = 2.4;
     ctx.beginPath();
     ctx.moveTo(lx, legendY - 4);
     ctx.lineTo(lx + 18, legendY - 4);
     ctx.stroke();
     ctx.beginPath();
     ctx.fillStyle = s.color;
-    ctx.arc(lx + 9, legendY - 4, 2.5, 0, Math.PI * 2);
+    ctx.arc(lx + 9, legendY - 4, 2.6, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#334155';
     ctx.fillText(s.label, lx + 24, legendY);
-    lx += 100;
+    lx += 98;
   });
 
   ctx.save();
-  ctx.translate(12, pad.top + plotH / 2);
+  ctx.translate(14, pad.top + plotH / 2);
   ctx.rotate(-Math.PI / 2);
   ctx.textAlign = 'center';
   ctx.fillStyle = '#64748B';
