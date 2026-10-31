@@ -1,5 +1,6 @@
 // js/excel/sheets/yearlyTrendSheet.js
 // 年間推移（点数票準拠・暦年 1月〜12月＋年間合計）
+// シート分離: 「年間推移」=数値表のみ / 「年間推移グラフ」=2グラフ専用
 // 2026年1〜9月: js/fy2026_annual_historical_score_data.js の確定値
 // 10月: ライブ集計 / 11・12月: 空欄（見込み）
 // ※既存の個別リハ患者シート・20名分割・PT/OT結合は本ファイルでは触らない
@@ -11,7 +12,7 @@ import { aggregateFromAppSchedule } from '../../store/scheduleStore.js';
 import {
   getEarlyBaseDate, thinBorder,
   setStyledCell, updateSheetRange, appendOrReplaceSheet,
-  applyA4LandscapePrintSetup, YEARLY_TREND_SHEET
+  applyA4LandscapePrintSetup, YEARLY_TREND_SHEET, YEARLY_TREND_GRAPH_SHEET
 } from '../sheetUtils.js';
 import {
   renderRevenuePointsChartPng,
@@ -406,7 +407,7 @@ export function writeYearlyTrendSheet(wb, year, _month) {
   const histNote = (calendarYear === 2026)
     ? '1〜9月=点数票確定値（fy2026_annual_historical_score_data）／10月=ライブ集計／11・12月=空欄'
     : '月次ライブ集計（履歴モジュール対象外年）';
-  setStyledCell(ws, r, 0, `点数票準拠／${histNote}／A4横 fitToWidth=1`, {
+  setStyledCell(ws, r, 0, `点数票準拠／${histNote}／A4横1枚（表のみ）／グラフは「${YEARLY_TREND_GRAPH_SHEET}」シート`, {
     font: { name: 'Meiryo UI', sz: 8.5, color: { rgb: '64748B' } }
   });
   merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: 15 } });
@@ -597,87 +598,10 @@ export function writeYearlyTrendSheet(wb, year, _month) {
   }));
   rowHeights[r - 1] = 17;
 
-  // 表を Excel 行30までに揃え、31〜33は空行、34行目からグラフ（手動改ページは使わない）
+  // 数値表のみ（〜Excel行30）。グラフは別シート「年間推移グラフ」へ分離
   while (r < 30) {
     rowHeights[r] = rowHeights[r] || 4;
     r += 1;
-  }
-  // Excel 31〜33（0始まり 30〜32）: 空行バッファ（セル・結合なし）
-  for (let emptyR = 30; emptyR <= 32; emptyR += 1) {
-    rowHeights[emptyR] = 12;
-  }
-
-  // Excel 34行目（0始まり 33）から2グラフを左右対称配置（A4横2ページ目に収める）
-  // 左 A34=請求点数 / 右 I34=3大疾患単位 ※rowBreaks 不使用・1 drawing に複数 PNG
-  // Canvas 内部は 2倍（920×680）描画 → Excel ext は 460×340
-  const chartAnchorRow = 33; // Excel row 34
-  const chartW = 460;
-  const chartH = 340;
-
-  const monthNum = (picker) => statsList.map((s) => (s.isBlank ? 0 : (Number(picker(s)) || 0)));
-  const pickCombinedUnits = (inKey, outKey) => statsList.map((s) => {
-    if (s.isBlank) return 0;
-    return (Number(s.in?.[inKey]?.units) || 0) + (Number(s.out?.[outKey]?.units) || 0);
-  });
-
-  const grandPointsByMonth = monthNum((s) => s.grandPoints);
-  const inpatientPointsByMonth = monthNum((s) => s.in.points);
-  const outpatientPointsByMonth = monthNum((s) => s.out.points);
-  const cerebrovascularUnits = pickCombinedUnits('CEREBROVASCULAR', 'CEREBROVASCULAR');
-  const locomotiveUnits = pickCombinedUnits('LOCOMOTIVE', 'LOCOMOTIVE');
-  const disuseUnits = pickCombinedUnits('DISUSE', 'DISUSE');
-
-  try {
-    const embedded = [];
-    const revenueChart = renderRevenuePointsChartPng({
-      calendarYear,
-      calendarMode: true,
-      grandPointsByMonth,
-      inpatientPointsByMonth,
-      outpatientPointsByMonth,
-      width: chartW,
-      height: chartH,
-      pixelRatio: 2
-    });
-    if (revenueChart?.png) {
-      embedded.push({
-        name: 'revenue_points_chart',
-        png: revenueChart.png,
-        fromCol: 0, // A34
-        fromRow: chartAnchorRow,
-        widthPx: chartW,
-        heightPx: chartH
-      });
-    }
-    const diseaseChart = renderDiseaseUnitsChartPng({
-      calendarYear,
-      calendarMode: true,
-      cerebrovascularUnits,
-      locomotiveUnits,
-      disuseUnits,
-      width: chartW,
-      height: chartH,
-      pixelRatio: 2
-    });
-    if (diseaseChart?.png) {
-      embedded.push({
-        name: 'disease_units_chart',
-        png: diseaseChart.png,
-        fromCol: 8, // I34
-        fromRow: chartAnchorRow,
-        widthPx: chartW,
-        heightPx: chartH
-      });
-    }
-    if (embedded.length) {
-      ws['!rehaEmbeddedImages'] = embedded;
-      // 340px ≈ 約18行分の余白を確保（印刷時ページ2に収める）
-      for (let i = 0; i < 20; i += 1) {
-        rowHeights[chartAnchorRow + i] = rowHeights[chartAnchorRow + i] || 15;
-      }
-    }
-  } catch (err) {
-    console.warn('[yearlyTrend] chart render skipped:', err);
   }
 
   ws['!cols'] = [
@@ -691,8 +615,9 @@ export function writeYearlyTrendSheet(wb, year, _month) {
   ws['!merges'] = merges;
   ws['!views'] = [{ showGridLines: true }];
   ws['!freeze'] = { xSplit: 3, ySplit: headerRow + 1, topLeftCell: 'D4', activePane: 'bottomRight', state: 'frozen' };
-  // 手動 rowBreaks は使わない。fitToHeight=2 で 表=1枚 / グラフ=1枚 に収容
-  applyA4LandscapePrintSetup(ws, 2);
+
+  // 表だけで A4横 1枚（fitToWidth=1 / fitToHeight=1）。画像・rowBreaks なし
+  applyA4LandscapePrintSetup(ws, 1);
   ws['!margins'] = {
     left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2
   };
@@ -702,7 +627,7 @@ export function writeYearlyTrendSheet(wb, year, _month) {
     orientation: 'landscape',
     fitToPage: true,
     fitToWidth: 1,
-    fitToHeight: 2,
+    fitToHeight: 1,
     scale: 100
   };
   ws['!sheetPr'] = { pageSetUpPr: { fitToPage: true } };
@@ -710,7 +635,7 @@ export function writeYearlyTrendSheet(wb, year, _month) {
     paperSize: 9,
     orientation: 'landscape',
     fitToWidth: 1,
-    fitToHeight: 2,
+    fitToHeight: 1,
     fitHeight: true,
     scale: 100,
     margins: {
@@ -720,4 +645,139 @@ export function writeYearlyTrendSheet(wb, year, _month) {
 
   updateSheetRange(ws);
   appendOrReplaceSheet(wb, ws, YEARLY_TREND_SHEET);
+
+  // グラフ専用シート（独立・左右2枚・A4横1枚）
+  writeYearlyTrendGraphSheet(wb, calendarYear, statsList);
+}
+
+/**
+ * 年間推移グラフ専用シート（点数推移 ＋ 3大疾患単位・左右配置）
+ * @param {Object} wb
+ * @param {number} calendarYear
+ * @param {ReturnType<typeof emptyMonthStats>[]} [statsListPrefetched]
+ */
+export function writeYearlyTrendGraphSheet(wb, calendarYear, statsListPrefetched) {
+  const y = Number(calendarYear) || new Date().getFullYear();
+  const statsList = Array.isArray(statsListPrefetched)
+    ? statsListPrefetched
+    : buildCalendarYearStats(y);
+
+  const ws = {};
+  const merges = [];
+  const rowHeights = [];
+
+  setStyledCell(ws, 0, 0, `【${y}年 年間推移グラフ】点数推移 ＋ 3大疾患単位（入院＋外来合算）`, {
+    font: { name: 'Meiryo UI', sz: 12, bold: true, color: { rgb: '0F172A' } }
+  });
+  merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 15 } });
+  rowHeights[0] = 22;
+
+  setStyledCell(ws, 1, 0, '左＝請求点数（棒:総点／折線:入院・外来）　右＝脳血管・運動器・廃用の単位推移　※A4横1枚', {
+    font: { name: 'Meiryo UI', sz: 8.5, color: { rgb: '64748B' } }
+  });
+  merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: 15 } });
+  rowHeights[1] = 16;
+
+  const chartAnchorRow = 2; // Excel 行3（タイトル下）
+  const chartW = 460;
+  const chartH = 340;
+
+  const monthNum = (picker) => statsList.map((s) => (s.isBlank ? 0 : (Number(picker(s)) || 0)));
+  const pickCombinedUnits = (inKey, outKey) => statsList.map((s) => {
+    if (s.isBlank) return 0;
+    return (Number(s.in?.[inKey]?.units) || 0) + (Number(s.out?.[outKey]?.units) || 0);
+  });
+
+  try {
+    const embedded = [];
+    const revenueChart = renderRevenuePointsChartPng({
+      calendarYear: y,
+      calendarMode: true,
+      grandPointsByMonth: monthNum((s) => s.grandPoints),
+      inpatientPointsByMonth: monthNum((s) => s.in.points),
+      outpatientPointsByMonth: monthNum((s) => s.out.points),
+      width: chartW,
+      height: chartH,
+      pixelRatio: 2
+    });
+    if (revenueChart?.png) {
+      embedded.push({
+        name: 'revenue_points_chart',
+        png: revenueChart.png,
+        fromCol: 0,
+        fromRow: chartAnchorRow,
+        widthPx: chartW,
+        heightPx: chartH
+      });
+    }
+    const diseaseChart = renderDiseaseUnitsChartPng({
+      calendarYear: y,
+      calendarMode: true,
+      cerebrovascularUnits: pickCombinedUnits('CEREBROVASCULAR', 'CEREBROVASCULAR'),
+      locomotiveUnits: pickCombinedUnits('LOCOMOTIVE', 'LOCOMOTIVE'),
+      disuseUnits: pickCombinedUnits('DISUSE', 'DISUSE'),
+      width: chartW,
+      height: chartH,
+      pixelRatio: 2
+    });
+    if (diseaseChart?.png) {
+      embedded.push({
+        name: 'disease_units_chart',
+        png: diseaseChart.png,
+        fromCol: 8,
+        fromRow: chartAnchorRow,
+        widthPx: chartW,
+        heightPx: chartH
+      });
+    }
+    if (embedded.length) {
+      ws['!rehaEmbeddedImages'] = embedded;
+      for (let i = 0; i < 20; i += 1) {
+        rowHeights[chartAnchorRow + i] = rowHeights[chartAnchorRow + i] || 16;
+      }
+    }
+  } catch (err) {
+    console.warn('[yearlyTrendGraph] chart render skipped:', err);
+  }
+
+  // 左右対称の見た目用に列幅を揃える（表シートと同系）
+  ws['!cols'] = [
+    { wch: 11 },
+    { wch: 30 },
+    { wch: 6.5 },
+    ...Array.from({ length: 12 }, () => ({ wch: 8.2 })),
+    { wch: 12.5 }
+  ];
+  ws['!rows'] = rowHeights.map((h) => ({ hpt: h || 16 }));
+  ws['!merges'] = merges;
+  ws['!views'] = [{ showGridLines: false }];
+
+  applyA4LandscapePrintSetup(ws, 1);
+  ws['!margins'] = {
+    left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2
+  };
+  ws['!pageSetup'] = {
+    ...(ws['!pageSetup'] || {}),
+    paperSize: 9,
+    orientation: 'landscape',
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: 1,
+    scale: 100
+  };
+  ws['!sheetPr'] = { pageSetUpPr: { fitToPage: true } };
+  ws['!rehaPrintSetup'] = {
+    paperSize: 9,
+    orientation: 'landscape',
+    fitToWidth: 1,
+    fitToHeight: 1,
+    fitHeight: true,
+    scale: 100,
+    margins: {
+      left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2
+    }
+  };
+
+  updateSheetRange(ws);
+  appendOrReplaceSheet(wb, ws, YEARLY_TREND_GRAPH_SHEET);
 }

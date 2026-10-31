@@ -4,6 +4,8 @@
 
 export const SUMMARY_SHEET = 'レセプト収益サマリー';
 export const YEARLY_TREND_SHEET = '年間推移';
+/** 年間推移のグラフ専用シート（表と分離して XML 破損リスクを排除） */
+export const YEARLY_TREND_GRAPH_SHEET = '年間推移グラフ';
 export const ANALGESIA_SHEET = '実施ﾘｽﾄ 消炎鎮痛';
 
 export const STYLES = {
