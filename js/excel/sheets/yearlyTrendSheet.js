@@ -61,7 +61,9 @@ function emptyMonthStats() {
     grandUnits: 0,
     grandPoints: 0,
     /** 未確定月（数式SUM対象だが表示は空） */
-    isBlank: false
+    isBlank: false,
+    /** historical=原本確定(1〜9) / live=システム集計(10月〜等) */
+    source: 'live'
   };
 }
 
@@ -85,10 +87,12 @@ function resolveDiseaseKey(patient) {
  */
 function statsFromHistorical(hist, month) {
   const st = emptyMonthStats();
+  st.source = 'historical';
   const m = Number(month);
   if (!hist || !m) return st;
 
   // —— 新スキーマ（原本スクリーンショット確定値）——
+  // ※ 1〜9月の数値は原本どおり units に格納し、以後の加工で値を変えない
   if (hist.grandTotalPoints || hist.diseaseTotals || hist.earlyBonusTotal) {
     const cerebro = Number(hist.diseaseTotals?.cerebrovascular?.units?.[m]) || 0;
     const loco = Number(hist.diseaseTotals?.locomotive?.units?.[m]) || 0;
@@ -96,7 +100,7 @@ function statsFromHistorical(hist, month) {
     const early = Number(hist.earlyBonusTotal?.units?.[m]) || 0;
     const grandPts = Number(hist.grandTotalPoints?.[m]) || 0;
 
-    // 原本は入院+外来合算の疾患別総単位 → 入院行に合算を載せ、外来は0（グラフの in+out 合算と一致）
+    // 原本は入院+外来合算の疾患別値 → 入院行に合算を載せ、外来は0（二重計上防止）
     st.in.CEREBROVASCULAR.units = cerebro;
     st.in.LOCOMOTIVE.units = loco;
     st.in.DISUSE.units = disuse;
@@ -149,6 +153,7 @@ function statsFromHistorical(hist, month) {
  */
 function aggregateMonthTrendStats(aggregated) {
   const st = emptyMonthStats();
+  st.source = 'live';
   Object.values(aggregated?.patientMap || {}).forEach((item) => {
     const p = item?.patient;
     if (!p) return;
@@ -253,6 +258,7 @@ function buildCalendarYearStats(calendarYear) {
     if (month >= 11 || (hist && month <= 9 && !confirmed.has(month))) {
       const blank = emptyMonthStats();
       blank.isBlank = true;
+      blank.source = 'blank';
       return blank;
     }
     // 非2026年など: 可能ならライブ
@@ -261,6 +267,7 @@ function buildCalendarYearStats(calendarYear) {
     } catch (_) {
       const blank = emptyMonthStats();
       blank.isBlank = true;
+      blank.source = 'blank';
       return blank;
     }
   });
@@ -269,6 +276,31 @@ function buildCalendarYearStats(calendarYear) {
 /** 入院+外来合算単位（履歴は in のみ格納、ライブは in+out） */
 function combinedDiseaseUnits(st, diseaseKey) {
   return (Number(st?.in?.[diseaseKey]?.units) || 0) + (Number(st?.out?.[diseaseKey]?.units) || 0);
+}
+
+/** 入院+外来合算点数（ライブ月用: 単位×規定単価の積算済み） */
+function combinedDiseasePoints(st, diseaseKey) {
+  return (Number(st?.in?.[diseaseKey]?.points) || 0) + (Number(st?.out?.[diseaseKey]?.points) || 0);
+}
+
+/**
+ * 表・グラフ用の疾患別表示値
+ * - historical（1〜9月確定）: 原本値を一切変更せず units フィールドをそのまま使用
+ * - live（10月〜等）: 規定単価込みの点数
+ */
+function tableDiseaseValue(st, diseaseKey) {
+  if (!st || st.isBlank) return 0;
+  if (st.source === 'historical') return combinedDiseaseUnits(st, diseaseKey);
+  return combinedDiseasePoints(st, diseaseKey);
+}
+
+/**
+ * 早期加算の表示値（確定月は原本 units、ライブ月は points）
+ */
+function tableEarlyValue(st) {
+  if (!st || st.isBlank) return 0;
+  if (st.source === 'historical') return Number(st.early?.units) || 0;
+  return Number(st.early?.points) || 0;
 }
 
 function styleHeader() {
@@ -433,9 +465,9 @@ export function writeYearlyTrendSheet(wb, year, _month) {
   r += 1;
 
   const histNote = (calendarYear === 2026)
-    ? '1〜9月=点数票_2.xlsx確定値／10月=当月実績（入外合算）／11・12月=空欄'
-    : '月次ライブ集計（入外合算）';
-  setStyledCell(ws, r, 0, `${histNote}　※下段: 左=請求総点数／右=3大疾患単位`, {
+    ? '1〜9月=点数票_2.xlsx確定値（変更なし）／10月〜=システム集計の点数（単位×規定単価）／11・12月=空欄'
+    : '月次ライブ集計（点数）';
+  setStyledCell(ws, r, 0, `${histNote}　※下段: 左=請求総点数／右=3大疾患`, {
     font: { name: 'Meiryo UI', sz: 8.5, color: { rgb: '64748B' } }
   });
   merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: 15 } });
@@ -456,32 +488,33 @@ export function writeYearlyTrendSheet(wb, year, _month) {
   const monthVals = (picker) => statsList.map((st) => picker(st));
   const rowOpts = (partial) => ({ blankFlags, ...partial });
 
+  // 1〜9月=原本確定値（加工なし）／10月〜=ライブ集計の点数（単位×規定単価）
   const dataRowH = 18;
   r = writeMetricRow(ws, r, merges, rowOpts({
-    catLabel: '単位', catFill: 'FFEDD5',
-    itemLabel: '運動器', metricLabel: '単位数',
-    monthValues: monthVals((s) => combinedDiseaseUnits(s, 'LOCOMOTIVE')), zebra: false
+    catLabel: '点数', catFill: 'FFEDD5',
+    itemLabel: '運動器', metricLabel: '点数',
+    monthValues: monthVals((s) => tableDiseaseValue(s, 'LOCOMOTIVE')), zebra: false
   }));
   rowHeights[r - 1] = dataRowH;
 
   r = writeMetricRow(ws, r, merges, rowOpts({
-    catLabel: '単位', catFill: 'DBEAFE',
-    itemLabel: '脳血管', metricLabel: '単位数',
-    monthValues: monthVals((s) => combinedDiseaseUnits(s, 'CEREBROVASCULAR')), zebra: true
+    catLabel: '点数', catFill: 'DBEAFE',
+    itemLabel: '脳血管', metricLabel: '点数',
+    monthValues: monthVals((s) => tableDiseaseValue(s, 'CEREBROVASCULAR')), zebra: true
   }));
   rowHeights[r - 1] = dataRowH;
 
   r = writeMetricRow(ws, r, merges, rowOpts({
-    catLabel: '単位', catFill: 'D1FAE5',
-    itemLabel: '廃用症候群', metricLabel: '単位数',
-    monthValues: monthVals((s) => combinedDiseaseUnits(s, 'DISUSE')), zebra: false
+    catLabel: '点数', catFill: 'D1FAE5',
+    itemLabel: '廃用症候群', metricLabel: '点数',
+    monthValues: monthVals((s) => tableDiseaseValue(s, 'DISUSE')), zebra: false
   }));
   rowHeights[r - 1] = dataRowH;
 
   r = writeMetricRow(ws, r, merges, rowOpts({
     catLabel: '加算', catFill: 'EDE9FE',
-    itemLabel: '早期加算', metricLabel: '単位数',
-    monthValues: monthVals((s) => Number(s.early?.units) || 0), zebra: true
+    itemLabel: '早期加算', metricLabel: '点数',
+    monthValues: monthVals((s) => tableEarlyValue(s)), zebra: true
   }));
   rowHeights[r - 1] = dataRowH;
 
@@ -506,7 +539,7 @@ export function writeYearlyTrendSheet(wb, year, _month) {
   setStyledCell(ws, chartAnchorRow, 0, '■ 請求総点数推移', {
     font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '0369A1' } }
   });
-  setStyledCell(ws, chartAnchorRow, 8, '■ 3大疾患 単位推移（入外合算）', {
+  setStyledCell(ws, chartAnchorRow, 8, '■ 3大疾患 推移（1〜9月=確定／10月〜=点数）', {
     font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '047857' } }
   });
   rowHeights[chartAnchorRow] = 14;
@@ -535,12 +568,13 @@ export function writeYearlyTrendSheet(wb, year, _month) {
         heightPx: chartH
       });
     }
+    // 疾患グラフも表と同じ値源（確定月は原本値、ライブ月は点数）
     const diseaseChart = renderDiseaseUnitsChartPng({
       calendarYear,
       calendarMode: true,
-      cerebrovascularUnits: monthNum((s) => combinedDiseaseUnits(s, 'CEREBROVASCULAR')),
-      locomotiveUnits: monthNum((s) => combinedDiseaseUnits(s, 'LOCOMOTIVE')),
-      disuseUnits: monthNum((s) => combinedDiseaseUnits(s, 'DISUSE')),
+      cerebrovascularUnits: monthNum((s) => tableDiseaseValue(s, 'CEREBROVASCULAR')),
+      locomotiveUnits: monthNum((s) => tableDiseaseValue(s, 'LOCOMOTIVE')),
+      disuseUnits: monthNum((s) => tableDiseaseValue(s, 'DISUSE')),
       width: chartW,
       height: chartH,
       pixelRatio: 2
