@@ -4,7 +4,7 @@
 // ★外来専用 OUTPATIENT_HOURS から全日コマを生成／昼休みは全列結合1行で圧縮
 // ★予約枠＝担当・患者名・【消炎】／空き枠＝手書き余白
 
-import { formatDateYMD, getWeekDates } from '../core/dateUtils.js';
+import { formatDateYMD, getWeekDates, getMondayOfWeek } from '../core/dateUtils.js';
 import { TIME_SLOTS } from '../config/appointmentSlots.js';
 import { snapToNearestAppointmentSlot } from '../core/timeSlotUtil.js';
 import { generateAppointmentTimeStrings } from '../core/timeSlotGenerator.js';
@@ -15,6 +15,35 @@ import { getPatientById } from '../store/patientStore.js';
 import { getAllTherapists } from '../store/therapistStore.js';
 import { getAllAppointments } from '../store/appointmentStore.js';
 import { showToast } from '../ui/toast.js';
+
+/**
+ * 紙予約表は「翌週以降」専用。
+ * 選択週が今週以前なら、来週月曜日へ繰り上げる。
+ * @param {Date} baseDate
+ * @returns {{ weekDates: Date[], bumped: boolean, reason: string }}
+ */
+function resolveNextWeekOrLater(baseDate) {
+  const selectedMonday = getMondayOfWeek(baseDate || new Date());
+  const thisMonday = getMondayOfWeek(new Date());
+  selectedMonday.setHours(0, 0, 0, 0);
+  thisMonday.setHours(0, 0, 0, 0);
+
+  // 選択週の月曜 ≦ 今週の月曜 → 翌週へ
+  if (selectedMonday.getTime() <= thisMonday.getTime()) {
+    const nextMonday = new Date(thisMonday);
+    nextMonday.setDate(thisMonday.getDate() + 7);
+    return {
+      weekDates: getWeekDates(nextMonday),
+      bumped: true,
+      reason: '選択中の週は今週以前のため、翌週の予約表を出力します'
+    };
+  }
+  return {
+    weekDates: getWeekDates(selectedMonday),
+    bumped: false,
+    reason: ''
+  };
+}
 
 /**
  * 印刷用スロット開始時刻（外来専用時間から午前〜午後を漏れなく生成）
@@ -168,18 +197,24 @@ function timeToMin(t) {
 }
 
 /**
- * 翌週紙予約用・週間予約表（A4縦・1枚完結）を印刷する
+ * 翌週以降の紙予約用・週間予約表（A4縦・1枚完結）を印刷する
  * ※ 受付簿（午前・午後2枚）とは別機能
+ * ※ 対象週は必ず「翌週以降」（今週以前を選んでいても翌週へ繰り上げ）
  * @param {Date} baseDate
  */
 export function printWeeklyPaperBookingSheet(baseDate) {
-  const weekDates = getWeekDates(baseDate);
+  const resolved = resolveNextWeekOrLater(baseDate);
+  const weekDates = resolved.weekDates;
+  if (resolved.bumped) {
+    showToast(resolved.reason, 'info');
+  }
+
   const startStr = formatDateYMD(weekDates[0]);
   const endStr = formatDateYMD(weekDates[5]);
   const allSlotTimes = resolvePrintSlotTimes();
 
   if (!allSlotTimes.length) {
-    showToast('外来予約の時間枠が未設定のため印刷できません', 'warn');
+    showToast('外来予約の時間枠が未設定のため印刷できません（スタッフ設定の外来提供時間を確認）', 'warn');
     return;
   }
 
@@ -220,18 +255,17 @@ export function printWeeklyPaperBookingSheet(baseDate) {
   const therapists = getAllTherapists();
   const dayNames = ['月', '火', '水', '木', '金', '土'];
 
-  // 昼休み帯: 外来 amEnd〜pmStart（例 12:00〜13:00 / 13:00〜13:00＝帯のみの境界表示）
+  // 昼休み帯: スタッフ設定・外来専用 amEnd〜pmStart を動的反映（全列結合1行で圧縮）
   const amEnd = String(OUTPATIENT_HOURS?.amEnd || '13:00');
   const pmStart = String(OUTPATIENT_HOURS?.pmStart || '13:00');
-  // ユーザー指定の「12:00〜13:00」表示を優先しつつ、設定値があればそれを使う
-  const lunchLabelStart = amEnd <= '12:00' ? amEnd : (amEnd < pmStart ? amEnd : '12:00');
-  const lunchLabelEnd = pmStart >= '13:00' ? pmStart : (pmStart > amEnd ? pmStart : '13:00');
+  const lunchLabelStart = amEnd;
+  const lunchLabelEnd = pmStart;
   const breakMin = Math.max(0, timeToMin(pmStart) - timeToMin(amEnd));
-  const showLunchBand = true; // 常に1行圧縮帯を入れ、縦高を節約しつつ午前／午後を視覚分離
+  const showLunchBand = true;
 
   const now = new Date();
   const outStamp = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  const periodLabel = `${startStr.slice(0, 4)}年${Number(startStr.slice(5, 7))}月${Number(startStr.slice(8, 10))}日(月) 〜 ${endStr.slice(0, 4)}年${Number(endStr.slice(5, 7))}月${Number(endStr.slice(8, 10))}日(土)`;
+  const periodLabel = `【翌週以降】${startStr.slice(0, 4)}年${Number(startStr.slice(5, 7))}月${Number(startStr.slice(8, 10))}日(月) 〜 ${endStr.slice(0, 4)}年${Number(endStr.slice(5, 7))}月${Number(endStr.slice(8, 10))}日(土)`;
 
   // A4縦 1枚: 297 - 5 - 4 = 288mm
   const slotCount = allSlotTimes.length;
@@ -265,8 +299,8 @@ export function printWeeklyPaperBookingSheet(baseDate) {
     if (showLunchBand && !lunchBandInserted && String(slotTime) >= pmStart) {
       lunchBandInserted = true;
       const breakText = breakMin > 0
-        ? `── 昼休み（${lunchLabelStart} 〜 ${lunchLabelEnd} / ${breakMin}分）──`
-        : `── 昼休み帯（${lunchLabelStart} 〜 ${lunchLabelEnd}）／午前／午後境界 ──`;
+        ? `── 昼休憩（${lunchLabelStart} 〜 ${lunchLabelEnd} / ${breakMin}分）──`
+        : `── 昼休憩（${lunchLabelStart} 〜 ${lunchLabelEnd}）──`;
       bodyRows += `
         <tr class="lunch-band">
           <td colspan="7">${breakText}</td>
@@ -329,7 +363,7 @@ export function printWeeklyPaperBookingSheet(baseDate) {
 
   // 午後コマが無くても昼休み帯を末尾に出す（午前のみ設定時）
   if (showLunchBand && !lunchBandInserted) {
-    const breakText = `── 昼休み（${lunchLabelStart} 〜 ${lunchLabelEnd}）──`;
+    const breakText = `── 昼休憩（${lunchLabelStart} 〜 ${lunchLabelEnd}）──`;
     bodyRows += `
       <tr class="lunch-band">
         <td colspan="7">${breakText}</td>
@@ -666,7 +700,7 @@ export function printWeeklyPaperBookingSheet(baseDate) {
       <div class="page-header">
         <div class="title-block">
           <div>
-            <span class="title">【外来リハビリ 週間予約表（紙予約用）】</span>
+            <span class="title">【翌週予約受付表（紙予約用・A4縦1枚）】</span>
             <span class="period">${periodLabel}</span>
           </div>
           <div class="legend">

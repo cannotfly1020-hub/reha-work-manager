@@ -89,11 +89,11 @@ function ensureReceptionBookPrintToolbar() {
     else if (weeklyBtn) parent.insertBefore(btnBook, weeklyBtn);
     else parent.appendChild(btnBook);
   }
-  btnBook.innerHTML = '<span>📝</span><span>週間予約受付簿 (午前・午後)</span>';
-  btnBook.title = '対面受付用。A4縦で午前1枚＋午後1枚の予約受付簿を印刷します（画面表示は変わりません）';
+  btnBook.innerHTML = '<span>📋</span><span>週間予約受付簿（午前・午後 2枚）</span>';
+  btnBook.title = '当週の受付・誘導用。スタッフ設定の外来提供時間で午前／午後を分割し、A4縦2枚で印刷します（フルネーム・【⚡消炎】表示）';
   btnBook.style.display = 'flex';
 
-  // ② 翌週紙予約用・週間予約表（A4縦1枚）— 受付簿とは独立
+  // ② 翌週以降の紙予約用・週間予約表（A4縦1枚）— 受付簿とは独立
   let btnPaper = document.getElementById('btnAptPrintWeeklyPaperBooking');
   if (!btnPaper) {
     btnPaper = document.createElement('button');
@@ -107,8 +107,8 @@ function ensureReceptionBookPrintToolbar() {
     if (dailyBtn) parent.insertBefore(btnPaper, dailyBtn);
     else parent.insertBefore(btnPaper, btnBook.nextSibling);
   }
-  btnPaper.innerHTML = '<span>🗓️</span><span>週間予約表 (A4縦1枚・紙予約)</span>';
-  btnPaper.title = '翌週以降の紙予約用。日付・曜日・時間・昼休み1行圧縮・手書き枠つきのA4縦1枚を印刷します（受付簿とは別）';
+  btnPaper.innerHTML = '<span>📝</span><span>翌週予約受付表（A4縦 1枚完結）</span>';
+  btnPaper.title = '翌週以降の紙予約台帳。今週以前を選んでいても翌週へ繰り上げ。昼休憩1行圧縮・手書き枠つきA4縦1枚（受付簿とは別）';
   btnPaper.style.display = 'flex';
 }
 

@@ -55,6 +55,7 @@ const STAFF_BADGE_PALETTE = Object.freeze([
 ]);
 
 /**
+ * 担当表示（フルネーム可・省略しない）
  * @param {object[]} therapists
  * @param {string} therapistId
  * @returns {string}
@@ -63,10 +64,7 @@ function formatStaffBadgeLabel(therapists, therapistId) {
   if (!therapistId || therapistId === 'NONE') return '指定無';
   if (therapistId === 'ANALGESIA') return '物療';
   const staff = therapists.find((t) => t.id === therapistId);
-  let label = staff?.name || therapistId;
-  label = String(label).replace(/\s+/g, '');
-  if (label.length > 6) label = label.slice(0, 6);
-  return label;
+  return String(staff?.name || therapistId).trim() || String(therapistId);
 }
 
 /**
@@ -141,7 +139,7 @@ function renderBookedCardHtml(apt, therapists) {
   const vis = resolveDiseaseVisual(patient, apt);
 
   const diseaseBadge = vis.isAnalgesia
-    ? `<span class="badge-analgesia" title="消炎鎮痛">【消炎】</span>`
+    ? `<span class="badge-analgesia" title="消炎鎮痛">【⚡消炎】</span>`
     : `<span class="badge-disease ${vis.diseaseClass}">[${sanitizeHtml(vis.diseaseTag)}]</span>`;
 
   const staffStyle = `background:${staffColor.bg};color:${staffColor.fg};border-color:${staffColor.border};`;
@@ -149,7 +147,7 @@ function renderBookedCardHtml(apt, therapists) {
   return `
     <div class="booked-card${vis.isAnalgesia ? ' is-analgesia' : ''}">
       <div class="bk-staff-row">
-        <span class="badge-staff" style="${staffStyle}">${sanitizeHtml(staffLabel)}</span>
+        <span class="badge-staff" style="${staffStyle}">[${sanitizeHtml(staffLabel)}]</span>
         ${diseaseBadge}
       </div>
       <div class="bk-main">
@@ -315,7 +313,7 @@ function renderSheetPage(opts) {
             <span class="lg lg-loco">[運]</span>運動器
             <span class="lg lg-cerebro">[脳]</span>脳血管
             <span class="lg lg-disuse">[廃]</span>廃用
-            <span class="lg lg-analgesia">【消炎】</span>消炎鎮痛
+            <span class="lg lg-analgesia">【⚡消炎】</span>消炎鎮痛
             ｜白い空き枠＝手書き可
           </div>
         </div>
@@ -351,7 +349,7 @@ function renderSheetPage(opts) {
       </div>
 
       <div class="footer">
-        <span>※ 色付き担当バッジ＝セラピスト即時把握　／　【消炎】＝消炎鎮痛　／　空き枠は手書き可</span>
+        <span>※ [担当名]＝セラピスト　／　【⚡消炎】＝消炎鎮痛　／　患者名はフルネーム表示　／　空き枠＝手書き可</span>
         <span>${sanitizeHtml(pageLabel)} ${first}〜${last}（${pageSlots.length}枠）／週予約 ${weekAptCount} 件／行高 ${rowMm.toFixed(1)}mm</span>
       </div>
       <style>
@@ -387,13 +385,15 @@ export function printHandwritingWeeklySheet(baseDate) {
     return;
   }
 
-  // 分割境界: 外来 pmStart（既定13:00）。午前＝境界未満／午後＝境界以上
+  // スタッフ設定・外来専用時間を動的反映
+  // 午前: 診療開始〜午前終了(amEnd)直前まで／午後: 午後開始(pmStart)〜終了
+  const amEndSetting = String(OUTPATIENT_HOURS?.amEnd || DEFAULT_PM_SPLIT);
   const pmSplit = String(OUTPATIENT_HOURS?.pmStart || DEFAULT_PM_SPLIT);
   const amSlots = allSlotTimes.filter((t) => String(t) < pmSplit);
   const pmSlots = allSlotTimes.filter((t) => String(t) >= pmSplit);
 
   if (!amSlots.length && !pmSlots.length) {
-    showToast('印刷可能な時間枠がありません', 'warn');
+    showToast('印刷可能な時間枠がありません（スタッフ設定の外来提供時間を確認してください）', 'warn');
     return;
   }
 
@@ -422,10 +422,10 @@ export function printHandwritingWeeklySheet(baseDate) {
   if (amSlots.length) {
     const rowspanSkip = buildPageRowspanSkip(amSlots, weekDates, slotAptMap);
     const metrics = computePageMetrics(amSlots.length);
-    const amEndLabel = amSlots[amSlots.length - 1] || '12:00';
+    const amFirst = amSlots[0] || '09:00';
     pages.push({
       pageKey: 'am',
-      pageLabel: `午前（〜${amEndLabel}）`,
+      pageLabel: `午前（${amFirst}〜${amEndSetting}）`,
       pageBadgeClass: 'badge-am',
       pageSlots: amSlots,
       bodyRows: buildPageBodyRows({
@@ -437,10 +437,10 @@ export function printHandwritingWeeklySheet(baseDate) {
   if (pmSlots.length) {
     const rowspanSkip = buildPageRowspanSkip(pmSlots, weekDates, slotAptMap);
     const metrics = computePageMetrics(pmSlots.length);
-    const pmLast = pmSlots[pmSlots.length - 1] || '18:00';
+    const pmLast = pmSlots[pmSlots.length - 1] || String(OUTPATIENT_HOURS?.pmEnd || '18:00');
     pages.push({
       pageKey: 'pm',
-      pageLabel: `午後（${pmSlots[0] || pmSplit}〜${pmLast}）`,
+      pageLabel: `午後（${pmSplit}〜${pmLast}）`,
       pageBadgeClass: 'badge-pm',
       pageSlots: pmSlots,
       bodyRows: buildPageBodyRows({
@@ -688,10 +688,11 @@ export function printHandwritingWeeklySheet(baseDate) {
         }
         .bk-staff-row {
           display: flex;
-          align-items: center;
+          align-items: flex-start;
+          flex-wrap: wrap;
           gap: 3px;
           margin-bottom: 0.6mm;
-          overflow: hidden;
+          overflow: visible;
         }
         .badge-disease,
         .badge-staff,
@@ -709,6 +710,9 @@ export function printHandwritingWeeklySheet(baseDate) {
           font-weight: 900;
           letter-spacing: 0.03em;
           padding: 0.6mm 4px;
+          max-width: 100%;
+          white-space: normal;
+          word-break: break-word;
         }
         .badge-disease {
           font-size: var(--badge-pt, 11pt);
@@ -742,19 +746,21 @@ export function printHandwritingWeeklySheet(baseDate) {
         }
         .bk-main {
           display: flex;
-          flex-wrap: nowrap;
+          flex-wrap: wrap;
           align-items: baseline;
-          gap: 4px 6px;
-          overflow: hidden;
+          gap: 2px 6px;
+          overflow: visible;
         }
         .bk-name {
           font-size: var(--name-pt, 13pt);
           font-weight: 900;
           color: #000000;
-          line-height: 1.1;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
+          line-height: 1.15;
+          white-space: normal;
+          word-break: break-word;
+          overflow-wrap: anywhere;
+          overflow: visible;
+          text-overflow: clip;
           max-width: 100%;
         }
         .bk-dur {
