@@ -72,12 +72,13 @@ function renderPatientPillRowHtml(apt, therapists) {
   const patientName = patient?.name || apt.patientId || '';
   const staffName = formatStaffBadgeLabel(therapists, apt.therapistId);
   const isAnti = resolveDiseaseVisual(patient, apt).isAnalgesia;
-  const staffTag = isAnti ? '⚡消炎' : (staffName || '担当');
+  // 消炎はアンバータグ、一般は [担当名] 青タグ
+  const staffTag = isAnti ? '⚡消炎' : `[${staffName || '担当'}]`;
 
   return `
-    <div class="patient-pill-row ${isAnti ? 'anti' : ''}">
+    <div class="patient-pill-row${isAnti ? ' anti' : ''}">
       <span class="staff-tag">${sanitizeHtml(staffTag)}</span>
-      <span class="name-text">${sanitizeHtml(patientName)}</span>
+      <span class="name-text">${sanitizeHtml(patientName)} 様</span>
     </div>
   `;
 }
@@ -115,10 +116,11 @@ function buildPageBodyRows(opts) {
         return;
       }
 
+      const multiCls = slotResList.length >= 2 ? ' is-multi' : '';
       const cardsHtml = slotResList.map((res) => renderPatientPillRowHtml(res, therapists)).join('');
       bodyRows += `
         <td class="res-slot day-col-slot${extraClass}">
-          <div class="slot-patients-container">
+          <div class="slot-patients-container${multiCls}">
             ${cardsHtml}
           </div>
         </td>
@@ -136,21 +138,19 @@ function buildPageBodyRows(opts) {
  * @param {number} slotCount
  */
 function computePageMetrics(slotCount) {
-  // A4縦: 297 - 5 - 4 = 288mm／午前・午後で枠数が違っても行高を均等分配
+  // A4縦に収めるため空き行の最小高は控えめ（複数人マスは内容で自然伸長）
   const pageMm = 288;
-  const headerMm = 14;
-  const theadMm = 8;
-  const footerMm = 5;
-  const borderFudgeMm = Math.min(10, 2 + slotCount * 0.18);
-  const dataAreaMm = Math.max(190, pageMm - headerMm - theadMm - footerMm - borderFudgeMm);
+  const headerMm = 12;
+  const theadMm = 7;
+  const footerMm = 4.5;
+  const borderFudgeMm = Math.min(8, 1.5 + slotCount * 0.12);
+  const dataAreaMm = Math.max(200, pageMm - headerMm - theadMm - footerMm - borderFudgeMm);
   const rawRow = dataAreaMm / Math.max(1, slotCount);
-  // 上下余白を保ちつつマス目を均等に（過剰な嵩上げはしない）
-  const rowMm = Math.min(20, Math.max(11.5, rawRow));
-  // 患者名〜11pt固定寄り／時間列は10ptに引き締め
-  const namePt = rowMm >= 14 ? 11.5 : 11;
-  const staffPt = 8;
-  const analgesiaPt = 8;
-  const timePt = 10;
+  const rowMm = Math.min(14, Math.max(7.5, rawRow));
+  const namePt = 9;
+  const staffPt = 7.5;
+  const analgesiaPt = 7.5;
+  const timePt = 9;
   return {
     pageMm, headerMm, theadMm, footerMm, rowMm, namePt, staffPt, analgesiaPt, timePt
   };
@@ -272,13 +272,22 @@ export function printHandwritingWeeklySheet(baseDate) {
     return apt && apt.status !== 'CANCELLED' && weekDatesSet.has(apt.date);
   });
 
-  // 吸着は全日スロット基準（ページ分割で予約が落ちない）
+  // 吸着は全日スロット基準（同一マスの複数予約は配列で全件保持）
   const slotAptMap = {};
   weekAptList.forEach((apt) => {
     const snapped = snapToNearestAppointmentSlot(apt.startTime, allSlotTimes);
     const k = `${apt.date}_${snapped}`;
     if (!slotAptMap[k]) slotAptMap[k] = [];
     slotAptMap[k].push(apt);
+  });
+  // 同一マス内の表示順を安定化（氏名→ID）
+  Object.keys(slotAptMap).forEach((k) => {
+    slotAptMap[k].sort((a, b) => {
+      const na = String(getPatientById(a.patientId)?.name || a.patientId || '');
+      const nb = String(getPatientById(b.patientId)?.name || b.patientId || '');
+      if (na !== nb) return na.localeCompare(nb, 'ja');
+      return String(a.id || '').localeCompare(String(b.id || ''));
+    });
   });
 
   const therapists = getAllTherapists();
@@ -354,13 +363,14 @@ export function printHandwritingWeeklySheet(baseDate) {
           print-color-adjust: exact;
         }
         body { font-size: 10pt; line-height: 1.25; color: #1e293b; }
+        /* display:flex は印刷時にセル内クリップを誘発するため block で組む */
         .sheet-page {
           width: 100%;
           min-height: var(--page-mm, 288mm);
-          height: auto;
-          display: flex;
-          flex-direction: column;
-          overflow: visible;
+          height: auto !important;
+          max-height: none !important;
+          display: block;
+          overflow: visible !important;
           page-break-after: always;
           break-after: page;
         }
@@ -375,9 +385,8 @@ export function printHandwritingWeeklySheet(baseDate) {
           border-bottom: 1px solid #cbd5e1;
           padding-bottom: 3px;
           margin-bottom: 3px;
-          flex: 0 0 auto;
-          min-height: var(--header-mm, 14mm);
-          max-height: 16mm;
+          min-height: var(--header-mm, 12mm);
+          max-height: 14mm;
           overflow: visible;
         }
         .title-block { min-width: 0; flex: 1; }
@@ -469,13 +478,15 @@ export function printHandwritingWeeklySheet(baseDate) {
         }
 
         .sheet-wrap {
-          flex: 1 1 auto;
-          min-height: 0;
-          overflow: visible;
+          width: 100%;
+          height: auto !important;
+          max-height: none !important;
+          overflow: visible !important;
         }
         table.hw-table {
           width: 100%;
-          height: auto;
+          height: auto !important;
+          max-height: none !important;
           border-collapse: collapse;
           table-layout: fixed;
         }
@@ -484,6 +495,8 @@ export function printHandwritingWeeklySheet(baseDate) {
         .hw-table td {
           border: 0.5px solid #cbd5e1;
           vertical-align: top;
+          overflow: visible !important;
+          max-height: none !important;
         }
         .hw-table thead th {
           background: #f8fafc;
@@ -524,21 +537,23 @@ export function printHandwritingWeeklySheet(baseDate) {
         .hw-table thead th.holiday .dow { color: #e11d48; }
 
         .slot-row {
-          height: auto;
-          min-height: var(--row-mm, 12mm);
+          height: auto !important;
+          max-height: none !important;
+          min-height: var(--row-mm, 8mm);
         }
-        /* 時間列：10pt・幅9.5%にスリム化 */
+        /* 時間列：スリム化 */
         .time-col {
           width: 9.5%;
           text-align: center;
           font-weight: 700;
-          font-size: 10pt;
+          font-size: 9pt;
           font-variant-numeric: tabular-nums;
           vertical-align: middle !important;
           background: #f8fafc;
           color: #64748b;
-          height: auto;
-          min-height: var(--row-mm, 12mm);
+          height: auto !important;
+          max-height: none !important;
+          min-height: var(--row-mm, 8mm);
           padding: 0 1mm;
           letter-spacing: 0.01em;
         }
@@ -546,20 +561,25 @@ export function printHandwritingWeeklySheet(baseDate) {
         .day-col-slot {
           vertical-align: top !important;
           padding: 2px !important;
-          height: auto;
+          height: auto !important;
+          max-height: none !important;
+          overflow: visible !important;
         }
         .res-slot.sat { background: #fafcff; }
         .res-slot.holiday { background: #fffafa; }
         .empty-slot { background: #ffffff !important; }
 
-        /* 複数患者が入るラッパー */
+        /*
+         * 複数患者ラッパー
+         * ※印刷エンジンで td 内 Flex column が高さ計算に失敗して切れるため
+         *   縦並びは block + margin で実現する
+         */
         .slot-patients-container {
-          display: flex;
-          flex-direction: column;
-          gap: 2px;
+          display: block;
           width: 100%;
-          height: 100%;
-          justify-content: flex-start;
+          height: auto !important;
+          max-height: none !important;
+          overflow: visible !important;
         }
 
         /* 個別患者の1行コンパクトバブル（複数人対応） */
@@ -574,8 +594,12 @@ export function printHandwritingWeeklySheet(baseDate) {
           border-left: 3px solid #1d4ed8;
           box-sizing: border-box;
           width: 100%;
-          overflow: hidden;
+          height: auto !important;
+          max-height: none !important;
+          overflow: visible;
+          margin: 0 0 2px 0;
         }
+        .patient-pill-row:last-child { margin-bottom: 0; }
 
         /* 消炎鎮痛の場合のアクセント */
         .patient-pill-row.anti {
@@ -599,16 +623,29 @@ export function printHandwritingWeeklySheet(baseDate) {
           background: #d97706;
         }
 
-        /* 患者氏名（フルネーム太字・1行で収める） */
+        /* 患者氏名（フルネーム太字・途切れさせない） */
         .patient-pill-row .name-text {
           font-size: 9pt;
           font-weight: 800;
           color: #0f172a;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          flex-grow: 1;
+          white-space: normal;
+          overflow: visible;
+          text-overflow: clip;
+          flex: 1 1 auto;
+          min-width: 0;
           line-height: 1.2;
+          word-break: break-word;
+        }
+        /* 2人以上：さらにコンパクトにして同一マスへ収容＋A4収まりを維持 */
+        .slot-patients-container.is-multi .patient-pill-row {
+          padding: 1px 2px;
+        }
+        .slot-patients-container.is-multi .patient-pill-row .staff-tag {
+          font-size: 7pt;
+          padding: 0 3px;
+        }
+        .slot-patients-container.is-multi .patient-pill-row .name-text {
+          font-size: 8pt;
         }
         .footer {
           display: flex;
@@ -620,19 +657,26 @@ export function printHandwritingWeeklySheet(baseDate) {
           font-size: 7.5pt;
           font-weight: 600;
           color: #94a3b8;
-          flex: 0 0 auto;
-          height: var(--footer-mm, 6mm);
-          max-height: var(--footer-mm, 6mm);
+          height: var(--footer-mm, 4.5mm);
+          max-height: var(--footer-mm, 4.5mm);
           overflow: hidden;
         }
         @media print {
           .sheet-page {
             min-height: var(--page-mm, 288mm) !important;
             height: auto !important;
+            max-height: none !important;
             overflow: visible !important;
           }
           .sheet-page:not(.sheet-page-last) {
             page-break-after: always !important;
+          }
+          .hw-table tr,
+          .hw-table td,
+          .slot-patients-container,
+          .patient-pill-row {
+            overflow: visible !important;
+            max-height: none !important;
           }
         }
       </style>
