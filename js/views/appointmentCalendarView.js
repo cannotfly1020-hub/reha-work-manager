@@ -8,7 +8,7 @@ import { openAppointmentModal } from './modals/appointmentModal.js';
 import { showToast } from '../ui/toast.js';
 import { printDailyAppointmentChecklist } from '../print/dailyChecklistPrint.js';
 import { printWeeklyReceptionBook } from '../print/printWeeklyReceptionBook.js';
-import { printNextWeekBookingSheet } from '../print/printNextWeekBookingSheet.js';
+import { openNextWeekBookingSheetPrintFlow } from '../print/printNextWeekBookingSheet.js';
 import { calendarState } from './appointment/calendarState.js';
 import { setupAptPaletteEvents, renderAptPalette } from './appointment/palette.js';
 import { renderWeeklyTimetable } from './appointment/weeklyTimetable.js';
@@ -22,10 +22,10 @@ export function handlePrintHandwritingWeeklySheet() {
 }
 
 /**
- * 翌週紙予約用・週間予約表（A4縦1枚完結）印刷
+ * 翌週予約受付表：対象週選択モーダル → 印刷（未来週予約自動反映）
  */
 export function handlePrintWeeklyPaperBookingSheet() {
-  printNextWeekBookingSheet(calendarState.baseDate);
+  openNextWeekBookingSheetPrintFlow(calendarState.baseDate);
 }
 
 /**
@@ -107,8 +107,8 @@ function ensureReceptionBookPrintToolbar() {
     if (dailyBtn) parent.insertBefore(btnPaper, dailyBtn);
     else parent.insertBefore(btnPaper, btnBook.nextSibling);
   }
-  btnPaper.innerHTML = '<span>📝</span><span>翌週予約受付表（A4縦 1枚完結）</span>';
-  btnPaper.title = '翌週以降の紙予約台帳。今週以前を選んでいても翌週へ繰り上げ。昼休憩1行圧縮・手書き枠つきA4縦1枚（受付簿とは別）';
+  btnPaper.innerHTML = '<span>📝</span><span>翌週予約受付表（次回予約受付用）</span>';
+  btnPaper.title = '翌週〜4週先／一括印刷を選択。未来週の予約を自動印字し、空きは手書き枠。各週A4縦1枚（受付簿とは別）';
   btnPaper.style.display = 'flex';
 }
 

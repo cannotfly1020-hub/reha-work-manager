@@ -2,5 +2,7 @@
 // 互換再エクスポート → printNextWeekBookingSheet.js
 export {
   printNextWeekBookingSheet,
-  printWeeklyPaperBookingSheet
+  printWeeklyPaperBookingSheet,
+  openNextWeekBookingSheetPrintFlow,
+  showNextWeekPrintWeekPicker
 } from './printNextWeekBookingSheet.js';

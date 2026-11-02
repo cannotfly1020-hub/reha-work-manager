@@ -9,5 +9,7 @@ export {
 
 export {
   printNextWeekBookingSheet,
-  printWeeklyPaperBookingSheet
+  printWeeklyPaperBookingSheet,
+  openNextWeekBookingSheetPrintFlow,
+  showNextWeekPrintWeekPicker
 } from './printNextWeekBookingSheet.js';

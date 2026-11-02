@@ -1,5 +1,6 @@
 // js/print/printNextWeekBookingSheet.js
-// 【翌週予約受付表】専用（翌週以降・紙予約用・A4縦 1枚完結）
+// 【翌週予約受付表】専用（翌週以降・紙予約用・A4縦 1枚／週）
+// ★複数週選択モーダル＋未来週予約の自動反映
 // ★週間予約受付簿（printWeeklyReceptionBook.js）とは完全独立
 // ★画面カレンダー・予約CRUD・DnD・Excel には一切干渉しない
 
@@ -29,6 +30,15 @@ const STAFF_PALETTE = Object.freeze([
 const ANALGESIA_COLOR = Object.freeze({
   bg: '#d97706', border: '#b45309', fg: '#ffffff', cardBg: '#fffbeb'
 });
+
+const WEEK_PICKER_OPTIONS = Object.freeze([
+  { id: 'w1', label: '① 翌週（1週先）', weeksOffsets: [1] },
+  { id: 'w2', label: '② 翌々週（2週先）', weeksOffsets: [2] },
+  { id: 'w3', label: '③ 3週先', weeksOffsets: [3] },
+  { id: 'w4', label: '④ 4週先', weeksOffsets: [4] },
+  { id: 'b12', label: '⑤ 【一括】翌週〜翌々週（2週間分・各A4縦1枚）', weeksOffsets: [1, 2] },
+  { id: 'b13', label: '⑥ 【一括】翌週〜3週先（3週間分・各A4縦1枚）', weeksOffsets: [1, 2, 3] }
+]);
 
 function resolvePrintSlotTimes() {
   const fromHours = generateAppointmentTimeStrings(OUTPATIENT_HOURS || {});
@@ -77,14 +87,6 @@ function resolveStaffColor(colorMap, therapistId, anti) {
   return colorMap[id] || colorMap.NONE || STAFF_PALETTE[0];
 }
 
-/**
- * 同一日・同一時間の全予約を抽出（.find 禁止・.filter 相当で欠落なし）
- * @param {object[]} weekAptList
- * @param {string} dateStr
- * @param {string} timeStr
- * @param {string[]} allSlotTimes
- * @returns {object[]}
- */
 function filterReservationsForSlot(weekAptList, dateStr, timeStr, allSlotTimes) {
   return weekAptList.filter((apt) => {
     if (!apt || apt.status === 'CANCELLED') return false;
@@ -94,22 +96,32 @@ function filterReservationsForSlot(weekAptList, dateStr, timeStr, allSlotTimes) 
   });
 }
 
-function resolveNextWeekOrLater(baseDate) {
-  const selectedMonday = getMondayOfWeek(baseDate || new Date());
+/**
+ * 今週月曜を基準に N 週先の月〜土を返す
+ * @param {number} weeksOffset 1=翌週, 2=翌々週 …
+ * @returns {Date[]}
+ */
+function resolveWeekDatesByOffset(weeksOffset) {
   const thisMonday = getMondayOfWeek(new Date());
-  selectedMonday.setHours(0, 0, 0, 0);
   thisMonday.setHours(0, 0, 0, 0);
+  const monday = new Date(thisMonday);
+  monday.setDate(thisMonday.getDate() + (Number(weeksOffset) * 7));
+  return getWeekDates(monday);
+}
 
-  if (selectedMonday.getTime() <= thisMonday.getTime()) {
-    const nextMonday = new Date(thisMonday);
-    nextMonday.setDate(thisMonday.getDate() + 7);
-    return {
-      weekDates: getWeekDates(nextMonday),
-      bumped: true,
-      reason: '選択中の週は今週以前のため、翌週の予約表を出力します'
-    };
-  }
-  return { weekDates: getWeekDates(selectedMonday), bumped: false, reason: '' };
+function formatSlashYMD(d) {
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function formatTargetWeekLabel(weekDates) {
+  return `対象週: ${formatSlashYMD(weekDates[0])}(月) 〜 ${formatSlashYMD(weekDates[5])}(土)`;
+}
+
+function formatOptionSubLabel(weeksOffsets) {
+  return weeksOffsets.map((off) => {
+    const wd = resolveWeekDatesByOffset(off);
+    return `${formatSlashYMD(wd[0])}〜${formatSlashYMD(wd[5])}`;
+  }).join(' ／ ');
 }
 
 function renderPatientCardHtml(apt, therapists, colorMap) {
@@ -134,57 +146,13 @@ function renderPatientCardHtml(apt, therapists, colorMap) {
 }
 
 /**
- * 翌週予約受付表（紙予約用・A4縦1枚完結）
- * @param {Date} baseDate
+ * 1週分の表本体 HTML（tbody 行）
  */
-export function printNextWeekBookingSheet(baseDate) {
-  const resolved = resolveNextWeekOrLater(baseDate);
-  const weekDates = resolved.weekDates;
-  if (resolved.bumped) showToast(resolved.reason, 'info');
-
-  const startStr = formatDateYMD(weekDates[0]);
-  const endStr = formatDateYMD(weekDates[5]);
-  const allSlotTimes = resolvePrintSlotTimes();
-
-  if (!allSlotTimes.length) {
-    showToast('外来予約の時間枠が未設定のため印刷できません（スタッフ設定の外来提供時間を確認）', 'warn');
-    return;
-  }
-
-  const weekDatesSet = new Set(weekDates.map(formatDateYMD));
-  // 週内予約を filter で全件抽出（欠落なし）
-  const weekAptList = Object.values(getAllAppointments()).filter((apt) => (
-    apt && apt.status !== 'CANCELLED' && weekDatesSet.has(apt.date)
-  ));
-
-  const therapists = getAllTherapists();
-  const colorMap = buildStaffColorMap(therapists);
-  const dayNames = ['月', '火', '水', '木', '金', '土'];
-
-  const amEnd = String(OUTPATIENT_HOURS?.amEnd || '13:00');
-  const pmStart = String(OUTPATIENT_HOURS?.pmStart || '13:00');
-  const breakMin = Math.max(0, timeToMin(pmStart) - timeToMin(amEnd));
-
-  const now = new Date();
-  const outStamp = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  const periodLabel = `【翌週以降】${startStr.slice(0, 4)}年${Number(startStr.slice(5, 7))}月${Number(startStr.slice(8, 10))}日(月) 〜 ${endStr.slice(0, 4)}年${Number(endStr.slice(5, 7))}月${Number(endStr.slice(8, 10))}日(土)`;
-
-  // A4縦 1枚完結：高さ 285mm 固定・改ページなし
-  const pageMm = 285;
-  const headerMm = 11;
-  const theadMm = 7.5;
-  const footerMm = 4.5;
-  const lunchMm = 4;
-  const slotCount = allSlotTimes.length;
-  const dataAreaMm = pageMm - headerMm - theadMm - footerMm - lunchMm;
-  // 1枚に均等分配（空き枠の手書きスペースは CSS で min-height: 9mm）
-  const rowMm = dataAreaMm / Math.max(1, slotCount);
-
+function buildWeekBodyRows(weekDates, weekAptList, allSlotTimes, therapists, colorMap, amEnd, pmStart, breakMin) {
   let bodyRows = '';
   let lunchBandInserted = false;
 
   allSlotTimes.forEach((slotTime) => {
-    // 昼休憩：午前終了〜午後開始を全7列結合1行で圧縮
     if (!lunchBandInserted && String(slotTime) >= pmStart) {
       lunchBandInserted = true;
       const breakText = breakMin > 0
@@ -196,14 +164,12 @@ export function printNextWeekBookingSheet(baseDate) {
         </tr>`;
     }
 
-    bodyRows += `<tr class="slot-row">`;
-    bodyRows += `<td class="time-col">${slotTime}</td>`;
+    bodyRows += `<tr class="slot-row"><td class="time-col">${slotTime}</td>`;
 
     weekDates.forEach((d) => {
       const dateStr = formatDateYMD(d);
       const isSat = d.getDay() === 6;
       const holidayName = getJapaneseHolidayName(d);
-      // .filter で同一日・同一時間の全予約を取得（.find による切り捨て禁止）
       const slotResList = filterReservationsForSlot(weekAptList, dateStr, slotTime, allSlotTimes);
 
       let extra = '';
@@ -211,7 +177,6 @@ export function printNextWeekBookingSheet(baseDate) {
       else if (isSat) extra += ' sat';
 
       if (slotResList.length === 0) {
-        // 空き枠：真っ白な手書き可能スペース（高さ約9mm）
         bodyRows += `
           <td class="res-slot empty-slot${extra}">
             <div class="write-space" aria-hidden="true"></div>
@@ -238,9 +203,210 @@ export function printNextWeekBookingSheet(baseDate) {
         <td colspan="7">── 昼休憩（${amEnd} 〜 ${pmStart}）──</td>
       </tr>`;
   }
+  return bodyRows;
+}
 
+/**
+ * 1週＝A4縦1枚の page-wrapper
+ */
+function buildPageWrapperHtml(opts) {
+  const {
+    weekDates, bodyRows, dayNames, periodLabel, outStamp,
+    firstSlot, lastSlot, slotCount, weekAptCount, isLast, weeksOffset
+  } = opts;
+
+  return `
+    <div class="page-wrapper${isLast ? ' page-wrapper-last' : ''}" data-weeks-offset="${weeksOffset}">
+      <div class="page-header">
+        <div>
+          <div class="title">【翌週予約受付表（紙予約用・A4縦1枚）】</div>
+          <div class="period">${sanitizeHtml(periodLabel)}</div>
+          <div class="legend">担当色分け ／ <span class="lg-anti">⚡ 消炎鎮痛</span> ／ 白枠＝手書き空き（約9mm）</div>
+        </div>
+        <div class="meta">出力 ${outStamp}<br>${weeksOffset}週先・1枚完結</div>
+      </div>
+      <div class="sheet-wrap">
+        <table class="paper-table">
+          <thead>
+            <tr>
+              <th class="th-time">時間</th>
+              ${weekDates.map((d, idx) => {
+                const mmdd = `${d.getMonth() + 1}/${d.getDate()}`;
+                const holidayName = getJapaneseHolidayName(d);
+                const isSat = d.getDay() === 6;
+                let cls = '';
+                if (holidayName) cls = 'holiday';
+                else if (isSat) cls = 'sat';
+                const hol = holidayName
+                  ? `<div class="hol-name">${sanitizeHtml(holidayName)}</div>` : '';
+                return `<th class="${cls}"><span class="dow">${dayNames[idx]}</span><span class="date">${mmdd}</span>${hol}</th>`;
+              }).join('')}
+            </tr>
+          </thead>
+          <tbody>${bodyRows}</tbody>
+        </table>
+      </div>
+      <div class="footer">
+        <span>${firstSlot}〜${lastSlot}（${slotCount}枠）＋昼休憩1行</span>
+        <span>週予約 ${weekAptCount} 件</span>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * 対象週選択モーダル（コンパクト）
+ * @returns {Promise<number[]|null>} weeksOffsets またはキャンセル時 null
+ */
+export function showNextWeekPrintWeekPicker() {
+  return new Promise((resolve) => {
+    const existing = document.getElementById('nextWeekPrintPickerOverlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'nextWeekPrintPickerOverlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', '翌週予約受付表の対象週選択');
+    overlay.style.cssText = [
+      'position:fixed', 'inset:0', 'z-index:10050',
+      'background:rgba(15,23,42,0.45)',
+      'display:flex', 'align-items:center', 'justify-content:center',
+      'padding:16px'
+    ].join(';');
+
+    const panel = document.createElement('div');
+    panel.style.cssText = [
+      'width:min(420px,100%)', 'background:#fff', 'border-radius:10px',
+      'box-shadow:0 20px 40px rgba(15,23,42,0.25)',
+      'border:1px solid #cbd5e1', 'overflow:hidden'
+    ].join(';');
+
+    const optionsHtml = WEEK_PICKER_OPTIONS.map((opt, i) => {
+      const sub = formatOptionSubLabel(opt.weeksOffsets);
+      const checked = i === 0 ? 'checked' : '';
+      return `
+        <label style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;background:#f8fafc;">
+          <input type="radio" name="nextWeekPrintOffset" value="${opt.id}" ${checked} style="margin-top:3px;flex-shrink:0;">
+          <span style="min-width:0;">
+            <span style="display:block;font-size:0.88rem;font-weight:800;color:#0f172a;line-height:1.3;">${opt.label}</span>
+            <span style="display:block;font-size:0.72rem;font-weight:600;color:#64748b;margin-top:2px;">${sub}</span>
+          </span>
+        </label>
+      `;
+    }).join('');
+
+    panel.innerHTML = `
+      <div style="padding:14px 16px 10px;border-bottom:1px solid #e2e8f0;">
+        <div style="font-size:1rem;font-weight:800;color:#0f172a;">翌週予約受付表 — 対象週</div>
+        <div style="font-size:0.78rem;color:#64748b;margin-top:4px;font-weight:600;">未来週の予約データは自動で印字されます。空き枠は手書き用の白マスです。</div>
+      </div>
+      <div style="padding:12px 16px;display:flex;flex-direction:column;gap:8px;max-height:min(58vh,420px);overflow:auto;">
+        ${optionsHtml}
+      </div>
+      <div style="padding:12px 16px;border-top:1px solid #e2e8f0;display:flex;justify-content:flex-end;gap:8px;background:#f8fafc;">
+        <button type="button" data-act="cancel" style="padding:8px 14px;border-radius:6px;border:1px solid #cbd5e1;background:#fff;font-weight:700;cursor:pointer;color:#475569;">キャンセル</button>
+        <button type="button" data-act="ok" style="padding:8px 16px;border-radius:6px;border:1px solid #0f766e;background:#0f766e;color:#fff;font-weight:800;cursor:pointer;">印刷プレビュー</button>
+      </div>
+    `;
+
+    const close = (value) => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(value);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') close(null);
+    };
+    document.addEventListener('keydown', onKey);
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) close(null);
+    });
+    panel.querySelector('[data-act="cancel"]')?.addEventListener('click', () => close(null));
+    panel.querySelector('[data-act="ok"]')?.addEventListener('click', () => {
+      const selected = panel.querySelector('input[name="nextWeekPrintOffset"]:checked');
+      const opt = WEEK_PICKER_OPTIONS.find((o) => o.id === selected?.value) || WEEK_PICKER_OPTIONS[0];
+      close([...opt.weeksOffsets]);
+    });
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+    panel.querySelector('[data-act="ok"]')?.focus();
+  });
+}
+
+/**
+ * 翌週予約受付表を印刷
+ * @param {Date} [_baseDate] 互換用（オフセットは今週月曜基準）
+ * @param {{ weeksOffsets?: number[] }} [options]
+ */
+export function printNextWeekBookingSheet(_baseDate, options = {}) {
+  let weeksOffsets = Array.isArray(options.weeksOffsets) && options.weeksOffsets.length
+    ? options.weeksOffsets.map((n) => Number(n)).filter((n) => n >= 1 && n <= 12)
+    : [1];
+  weeksOffsets = [...new Set(weeksOffsets)].sort((a, b) => a - b);
+  if (!weeksOffsets.length) weeksOffsets = [1];
+
+  const allSlotTimes = resolvePrintSlotTimes();
+  if (!allSlotTimes.length) {
+    showToast('外来予約の時間枠が未設定のため印刷できません（スタッフ設定の外来提供時間を確認）', 'warn');
+    return;
+  }
+
+  const allAppointments = Object.values(getAllAppointments()).filter((apt) => (
+    apt && apt.status !== 'CANCELLED'
+  ));
+  const therapists = getAllTherapists();
+  const colorMap = buildStaffColorMap(therapists);
+  const dayNames = ['月', '火', '水', '木', '金', '土'];
+
+  const amEnd = String(OUTPATIENT_HOURS?.amEnd || '13:00');
+  const pmStart = String(OUTPATIENT_HOURS?.pmStart || '13:00');
+  const breakMin = Math.max(0, timeToMin(pmStart) - timeToMin(amEnd));
+
+  const now = new Date();
+  const outStamp = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+  const pageMm = 285;
+  const headerMm = 11;
+  const theadMm = 7.5;
+  const footerMm = 4.5;
+  const lunchMm = 4;
+  const slotCount = allSlotTimes.length;
+  const dataAreaMm = pageMm - headerMm - theadMm - footerMm - lunchMm;
+  const rowMm = dataAreaMm / Math.max(1, slotCount);
   const firstSlot = allSlotTimes[0];
   const lastSlot = allSlotTimes[slotCount - 1];
+
+  const pagesHtml = weeksOffsets.map((off, idx) => {
+    const weekDates = resolveWeekDatesByOffset(off);
+    const weekDatesSet = new Set(weekDates.map(formatDateYMD));
+    // 未来週の予約を filter で漏れなく抽出
+    const weekAptList = allAppointments.filter((apt) => weekDatesSet.has(apt.date));
+    const bodyRows = buildWeekBodyRows(
+      weekDates, weekAptList, allSlotTimes, therapists, colorMap, amEnd, pmStart, breakMin
+    );
+    return buildPageWrapperHtml({
+      weekDates,
+      bodyRows,
+      dayNames,
+      periodLabel: formatTargetWeekLabel(weekDates),
+      outStamp,
+      firstSlot,
+      lastSlot,
+      slotCount,
+      weekAptCount: weekAptList.length,
+      isLast: idx === weeksOffsets.length - 1,
+      weeksOffset: off
+    });
+  }).join('');
+
+  const titleRange = (() => {
+    const first = resolveWeekDatesByOffset(weeksOffsets[0]);
+    const last = resolveWeekDatesByOffset(weeksOffsets[weeksOffsets.length - 1]);
+    return `${formatSlashYMD(first[0])}〜${formatSlashYMD(last[5])}`;
+  })();
 
   const printWindow = window.open('', '_blank', 'width=900,height=1200');
   if (!printWindow) {
@@ -252,7 +418,7 @@ export function printNextWeekBookingSheet(baseDate) {
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>外来リハビリ 翌週予約受付表 (${startStr.replace(/-/g, '/')}〜)</title>
+  <title>外来リハビリ 翌週予約受付表 (${titleRange})</title>
   <style>
     @page { size: A4 portrait; margin: 5mm; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -261,13 +427,22 @@ export function printNextWeekBookingSheet(baseDate) {
       font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Meiryo UI", Meiryo, sans-serif;
       -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
-    body {
-      font-size: 9pt; line-height: 1.15;
+    body { font-size: 9pt; line-height: 1.15; }
+    .page-wrapper {
+      width: 100%;
       height: 285mm !important;
       max-height: 285mm !important;
       min-height: 285mm !important;
-      display: flex; flex-direction: column; overflow: hidden;
-      page-break-after: avoid; page-break-inside: avoid;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      page-break-after: always;
+      break-after: page;
+      page-break-inside: avoid;
+    }
+    .page-wrapper-last {
+      page-break-after: auto;
+      break-after: auto;
     }
     .page-header {
       display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
@@ -317,10 +492,7 @@ export function printNextWeekBookingSheet(baseDate) {
     .res-slot.holiday { background: #fffafa; }
     .empty-slot { background: #ffffff !important; }
     .write-space {
-      width: 100%;
-      height: 100%;
-      min-height: 9mm;
-      background: #ffffff;
+      width: 100%; height: 100%; min-height: 9mm; background: #ffffff;
     }
     .slot-patients-container {
       display: flex; flex-direction: column; justify-content: space-around;
@@ -351,53 +523,36 @@ export function printNextWeekBookingSheet(baseDate) {
       flex: 0 0 auto; height: ${footerMm}mm; max-height: ${footerMm}mm; overflow: hidden;
     }
     @media print {
-      body {
+      .page-wrapper {
         height: 285mm !important; max-height: 285mm !important; min-height: 285mm !important;
-        overflow: hidden !important; page-break-after: avoid !important;
+        overflow: hidden !important; page-break-after: always !important;
       }
+      .page-wrapper-last { page-break-after: auto !important; }
       table.paper-table { height: 100% !important; }
       tr.slot-row { height: ${rowMm}mm !important; min-height: 9mm !important; }
     }
   </style>
 </head>
 <body>
-  <div class="page-header">
-    <div>
-      <div class="title">【翌週予約受付表（紙予約用・A4縦1枚）】</div>
-      <div class="period">${periodLabel}</div>
-      <div class="legend">担当色分け ／ <span class="lg-anti">⚡ 消炎鎮痛</span> ／ 白枠＝手書き空き（約9mm）</div>
-    </div>
-    <div class="meta">出力 ${outStamp}<br>改ページなし・1枚完結</div>
-  </div>
-  <div class="sheet-wrap">
-    <table class="paper-table">
-      <thead>
-        <tr>
-          <th class="th-time">時間</th>
-          ${weekDates.map((d, idx) => {
-            const mmdd = `${d.getMonth() + 1}/${d.getDate()}`;
-            const holidayName = getJapaneseHolidayName(d);
-            const isSat = d.getDay() === 6;
-            let cls = '';
-            if (holidayName) cls = 'holiday';
-            else if (isSat) cls = 'sat';
-            const hol = holidayName
-              ? `<div class="hol-name">${sanitizeHtml(holidayName)}</div>` : '';
-            return `<th class="${cls}"><span class="dow">${dayNames[idx]}</span><span class="date">${mmdd}</span>${hol}</th>`;
-          }).join('')}
-        </tr>
-      </thead>
-      <tbody>${bodyRows}</tbody>
-    </table>
-  </div>
-  <div class="footer">
-    <span>${firstSlot}〜${lastSlot}（${slotCount}枠）＋昼休憩1行</span>
-    <span>週予約 ${weekAptList.length} 件</span>
-  </div>
+  ${pagesHtml}
   <script>window.onload = function() { window.print(); };</script>
 </body>
 </html>`);
   printWindow.document.close();
+
+  if (weeksOffsets.length > 1) {
+    showToast(`${weeksOffsets.length}週分の翌週予約受付表を出力します`, 'info');
+  }
+}
+
+/**
+ * モーダルで週を選んでから印刷（カレンダーボタン用）
+ * @param {Date} [baseDate]
+ */
+export async function openNextWeekBookingSheetPrintFlow(baseDate) {
+  const weeksOffsets = await showNextWeekPrintWeekPicker();
+  if (!weeksOffsets) return;
+  printNextWeekBookingSheet(baseDate || new Date(), { weeksOffsets });
 }
 
 /** 旧名称互換 */
