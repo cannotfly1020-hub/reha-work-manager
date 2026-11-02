@@ -118,8 +118,8 @@ function renderBookedCardHtml(apt, therapists) {
       </div>
       <div class="bk-main">
         <span class="bk-name">${sanitizeHtml(pName)} 様</span>
-        <span class="bk-dur">${dur}分</span>
       </div>
+      <div class="bk-meta"><span class="bk-dur">${dur}分</span></div>
     </div>
   `;
 }
@@ -227,21 +227,22 @@ function buildPageBodyRows(opts) {
  * @param {number} slotCount
  */
 function computePageMetrics(slotCount) {
-  // A4縦: 297 - 5 - 4 = 288mm（横向きより縦幅が広く、患者名の縦並びを収容）
+  // A4縦: 297 - 5 - 4 = 288mm／午前・午後で枠数が違っても行高を均等分配
   const pageMm = 288;
-  const headerMm = 16;
-  const theadMm = 9;
-  const footerMm = 5.5;
-  const borderFudgeMm = Math.min(12, 2.5 + slotCount * 0.22);
-  const dataAreaMm = Math.max(180, pageMm - headerMm - theadMm - footerMm - borderFudgeMm);
+  const headerMm = 14;
+  const theadMm = 8;
+  const footerMm = 5;
+  const borderFudgeMm = Math.min(10, 2 + slotCount * 0.18);
+  const dataAreaMm = Math.max(190, pageMm - headerMm - theadMm - footerMm - borderFudgeMm);
   const rawRow = dataAreaMm / Math.max(1, slotCount);
-  // 嵩上げ禁止。午前〜12枠／午後〜15枠なら行高 16〜21mm 程度で大文字表示が可能
-  const rowMm = Math.min(22, rawRow);
-  const namePt = rowMm >= 18 ? 14 : (rowMm >= 15 ? 13 : (rowMm >= 12 ? 12 : 10.5));
-  const staffPt = rowMm >= 18 ? 13 : (rowMm >= 15 ? 12 : (rowMm >= 12 ? 11 : 9.5));
-  const badgePt = rowMm >= 18 ? 12 : (rowMm >= 15 ? 11 : (rowMm >= 12 ? 10 : 9));
-  const analgesiaPt = Math.max(staffPt + 1, badgePt + 1.5);
-  const timePt = rowMm >= 16 ? 13 : (rowMm >= 12 ? 12 : 10.5);
+  // 上下余白を保ちつつマス目を均等に（過剰な嵩上げはしない）
+  const rowMm = Math.min(20, Math.max(11.5, rawRow));
+  // 患者名〜11pt固定寄り／時間列は10ptに引き締め
+  const namePt = rowMm >= 14 ? 11.5 : 11;
+  const staffPt = 8;
+  const badgePt = 7.5;
+  const analgesiaPt = 8;
+  const timePt = 10;
   return {
     pageMm, headerMm, theadMm, footerMm, rowMm, namePt, staffPt, badgePt, analgesiaPt, timePt
   };
@@ -470,8 +471,8 @@ export function printHandwritingWeeklySheet(baseDate) {
           padding-bottom: 3px;
           margin-bottom: 3px;
           flex: 0 0 auto;
-          min-height: var(--header-mm, 15mm);
-          max-height: 18mm;
+          min-height: var(--header-mm, 14mm);
+          max-height: 16mm;
           overflow: visible;
         }
         .title-block { min-width: 0; flex: 1; }
@@ -541,14 +542,14 @@ export function printHandwritingWeeklySheet(baseDate) {
           white-space: nowrap;
         }
         .chip-staff {
-          background: #eff6ff;
-          color: #1d4ed8;
-          border-color: #bfdbfe;
+          background: #1d4ed8;
+          color: #ffffff;
+          border-color: #1d4ed8;
         }
         .chip-analgesia {
-          background: #fffbeb;
-          color: #b45309;
-          border-color: #fde68a;
+          background: #d97706;
+          color: #ffffff;
+          border-color: #d97706;
         }
         .chip-empty {
           background: #fff;
@@ -590,7 +591,11 @@ export function printHandwritingWeeklySheet(baseDate) {
           vertical-align: middle;
           color: #334155;
         }
-        .hw-table thead th.th-time { width: 14mm; color: #64748b; font-size: 8.5pt; }
+        .hw-table thead th.th-time {
+          width: 9.5%;
+          color: #64748b;
+          font-size: 8pt;
+        }
         .hw-table thead th .dow {
           display: block;
           font-size: 9pt;
@@ -614,25 +619,28 @@ export function printHandwritingWeeklySheet(baseDate) {
         .hw-table thead th.holiday .dow { color: #e11d48; }
 
         .slot-row {
-          height: var(--row-mm, 18mm);
-          max-height: var(--row-mm, 18mm);
+          height: var(--row-mm, 16mm);
+          max-height: var(--row-mm, 16mm);
         }
+        /* 時間列：10pt・幅9.5%にスリム化 */
         .time-col {
-          width: 14mm;
+          width: 9.5%;
           text-align: center;
           font-weight: 700;
-          font-size: var(--time-pt, 11pt);
+          font-size: 10pt;
+          font-variant-numeric: tabular-nums;
           vertical-align: middle !important;
           background: #f8fafc;
-          color: #475569;
-          height: var(--row-mm, 18mm);
-          max-height: var(--row-mm, 18mm);
-          padding: 0;
+          color: #64748b;
+          height: var(--row-mm, 16mm);
+          max-height: var(--row-mm, 16mm);
+          padding: 0 1mm;
+          letter-spacing: 0.01em;
         }
         .slot-cell {
-          height: var(--row-mm, 18mm);
-          max-height: var(--row-mm, 18mm);
-          padding: 1.2mm 1.6mm;
+          height: var(--row-mm, 16mm);
+          max-height: var(--row-mm, 16mm);
+          padding: 1.4mm 1.8mm;
           position: relative;
           overflow: hidden;
         }
@@ -641,7 +649,7 @@ export function printHandwritingWeeklySheet(baseDate) {
         .empty-cell { background: #ffffff !important; }
         .write-space {
           height: 100%;
-          min-height: 7mm;
+          min-height: 6mm;
           border-radius: 2px;
         }
 
@@ -651,46 +659,52 @@ export function printHandwritingWeeklySheet(baseDate) {
           overflow: hidden;
         }
         .booked-card {
-          padding: 0.2mm 0;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: stretch;
+          gap: 1mm;
+          min-height: 100%;
+          padding: 0.4mm 0;
           margin: 0;
         }
-        /* 消炎：アイボリー＋琥珀色左アクセント */
+        /* 消炎セル：薄いアイボリー＋左アンバーライン */
         .booked-card.is-analgesia {
           background: #fffbeb;
           border: none;
           border-left: 3px solid #d97706;
           border-radius: 0 3px 3px 0;
-          padding: 0.8mm 1.4mm 0.8mm 1.8mm;
+          padding: 0.8mm 1.2mm 0.8mm 1.6mm;
         }
         .bk-staff-row {
           display: flex;
           align-items: center;
           flex-wrap: wrap;
+          justify-content: flex-start;
           gap: 3px;
-          margin-bottom: 0.8mm;
         }
         .badge-disease,
         .badge-staff,
         .badge-analgesia {
           display: inline-flex;
           align-items: center;
-          line-height: 1.2;
+          line-height: 1.15;
           vertical-align: middle;
           white-space: nowrap;
         }
-        /* 淡いブルーの担当ピル */
+        /* 担当：濃いブルー背景＋白文字でアイキャッチ */
         .badge-staff {
-          font-size: var(--staff-pt, 9pt);
+          font-size: var(--staff-pt, 8pt);
           font-weight: 700;
-          padding: 1px 7px;
-          border-radius: 999px;
-          background: #eff6ff;
-          color: #1d4ed8;
-          border: 1px solid #bfdbfe;
-          letter-spacing: 0.01em;
+          padding: 1px 6px;
+          border-radius: 4px;
+          background: #1d4ed8;
+          color: #ffffff;
+          border: 1px solid #1d4ed8;
+          letter-spacing: 0.02em;
         }
         .badge-disease {
-          font-size: var(--badge-pt, 8pt);
+          font-size: var(--badge-pt, 7.5pt);
           font-weight: 600;
           padding: 0 5px;
           border-radius: 999px;
@@ -698,14 +712,15 @@ export function printHandwritingWeeklySheet(baseDate) {
           background: #f8fafc;
           color: #64748b;
         }
+        /* 消炎：アンバー（#d97706）背景タグ */
         .badge-analgesia {
-          font-size: var(--analgesia-pt, 8.5pt);
+          font-size: var(--analgesia-pt, 8pt);
           font-weight: 700;
           padding: 1px 7px;
-          border-radius: 999px;
-          background: #fffbeb;
-          color: #b45309;
-          border: 1px solid #fde68a;
+          border-radius: 4px;
+          background: #d97706;
+          color: #ffffff;
+          border: 1px solid #d97706;
           letter-spacing: 0.02em;
         }
         .dtype-loco { background: #f0f9ff; color: #0369a1; border-color: #bae6fd; }
@@ -714,22 +729,31 @@ export function printHandwritingWeeklySheet(baseDate) {
 
         .bk-main {
           display: flex;
-          flex-wrap: wrap;
-          align-items: baseline;
-          gap: 2px 6px;
+          align-items: center;
+          justify-content: center;
+          width: 100%;
+          text-align: center;
+          flex: 1 1 auto;
         }
+        /* 患者名：マス目中央・11pt前後の太字フルネーム */
         .bk-name {
-          font-size: var(--name-pt, 12pt);
+          font-size: var(--name-pt, 11pt);
           font-weight: 700;
           color: #0f172a;
-          line-height: 1.25;
+          line-height: 1.3;
           white-space: normal;
           word-break: break-word;
           overflow-wrap: anywhere;
-          letter-spacing: 0.02em;
+          letter-spacing: 0.04em;
+          text-align: center;
+        }
+        .bk-meta {
+          display: flex;
+          justify-content: flex-end;
+          line-height: 1;
         }
         .bk-dur {
-          font-size: 8pt;
+          font-size: 7pt;
           font-weight: 600;
           color: #94a3b8;
           flex-shrink: 0;
