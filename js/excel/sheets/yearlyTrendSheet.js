@@ -116,8 +116,6 @@ function statsFromHistorical(hist, month) {
     st.grandUnits = st.in.units;
     // 総点数は原本「総点数」を優先（入外・加算の内訳合算ではない）
     st.grandPoints = grandPts;
-    // 入外内訳が無いため、請求総点数折れ線が 0 にならないよう入院系列に総点数を載せる
-    if (grandPts > 0) st.in.points = grandPts;
     return st;
   }
 
@@ -325,22 +323,6 @@ function tableDiseaseValue(st, diseaseKey) {
 function tableEarlyValue(st) {
   if (!st || st.isBlank) return 0;
   return pointsOrUnits(st.early);
-}
-
-/** グラフ①入院点数: points||units（確定月は総点数ミラー済み） */
-function chartInpatientPoints(st) {
-  if (!st || st.isBlank) return 0;
-  const pts = Number(st.in?.points);
-  if (Number.isFinite(pts) && pts !== 0) return pts;
-  return Number(st.in?.units) || 0;
-}
-
-/** グラフ①外来点数: points||units */
-function chartOutpatientPoints(st) {
-  if (!st || st.isBlank) return 0;
-  const pts = Number(st.out?.points);
-  if (Number.isFinite(pts) && pts !== 0) return pts;
-  return Number(st.out?.units) || 0;
 }
 
 function styleHeader() {
@@ -576,24 +558,30 @@ export function writeYearlyTrendSheet(wb, year, _month) {
   const chartAnchorRow = 11; // Excel row 12
   const chartW = 460;
   const chartH = 260;
-  setStyledCell(ws, chartAnchorRow, 0, '■ 請求総点数推移', {
+  setStyledCell(ws, chartAnchorRow, 0, '■ 請求総点数推移（表と同一）', {
     font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '0369A1' } }
   });
-  setStyledCell(ws, chartAnchorRow, 8, '■ 3大疾患 点数推移（1〜12月・点数統一）', {
+  setStyledCell(ws, chartAnchorRow, 8, '■ 3大疾患 点数推移（表と同一・未集計月は非描画）', {
     font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '047857' } }
   });
   rowHeights[chartAnchorRow] = 14;
   const chartImgRow = chartAnchorRow + 1; // Excel 13
 
-  const monthNum = (picker) => statsList.map((s) => (s.isBlank ? 0 : (Number(picker(s)) || 0)));
+  // 表セルと同じ picker。未集計月は null（0 埋め禁止 → 折れ線の急降下防止）
+  const monthChartVal = (picker) => statsList.map((s) => {
+    if (s.isBlank) return null;
+    const v = Number(picker(s));
+    return Number.isFinite(v) ? v : 0;
+  });
   try {
     const embedded = [];
+    // グラフ1: 表「請求総点数」行のみ（入外線なし＝10月の急変ズレ解消）
+    const grandForChart = monthChartVal((s) => s.grandPoints);
     const revenueChart = renderRevenuePointsChartPng({
       calendarYear,
       calendarMode: true,
-      grandPointsByMonth: monthNum((s) => s.grandPoints),
-      inpatientPointsByMonth: monthNum((s) => chartInpatientPoints(s)),
-      outpatientPointsByMonth: monthNum((s) => chartOutpatientPoints(s)),
+      grandPointsByMonth: grandForChart,
+      showInOutLines: false,
       width: chartW,
       height: chartH,
       pixelRatio: 2
@@ -608,11 +596,11 @@ export function writeYearlyTrendSheet(wb, year, _month) {
         heightPx: chartH
       });
     }
-    // 疾患グラフ: 表と同じ点数（1〜9月=原本確定 points||units／10月〜=ライブ点数）
+    // グラフ2: 表の運動器・脳血管・廃用と同一系列
     const diseasePointsByMonth = {
-      cerebrovascular: monthNum((s) => tableDiseaseValue(s, 'CEREBROVASCULAR')),
-      locomotive: monthNum((s) => tableDiseaseValue(s, 'LOCOMOTIVE')),
-      disuse: monthNum((s) => tableDiseaseValue(s, 'DISUSE'))
+      locomotive: monthChartVal((s) => tableDiseaseValue(s, 'LOCOMOTIVE')),
+      cerebrovascular: monthChartVal((s) => tableDiseaseValue(s, 'CEREBROVASCULAR')),
+      disuse: monthChartVal((s) => tableDiseaseValue(s, 'DISUSE'))
     };
     const diseaseChart = renderDiseaseUnitsChartPng({
       calendarYear,
