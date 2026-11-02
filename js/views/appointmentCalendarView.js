@@ -7,10 +7,8 @@ import { formatDateYMD } from '../core/dateUtils.js';
 import { openAppointmentModal } from './modals/appointmentModal.js';
 import { showToast } from '../ui/toast.js';
 import { printDailyAppointmentChecklist } from '../print/dailyChecklistPrint.js';
-import {
-  printHandwritingWeeklySheet,
-  printWeeklyPaperBookingSheet
-} from '../print/outpatientWeeklyPrints.js';
+import { printWeeklyReceptionBook } from '../print/printWeeklyReceptionBook.js';
+import { printNextWeekBookingSheet } from '../print/printNextWeekBookingSheet.js';
 import { calendarState } from './appointment/calendarState.js';
 import { setupAptPaletteEvents, renderAptPalette } from './appointment/palette.js';
 import { renderWeeklyTimetable } from './appointment/weeklyTimetable.js';
@@ -20,14 +18,14 @@ import { renderMonthlyCalendar } from './appointment/monthlyCalendar.js';
  * 週間予約受付簿（A4縦・午前／午後 2ページ）印刷
  */
 export function handlePrintHandwritingWeeklySheet() {
-  printHandwritingWeeklySheet(calendarState.baseDate);
+  printWeeklyReceptionBook(calendarState.baseDate);
 }
 
 /**
  * 翌週紙予約用・週間予約表（A4縦1枚完結）印刷
  */
 export function handlePrintWeeklyPaperBookingSheet() {
-  printWeeklyPaperBookingSheet(calendarState.baseDate);
+  printNextWeekBookingSheet(calendarState.baseDate);
 }
 
 /**

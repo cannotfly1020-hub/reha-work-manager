@@ -1,3 +1,6 @@
 // js/print/weeklyPaperBookingPrint.js
-// 互換再エクスポート（実装本体は outpatientWeeklyPrints.js）
-export { printWeeklyPaperBookingSheet } from './outpatientWeeklyPrints.js';
+// 互換再エクスポート → printNextWeekBookingSheet.js
+export {
+  printNextWeekBookingSheet,
+  printWeeklyPaperBookingSheet
+} from './printNextWeekBookingSheet.js';
