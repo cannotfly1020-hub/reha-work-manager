@@ -7,8 +7,10 @@ import { formatDateYMD } from '../core/dateUtils.js';
 import { openAppointmentModal } from './modals/appointmentModal.js';
 import { showToast } from '../ui/toast.js';
 import { printDailyAppointmentChecklist } from '../print/dailyChecklistPrint.js';
-import { printHandwritingWeeklySheet } from '../print/handwritingWeeklyPrint.js';
-import { printWeeklyPaperBookingSheet } from '../print/weeklyPaperBookingPrint.js';
+import {
+  printHandwritingWeeklySheet,
+  printWeeklyPaperBookingSheet
+} from '../print/outpatientWeeklyPrints.js';
 import { calendarState } from './appointment/calendarState.js';
 import { setupAptPaletteEvents, renderAptPalette } from './appointment/palette.js';
 import { renderWeeklyTimetable } from './appointment/weeklyTimetable.js';
