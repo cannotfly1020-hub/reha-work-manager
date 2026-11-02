@@ -1,6 +1,6 @@
 // js/views/modals/staffModal.js
 // セラピストマスター設定モーダル制御層
-// （スタッフ検索・追加・名称変更・休職退職管理・初期復帰 ＋ リハビリ助手1・2設定 ＋ 施設リハビリ提供時間設定・自動保存）
+// （スタッフ・助手・施設時間＝本日時間割 ＋ 外来カレンダー専用提供時間・独立保存）
 
 import { sanitizeHtml } from '../../core/dataNormalizer.js';
 import {
@@ -16,11 +16,21 @@ import {
   saveFacilityHours,
   validateFacilityHours,
   formatFacilityHoursSummary,
+  getSavedOutpatientHours,
+  saveOutpatientHours,
+  validateOutpatientHours,
+  formatOutpatientHoursSummary,
   getAmSlotCount,
   getTotalSlotCount,
-  DEFAULT_FACILITY_HOURS
+  DEFAULT_FACILITY_HOURS,
+  DEFAULT_OUTPATIENT_HOURS
 } from '../../core/timeSlotGenerator.js';
-import { reloadFacilityTimeSlots, AM_SLOT_COUNT, TOTAL_SLOT_COUNT } from '../../config/rules.js';
+import {
+  reloadFacilityTimeSlots,
+  reloadOutpatientTimeSlots,
+  AM_SLOT_COUNT,
+  TOTAL_SLOT_COUNT
+} from '../../config/rules.js';
 import { renderAppointmentCalendarView } from '../appointmentCalendarView.js';
 
 let onStaffUpdatedCallback = null;
@@ -87,6 +97,38 @@ function fillFacilityHoursForm(hours) {
 }
 
 /**
+ * フォームから外来専用時間を読み取る
+ * @returns {{ amStart: string, amEnd: string, pmStart: string, pmEnd: string }}
+ */
+function readOutpatientHoursFromForm() {
+  return {
+    amStart: document.getElementById('settingAptAmStartInput')?.value || '',
+    amEnd: document.getElementById('settingAptAmEndInput')?.value || '',
+    pmStart: document.getElementById('settingAptPmStartInput')?.value || '',
+    pmEnd: document.getElementById('settingAptPmEndInput')?.value || '',
+    defaultLunchStart: DEFAULT_OUTPATIENT_HOURS.defaultLunchStart,
+    defaultLunchEnd: DEFAULT_OUTPATIENT_HOURS.defaultLunchEnd
+  };
+}
+
+/**
+ * 外来専用時間をフォームへセット
+ * @param {Partial<import('../../core/timeSlotGenerator.js').FacilityHours>|null|undefined} [hours]
+ */
+function fillOutpatientHoursForm(hours) {
+  const h = hours || getSavedOutpatientHours();
+  const amStart = document.getElementById('settingAptAmStartInput');
+  const amEnd = document.getElementById('settingAptAmEndInput');
+  const pmStart = document.getElementById('settingAptPmStartInput');
+  const pmEnd = document.getElementById('settingAptPmEndInput');
+  if (amStart) amStart.value = h.amStart || DEFAULT_OUTPATIENT_HOURS.amStart;
+  if (amEnd) amEnd.value = h.amEnd || DEFAULT_OUTPATIENT_HOURS.amEnd;
+  if (pmStart) pmStart.value = h.pmStart || DEFAULT_OUTPATIENT_HOURS.pmStart;
+  if (pmEnd) pmEnd.value = h.pmEnd || DEFAULT_OUTPATIENT_HOURS.pmEnd;
+  updateOutpatientHoursSlotSummaryBadge();
+}
+
+/**
  * リアルタイムバッジ更新（時刻入力の都度）
  */
 function updateFacilityHoursSlotSummaryBadge() {
@@ -97,6 +139,21 @@ function updateFacilityHoursSlotSummaryBadge() {
   const check = validateFacilityHours(hours);
   badge.textContent = summary;
   badge.style.background = check.ok ? '#ecfdf5' : '#fef2f2';
+  badge.style.color = check.ok ? '#065f46' : '#b91c1c';
+  badge.style.borderColor = check.ok ? '#a7f3d0' : '#fecaca';
+}
+
+/**
+ * 外来専用時間バッジ更新
+ */
+function updateOutpatientHoursSlotSummaryBadge() {
+  const badge = document.getElementById('outpatientHoursSlotSummaryBadge');
+  if (!badge) return;
+  const hours = readOutpatientHoursFromForm();
+  const summary = formatOutpatientHoursSummary(hours);
+  const check = validateOutpatientHours(hours);
+  badge.textContent = summary;
+  badge.style.background = check.ok ? '#fff' : '#fef2f2';
   badge.style.color = check.ok ? '#065f46' : '#b91c1c';
   badge.style.borderColor = check.ok ? '#a7f3d0' : '#fecaca';
 }
@@ -177,6 +234,17 @@ export function setupStaffSettingsModalListeners(onUpdate) {
     el?.addEventListener('change', updateFacilityHoursSlotSummaryBadge);
   });
 
+  const outpatientTimeInputs = [
+    document.getElementById('settingAptAmStartInput'),
+    document.getElementById('settingAptAmEndInput'),
+    document.getElementById('settingAptPmStartInput'),
+    document.getElementById('settingAptPmEndInput')
+  ];
+  outpatientTimeInputs.forEach((el) => {
+    el?.addEventListener('input', updateOutpatientHoursSlotSummaryBadge);
+    el?.addEventListener('change', updateOutpatientHoursSlotSummaryBadge);
+  });
+
   // 施設標準昼休み → 全スタッフ一括適用
   document.getElementById('btnApplyDefaultLunchToAllStaff')?.addEventListener('click', () => {
     const lunchStart = document.getElementById('settingDefaultLunchStart')?.value || DEFAULT_LUNCH_BREAK.start;
@@ -210,8 +278,9 @@ export function setupStaffSettingsModalListeners(onUpdate) {
     if (assistant1Input) assistant1Input.value = assistants.assistant1;
     if (assistant2Input) assistant2Input.value = assistants.assistant2;
 
-    // ★保存済み施設リハビリ提供時間をフォームに反映
+    // ★保存済み施設時間（本日時間割）＋外来専用時間をフォームに反映
     fillFacilityHoursForm(getSavedFacilityHours());
+    fillOutpatientHoursForm(getSavedOutpatientHours());
 
     modal?.classList.add('active');
   });
@@ -276,18 +345,23 @@ export function setupStaffSettingsModalListeners(onUpdate) {
     if (assistant1Input) assistant1Input.value = '';
     if (assistant2Input) assistant2Input.value = '';
 
-    // 施設時間・標準昼休みも初期デフォルトへ戻す
+    // 施設時間（本日時間割）・外来専用時間・標準昼休みを初期デフォルトへ戻す
     const hoursSave = saveFacilityHours({ ...DEFAULT_FACILITY_HOURS });
     if (hoursSave.success) {
       reloadFacilityTimeSlots(hoursSave.hours);
       fillFacilityHoursForm(hoursSave.hours);
       syncLeavePresetDurations(hoursSave.hours);
     }
+    const aptHoursSave = saveOutpatientHours({ ...DEFAULT_OUTPATIENT_HOURS });
+    if (aptHoursSave.success) {
+      reloadOutpatientTimeSlots(aptHoursSave.hours);
+      fillOutpatientHoursForm(aptHoursSave.hours);
+    }
     const overwriteChk = document.getElementById('chkOverwriteCustomLunch');
     if (overwriteChk) overwriteChk.checked = false;
 
     renderStaffSettingsFields();
-    showToast('セラピスト・助手・施設時間を初期デフォルトに戻しました', 'info');
+    showToast('セラピスト・助手・施設時間・外来専用時間を初期デフォルトに戻しました', 'info');
     refreshViewsAfterFacilityHoursChange();
   });
 
@@ -315,11 +389,11 @@ export function setupStaffSettingsModalListeners(onUpdate) {
       }
     });
 
-    // ★施設時間: バリデーション → 保存 → メモリ即時更新（失敗時はスタッフ保存も中断）
+    // ★施設時間（本日時間割）: バリデーション → 保存 → メモリ即時更新
     const facilityHours = readFacilityHoursFromForm();
     const hoursCheck = validateFacilityHours(facilityHours);
     if (!hoursCheck.ok) {
-      showToast(hoursCheck.message, 'error');
+      showToast(`【本日時間割】${hoursCheck.message}`, 'error');
       updateFacilityHoursSlotSummaryBadge();
       return;
     }
@@ -335,6 +409,25 @@ export function setupStaffSettingsModalListeners(onUpdate) {
     }
     syncLeavePresetDurations(hoursSave.hours);
 
+    // ★外来専用時間: 施設とは独立に検証・保存・反映
+    const aptHours = readOutpatientHoursFromForm();
+    const aptCheck = validateOutpatientHours(aptHours);
+    if (!aptCheck.ok) {
+      showToast(`【外来カレンダー】${aptCheck.message}`, 'error');
+      updateOutpatientHoursSlotSummaryBadge();
+      return;
+    }
+    const aptSave = saveOutpatientHours(aptCheck.hours);
+    if (!aptSave.success) {
+      showToast(aptSave.message || '外来専用時間の保存に失敗しました', 'error');
+      return;
+    }
+    const aptReloaded = reloadOutpatientTimeSlots(aptSave.hours);
+    if (!aptReloaded.success) {
+      showToast(aptReloaded.message || '外来専用時間の反映に失敗しました', 'error');
+      return;
+    }
+
     const staffSaved = updateTherapistSettings(updateMap);
 
     const a1Val = assistant1Input ? assistant1Input.value.trim() : '';
@@ -344,7 +437,7 @@ export function setupStaffSettingsModalListeners(onUpdate) {
 
     closeModal();
     showToast(
-      `スタッフ設定を保存しました（施設時間: 午前${reloaded.am}／午後${reloaded.pm}＝計${reloaded.total}コマ）`,
+      `保存しました（時間割: 計${reloaded.total}コマ／外来: 計${aptReloaded.total}コマ）`,
       'success'
     );
     refreshViewsAfterFacilityHoursChange();

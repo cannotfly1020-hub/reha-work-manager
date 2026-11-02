@@ -16,8 +16,11 @@
  * }} FacilityHours
  */
 
-/** localStorage キー（施設リハビリ提供時間） */
+/** localStorage キー（施設リハビリ提供時間＝本日の時間割専用） */
 export const FACILITY_HOURS_STORAGE_KEY = 'reha_facility_hours';
+
+/** localStorage キー（外来予約カレンダー専用 提供時間・昼休み） */
+export const OUTPATIENT_HOURS_STORAGE_KEY = 'reha_outpatient_calendar_hours';
 
 /**
  * 旧既定（昼休憩で 13:00〜14:00 が欠落していた構成）
@@ -40,6 +43,19 @@ export const DEFAULT_FACILITY_HOURS = {
   pmStart: '13:00',  // 午後開始＝午前終了（昼休憩なし・完全連続）
   pmEnd: '18:00',    // 業務終了（15コマ: 13:00〜18:00）→ 合計27コマ
   // 施設標準昼休み時間（スタッフ個別未設定・新規登録の初期値／一括適用の基準）
+  defaultLunchStart: '12:00',
+  defaultLunchEnd: '13:00'
+};
+
+/**
+ * 外来予約カレンダー専用の既定提供時間（施設時間とは独立）
+ * @type {FacilityHours}
+ */
+export const DEFAULT_OUTPATIENT_HOURS = {
+  amStart: '09:00',
+  amEnd: '13:00',
+  pmStart: '13:00',
+  pmEnd: '18:00',
   defaultLunchStart: '12:00',
   defaultLunchEnd: '13:00'
 };
@@ -252,6 +268,96 @@ export function saveFacilityHours(hours) {
   } catch (_) {
     return { success: false, message: '施設時間の保存に失敗しました（ストレージ書き込み不可）', hours: check.hours };
   }
+}
+
+/**
+ * 外来専用時間を正規化（欠落は DEFAULT_OUTPATIENT_HOURS で補完）
+ * @param {Partial<FacilityHours>|null|undefined} hours
+ * @returns {FacilityHours}
+ */
+export function normalizeOutpatientHours(hours) {
+  const base = normalizeFacilityHours({
+    ...DEFAULT_OUTPATIENT_HOURS,
+    ...(hours || {})
+  });
+  return {
+    amStart: normalizeTimeString(hours?.amStart) || DEFAULT_OUTPATIENT_HOURS.amStart,
+    amEnd: normalizeTimeString(hours?.amEnd) || DEFAULT_OUTPATIENT_HOURS.amEnd,
+    pmStart: normalizeTimeString(hours?.pmStart) || DEFAULT_OUTPATIENT_HOURS.pmStart,
+    pmEnd: normalizeTimeString(hours?.pmEnd) || DEFAULT_OUTPATIENT_HOURS.pmEnd,
+    defaultLunchStart: base.defaultLunchStart || DEFAULT_OUTPATIENT_HOURS.defaultLunchStart,
+    defaultLunchEnd: base.defaultLunchEnd || DEFAULT_OUTPATIENT_HOURS.defaultLunchEnd
+  };
+}
+
+/**
+ * 外来専用時間の検証（施設時間と同じルール）
+ * @param {Partial<FacilityHours>|null|undefined} hours
+ * @returns {{ ok: boolean, message: string, hours: FacilityHours }}
+ */
+export function validateOutpatientHours(hours) {
+  const normalized = normalizeOutpatientHours(hours);
+  return validateFacilityHours(normalized);
+}
+
+/**
+ * 保存済みの外来予約カレンダー専用提供時間を取得
+ * 未保存時は現行施設時間を1回だけシードして独立キーへ永続化し、以後は施設変更の影響を受けない
+ * @returns {FacilityHours}
+ */
+export function getSavedOutpatientHours() {
+  try {
+    if (typeof localStorage === 'undefined') {
+      return { ...DEFAULT_OUTPATIENT_HOURS };
+    }
+    const raw = localStorage.getItem(OUTPATIENT_HOURS_STORAGE_KEY);
+    if (!raw) {
+      // 初回: 既存の外来見た目を維持するため施設時間をコピーして独立保存
+      const seeded = normalizeOutpatientHours(getSavedFacilityHours());
+      const check = validateOutpatientHours(seeded);
+      const hours = check.ok ? check.hours : { ...DEFAULT_OUTPATIENT_HOURS };
+      try {
+        localStorage.setItem(OUTPATIENT_HOURS_STORAGE_KEY, JSON.stringify(hours));
+      } catch (_) { /* ignore */ }
+      return hours;
+    }
+
+    const parsed = JSON.parse(raw);
+    const check = validateOutpatientHours(parsed);
+    if (!check.ok) return { ...DEFAULT_OUTPATIENT_HOURS };
+    return check.hours;
+  } catch (_) {
+    return { ...DEFAULT_OUTPATIENT_HOURS };
+  }
+}
+
+/**
+ * 外来予約カレンダー専用提供時間を検証して保存
+ * @param {Partial<FacilityHours>} hours
+ * @returns {{ success: boolean, message: string, hours: FacilityHours }}
+ */
+export function saveOutpatientHours(hours) {
+  const check = validateOutpatientHours(hours);
+  if (!check.ok) {
+    return { success: false, message: check.message, hours: check.hours };
+  }
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(OUTPATIENT_HOURS_STORAGE_KEY, JSON.stringify(check.hours));
+    }
+    return { success: true, message: '外来予約カレンダー専用の提供時間を保存しました', hours: check.hours };
+  } catch (_) {
+    return { success: false, message: '外来専用時間の保存に失敗しました（ストレージ書き込み不可）', hours: check.hours };
+  }
+}
+
+/**
+ * 外来専用時間のバッジ用サマリー
+ * @param {Partial<FacilityHours>|null|undefined} hours
+ * @returns {string}
+ */
+export function formatOutpatientHoursSummary(hours) {
+  return formatFacilityHoursSummary(normalizeOutpatientHours(hours));
 }
 
 /**

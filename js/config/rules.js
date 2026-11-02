@@ -1,18 +1,23 @@
 // js/config/rules.js
 // 診療報酬改定定数マスター・時間枠定義・制約ルール設定
 // ★時間枠は timeSlotGenerator が単一情報源。手書き固定配列は置かない。
-// ★施設時間は localStorage('reha_facility_hours') → FACILITY_HOURS → TIME_SLOTS へ即時反映
+// ★施設時間: localStorage('reha_facility_hours') → FACILITY_HOURS → TIME_SLOTS（本日の時間割専用）
+// ★外来専用: localStorage('reha_outpatient_calendar_hours') → OUTPATIENT_HOURS → APPOINTMENT_TIME_STRINGS
 
 import {
   DEFAULT_FACILITY_HOURS,
+  DEFAULT_OUTPATIENT_HOURS,
   generateTimeSlots,
   generateAppointmentTimeStrings,
   getAmSlotCount,
   getPmSlotCount,
   getTotalSlotCount,
   getSavedFacilityHours,
+  getSavedOutpatientHours,
   normalizeFacilityHours,
-  validateFacilityHours
+  normalizeOutpatientHours,
+  validateFacilityHours,
+  validateOutpatientHours
 } from '../core/timeSlotGenerator.js';
 
 export const REHA_RULES = {
@@ -130,7 +135,7 @@ export const REHA_RULES = {
 };
 
 /**
- * 現行施設の診療時間（画面設定・localStorage と同期）
+ * 現行施設の診療時間（本日の時間割専用・localStorage と同期）
  * 初期値: 保存済み設定があればそれ、なければ 午前09:00〜13:00 / 午後13:00〜18:00（昼休憩なし・計27コマ）
  * ※旧保存（pmStart=14:00）は getSavedFacilityHours で 13:00 へ自動マイグレーション
  * ※オブジェクトは同一参照を維持し、プロパティだけ上書きする（import 側の参照を壊さない）
@@ -138,22 +143,36 @@ export const REHA_RULES = {
 export const FACILITY_HOURS = { ...DEFAULT_FACILITY_HOURS };
 
 /**
+ * 外来予約カレンダー専用の提供時間（施設時間とは独立）
+ * ※オブジェクトは同一参照を維持し、プロパティだけ上書きする
+ */
+export const OUTPATIENT_HOURS = { ...DEFAULT_OUTPATIENT_HOURS };
+
+/**
  * 本日時間割・バリデーション・吸着・日誌の単一情報源
  * ※配列は同一参照を維持し、中身だけ差し替える（全 import 先が即時反映）
  */
 export const TIME_SLOTS = [];
 
-/** 外来予約カレンダー用の開始時刻文字列（TIME_SLOTS.start と同一系列・同一配列参照を appointmentSlots が再エクスポート） */
+/**
+ * 外来予約カレンダー／週間印刷用の開始時刻文字列
+ * ※ OUTPATIENT_HOURS から生成。appointmentSlots.js が同一配列参照を再エクスポート
+ */
 export const APPOINTMENT_TIME_STRINGS = [];
 
-/** 午前／午後／全日コマ数（半日・終日休暇プリセットと整合・live binding） */
+/** 午前／午後／全日コマ数（半日・終日休暇プリセットと整合・本日時間割側 live binding） */
 export let AM_SLOT_COUNT = 0;
 export let PM_SLOT_COUNT = 0;
 export let TOTAL_SLOT_COUNT = 0;
 
+/** 外来カレンダー側コマ数（表示・印刷サマリー用） */
+export let OUTPATIENT_AM_SLOT_COUNT = 0;
+export let OUTPATIENT_PM_SLOT_COUNT = 0;
+export let OUTPATIENT_TOTAL_SLOT_COUNT = 0;
+
 /**
- * FACILITY_HOURS / TIME_SLOTS / APPOINTMENT_TIME_STRINGS / コマ数をメモリ上で即時更新する。
- * 配列・オブジェクトは参照を維持したまま中身だけ差し替えるため、既存 import 先の再 import は不要。
+ * FACILITY_HOURS / TIME_SLOTS / コマ数をメモリ上で即時更新する（本日の時間割専用）。
+ * ※ APPOINTMENT_TIME_STRINGS は更新しない（外来専用設定は reloadOutpatientTimeSlots）
  *
  * @param {Partial<typeof DEFAULT_FACILITY_HOURS>|null|undefined} [newHours]
  * @returns {{ success: boolean, message: string, hours: typeof DEFAULT_FACILITY_HOURS, am: number, pm: number, total: number }}
@@ -177,17 +196,13 @@ export function reloadFacilityTimeSlots(newHours) {
   FACILITY_HOURS.amEnd = hours.amEnd;
   FACILITY_HOURS.pmStart = hours.pmStart;
   FACILITY_HOURS.pmEnd = hours.pmEnd;
+  FACILITY_HOURS.defaultLunchStart = hours.defaultLunchStart;
+  FACILITY_HOURS.defaultLunchEnd = hours.defaultLunchEnd;
 
   const slots = generateTimeSlots(FACILITY_HOURS);
   TIME_SLOTS.length = 0;
   for (let i = 0; i < slots.length; i += 1) {
     TIME_SLOTS.push(slots[i]);
-  }
-
-  const aptStrings = generateAppointmentTimeStrings(FACILITY_HOURS);
-  APPOINTMENT_TIME_STRINGS.length = 0;
-  for (let i = 0; i < aptStrings.length; i += 1) {
-    APPOINTMENT_TIME_STRINGS.push(aptStrings[i]);
   }
 
   AM_SLOT_COUNT = getAmSlotCount(FACILITY_HOURS);
@@ -196,7 +211,7 @@ export function reloadFacilityTimeSlots(newHours) {
 
   return {
     success: true,
-    message: '施設時間枠をメモリへ反映しました',
+    message: '施設時間枠（本日時間割）をメモリへ反映しました',
     hours: { ...FACILITY_HOURS },
     am: AM_SLOT_COUNT,
     pm: PM_SLOT_COUNT,
@@ -204,8 +219,58 @@ export function reloadFacilityTimeSlots(newHours) {
   };
 }
 
-// モジュール読込時に保存済み設定（なければデフォルト）で初期化
+/**
+ * OUTPATIENT_HOURS / APPOINTMENT_TIME_STRINGS をメモリ上で即時更新する（外来カレンダー専用）。
+ * ※ TIME_SLOTS（本日時間割）は更新しない
+ *
+ * @param {Partial<typeof DEFAULT_OUTPATIENT_HOURS>|null|undefined} [newHours]
+ * @returns {{ success: boolean, message: string, hours: typeof DEFAULT_OUTPATIENT_HOURS, am: number, pm: number, total: number }}
+ */
+export function reloadOutpatientTimeSlots(newHours) {
+  const source = newHours != null ? newHours : getSavedOutpatientHours();
+  const check = validateOutpatientHours(source);
+  if (!check.ok) {
+    return {
+      success: false,
+      message: check.message,
+      hours: { ...OUTPATIENT_HOURS },
+      am: OUTPATIENT_AM_SLOT_COUNT,
+      pm: OUTPATIENT_PM_SLOT_COUNT,
+      total: OUTPATIENT_TOTAL_SLOT_COUNT
+    };
+  }
+
+  const hours = normalizeOutpatientHours(check.hours);
+  OUTPATIENT_HOURS.amStart = hours.amStart;
+  OUTPATIENT_HOURS.amEnd = hours.amEnd;
+  OUTPATIENT_HOURS.pmStart = hours.pmStart;
+  OUTPATIENT_HOURS.pmEnd = hours.pmEnd;
+  OUTPATIENT_HOURS.defaultLunchStart = hours.defaultLunchStart;
+  OUTPATIENT_HOURS.defaultLunchEnd = hours.defaultLunchEnd;
+
+  const aptStrings = generateAppointmentTimeStrings(OUTPATIENT_HOURS);
+  APPOINTMENT_TIME_STRINGS.length = 0;
+  for (let i = 0; i < aptStrings.length; i += 1) {
+    APPOINTMENT_TIME_STRINGS.push(aptStrings[i]);
+  }
+
+  OUTPATIENT_AM_SLOT_COUNT = getAmSlotCount(OUTPATIENT_HOURS);
+  OUTPATIENT_PM_SLOT_COUNT = getPmSlotCount(OUTPATIENT_HOURS);
+  OUTPATIENT_TOTAL_SLOT_COUNT = getTotalSlotCount(OUTPATIENT_HOURS);
+
+  return {
+    success: true,
+    message: '外来予約カレンダー専用時間枠をメモリへ反映しました',
+    hours: { ...OUTPATIENT_HOURS },
+    am: OUTPATIENT_AM_SLOT_COUNT,
+    pm: OUTPATIENT_PM_SLOT_COUNT,
+    total: OUTPATIENT_TOTAL_SLOT_COUNT
+  };
+}
+
+// モジュール読込時: 施設（時間割）と外来をそれぞれ独立初期化
 reloadFacilityTimeSlots(getSavedFacilityHours());
+reloadOutpatientTimeSlots(getSavedOutpatientHours());
 
 // 対象セラピストリスト定義
 export const THERAPISTS = [

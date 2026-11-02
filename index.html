@@ -849,7 +849,7 @@
         <button type="button" id="btnCloseStaffModalX" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:#64748b;">✕</button>
       </div>
       <p style="font-size:0.75rem; color:#64748b; margin-bottom:12px;">
-        時間割には「稼働中」のセラピストのみが表示されます。リハビリ助手の氏名は業務日誌の出勤確認欄に自動反映されます。施設の午前・休憩・午後の提供時間もここで変更できます。
+        時間割には「稼働中」のセラピストのみが表示されます。リハビリ助手の氏名は業務日誌の出勤確認欄に自動反映されます。「本日の時間割」用の施設時間と、「外来予約カレンダー」専用時間はそれぞれ独立して設定できます。
       </p>
 
       <!-- リアルタイム検索 & 新規セラピスト追加バー -->
@@ -889,11 +889,11 @@
           </div>
         </div>
 
-        <!-- ★施設リハビリ提供時間設定（午前・休憩・午後 → 20分コマ自動生成） -->
+        <!-- ★施設リハビリ提供時間設定（本日の時間割専用） -->
         <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:6px; padding:10px; margin-top:4px;">
           <div style="font-size:0.8rem; font-weight:800; color:#0c4a6e; margin-bottom:6px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
             <span>🏥 施設リハビリ提供時間設定</span>
-            <span style="font-size:0.68rem; color:#0369a1; font-weight:normal;">(保存すると時間割・外来予約・印刷が即時連動)</span>
+            <span style="font-size:0.68rem; color:#0369a1; font-weight:normal;">（本日の時間割専用・外来カレンダーには影響しません）</span>
           </div>
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
             <div>
@@ -919,10 +919,10 @@
           </div>
           <div id="facilityHoursSlotSummaryBadge"
                style="margin-top:8px; display:inline-block; padding:4px 10px; border-radius:999px; border:1px solid #a7f3d0; background:#ecfdf5; color:#065f46; font-size:0.72rem; font-weight:700;">
-            午前 12コマ ／ 午後 12コマ ＝ 計 24コマ（昼休憩 60分）
+            午前 12コマ ／ 午後 15コマ ＝ 計 27コマ（昼休憩なし）
           </div>
           <p style="font-size:0.68rem; color:#64748b; margin:6px 0 0;">
-            条件: 午前開始 &lt; 午前終了 ≦ 午後開始 &lt; 業務終了。20分刻みでコマを自動生成します。
+            条件: 午前開始 &lt; 午前終了 ≦ 午後開始 &lt; 業務終了。20分刻みで「本日の時間割」コマを自動生成します。
           </p>
 
           <!-- 施設標準昼休み時間（交代制・誤配置防止ハイライトの基準） -->
@@ -972,6 +972,43 @@
               個別変更済みのスタッフも上書きする（未チェック時は施設標準と異なる設定者を保護）
             </label>
           </div>
+        </div>
+
+        <!-- ★外来予約カレンダー専用 提供時間・昼休み設定（本日時間割とは独立） -->
+        <div style="background:#ecfdf5; border:1px solid #6ee7b7; border-radius:6px; padding:10px; margin-top:8px;">
+          <div style="font-size:0.8rem; font-weight:800; color:#065f46; margin-bottom:6px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            <span>📅 外来予約カレンダー専用 提供時間・昼休み設定</span>
+            <span style="font-size:0.68rem; color:#047857; font-weight:normal;">（外来カレンダー・週間予約印刷のみに適用／本日の時間割は変更しません）</span>
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+            <div>
+              <label for="settingAptAmStartInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午前開始</label>
+              <input type="time" id="settingAptAmStartInput" value="09:00" step="300"
+                     style="width:100%; padding:5px 8px; border:1px solid #a7f3d0; border-radius:4px; font-size:0.8rem; background:#fff;">
+            </div>
+            <div>
+              <label for="settingAptAmEndInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午前終了</label>
+              <input type="time" id="settingAptAmEndInput" value="13:00" step="300"
+                     style="width:100%; padding:5px 8px; border:1px solid #a7f3d0; border-radius:4px; font-size:0.8rem; background:#fff;">
+            </div>
+            <div>
+              <label for="settingAptPmStartInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午後開始（午前終了より後＝昼休みあり）</label>
+              <input type="time" id="settingAptPmStartInput" value="13:00" step="300"
+                     style="width:100%; padding:5px 8px; border:1px solid #a7f3d0; border-radius:4px; font-size:0.8rem; background:#fff;">
+            </div>
+            <div>
+              <label for="settingAptPmEndInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">業務終了</label>
+              <input type="time" id="settingAptPmEndInput" value="18:00" step="300"
+                     style="width:100%; padding:5px 8px; border:1px solid #a7f3d0; border-radius:4px; font-size:0.8rem; background:#fff;">
+            </div>
+          </div>
+          <div id="outpatientHoursSlotSummaryBadge"
+               style="margin-top:8px; display:inline-block; padding:4px 10px; border-radius:999px; border:1px solid #a7f3d0; background:#fff; color:#065f46; font-size:0.72rem; font-weight:700;">
+            午前 12コマ ／ 午後 15コマ ＝ 計 27コマ（昼休憩なし）
+          </div>
+          <p style="font-size:0.68rem; color:#64748b; margin:6px 0 0;">
+            午前終了〜午後開始のあいだが外来カレンダー上の昼休み帯になります。既存の予約データはそのまま保持されます。
+          </p>
         </div>
 
         <!-- 過去・退職者（非表示スタッフ）折りたたみアコーディオン（トップを汚さず一番下に配置） -->

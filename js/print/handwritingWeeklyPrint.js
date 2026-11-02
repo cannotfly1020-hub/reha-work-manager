@@ -5,7 +5,7 @@
 import { formatDateYMD, getWeekDates } from '../core/dateUtils.js';
 import { TIME_SLOTS } from '../config/appointmentSlots.js';
 import { snapToNearestAppointmentSlot } from '../core/timeSlotUtil.js';
-import { FACILITY_HOURS, REHA_RULES } from '../config/rules.js';
+import { OUTPATIENT_HOURS, REHA_RULES } from '../config/rules.js';
 import { sanitizeHtml } from '../core/dataNormalizer.js';
 import { getJapaneseHolidayName } from '../core/holidayCalc.js';
 import { getPatientById } from '../store/patientStore.js';
@@ -204,8 +204,9 @@ export function printHandwritingWeeklySheet(baseDate) {
 
   const therapists = getAllTherapists();
   const dayNames = ['月', '火', '水', '木', '金', '土'];
-  const pmStart = String(FACILITY_HOURS?.pmStart || '13:00');
-  const amEnd = String(FACILITY_HOURS?.amEnd || '13:00');
+  // 昼休み帯は外来専用設定のみ参照（本日時間割の施設時間とは独立）
+  const pmStart = String(OUTPATIENT_HOURS?.pmStart || '13:00');
+  const amEnd = String(OUTPATIENT_HOURS?.amEnd || '13:00');
   const breakMin = (() => {
     const toMin = (t) => {
       const [h, m] = String(t).split(':').map(Number);
