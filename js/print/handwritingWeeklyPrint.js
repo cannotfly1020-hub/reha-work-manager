@@ -8,7 +8,7 @@ import { formatDateYMD, getWeekDates } from '../core/dateUtils.js';
 import { TIME_SLOTS } from '../config/appointmentSlots.js';
 import { snapToNearestAppointmentSlot } from '../core/timeSlotUtil.js';
 import { generateAppointmentTimeStrings } from '../core/timeSlotGenerator.js';
-import { OUTPATIENT_HOURS, REHA_RULES } from '../config/rules.js';
+import { OUTPATIENT_HOURS } from '../config/rules.js';
 import { sanitizeHtml } from '../core/dataNormalizer.js';
 import { getJapaneseHolidayName } from '../core/holidayCalc.js';
 import { getPatientById } from '../store/patientStore.js';
@@ -35,15 +35,6 @@ function resolvePrintSlotTimes() {
 }
 
 /**
- * @param {{ durationMinutes?: number }} apt
- * @returns {number}
- */
-function getAptSlotSpan(apt) {
-  const duration = Math.max(1, Number(apt?.durationMinutes) || 20);
-  return Math.max(1, Math.ceil(duration / 20));
-}
-
-/**
  * 担当表示（フルネーム可・省略しない）
  * @param {object[]} therapists
  * @param {string} therapistId
@@ -57,41 +48,17 @@ function formatStaffBadgeLabel(therapists, therapistId) {
 }
 
 /**
+ * 消炎鎮痛かどうか（印刷マス内バッジ用）
  * @param {object|null|undefined} patient
  * @param {object} apt
+ * @returns {{ isAnalgesia: boolean }}
  */
 function resolveDiseaseVisual(patient, apt) {
   const treatment = String(apt?.treatmentType || '').toUpperCase();
   const therapistId = String(apt?.therapistId || '');
   const isAnalgesia = treatment === 'ANALGESIA' || therapistId === 'ANALGESIA'
     || String(patient?.diseaseType || '').toUpperCase() === 'ANALGESIA';
-
-  if (isAnalgesia) {
-    return {
-      isAnalgesia: true,
-      diseaseType: 'ANALGESIA',
-      diseaseTag: '消炎',
-      diseaseClass: 'dtype-analgesia'
-    };
-  }
-
-  const raw = String(patient?.diseaseType || '').toUpperCase();
-  const known = ['LOCOMOTIVE', 'CEREBROVASCULAR', 'DISUSE'];
-  const diseaseType = known.includes(raw) ? raw : 'LOCOMOTIVE';
-  const rule = REHA_RULES.LIMIT_DAYS[diseaseType] || REHA_RULES.LIMIT_DAYS.LOCOMOTIVE;
-  const tagMap = { LOCOMOTIVE: '運', CEREBROVASCULAR: '脳', DISUSE: '廃' };
-  const classMap = {
-    LOCOMOTIVE: 'dtype-loco',
-    CEREBROVASCULAR: 'dtype-cerebro',
-    DISUSE: 'dtype-disuse'
-  };
-
-  return {
-    isAnalgesia: false,
-    diseaseType,
-    diseaseTag: tagMap[diseaseType] || rule.tag || '運',
-    diseaseClass: classMap[diseaseType] || 'dtype-loco'
-  };
+  return { isAnalgesia };
 }
 
 /**
@@ -103,69 +70,39 @@ function renderBookedCardHtml(apt, therapists) {
   const patient = getPatientById(apt.patientId);
   const pName = patient?.name || apt.patientId || '（氏名不明）';
   const staffLabel = formatStaffBadgeLabel(therapists, apt.therapistId);
-  const dur = Number(apt.durationMinutes) || 20;
   const vis = resolveDiseaseVisual(patient, apt);
 
-  const diseaseBadge = vis.isAnalgesia
-    ? `<span class="badge-analgesia" title="消炎鎮痛">⚡ 消炎鎮痛</span>`
-    : `<span class="badge-disease ${vis.diseaseClass}">${sanitizeHtml(vis.diseaseTag)}</span>`;
+  // 単一マス表示：担当＋氏名＋（消炎時のみバッジ）。病名・分数は出さない
+  const analgesiaBadge = vis.isAnalgesia
+    ? `<span class="badge-analgesia" title="消炎鎮痛">⚡消炎</span>`
+    : '';
 
   return `
     <div class="booked-card${vis.isAnalgesia ? ' is-analgesia' : ''}">
       <div class="bk-staff-row">
         <span class="badge-staff">[${sanitizeHtml(staffLabel)}]</span>
-        ${diseaseBadge}
+        ${analgesiaBadge}
       </div>
       <div class="bk-main">
         <span class="bk-name">${sanitizeHtml(pName)} 様</span>
       </div>
-      <div class="bk-meta"><span class="bk-dur">${dur}分</span></div>
     </div>
   `;
 }
 
 /**
- * ページ内スロット用の rowspan スキップ集合を構築（ページ境界をまたがない）
- * @param {string[]} pageSlots
- * @param {Date[]} weekDates
- * @param {Record<string, object[]>} slotAptMap
- * @returns {Set<string>}
- */
-function buildPageRowspanSkip(pageSlots, weekDates, slotAptMap) {
-  const rowspanSkip = new Set();
-  weekDates.forEach((d) => {
-    const dateStr = formatDateYMD(d);
-    pageSlots.forEach((slotTime, idx) => {
-      const key = `${dateStr}_${slotTime}`;
-      if (rowspanSkip.has(key)) return;
-      const apts = slotAptMap[key] || [];
-      if (apts.length !== 1) return;
-      const span = getAptSlotSpan(apts[0]);
-      if (span <= 1) return;
-      for (let i = 1; i < span; i += 1) {
-        const next = pageSlots[idx + i];
-        if (!next) break;
-        const nextKey = `${dateStr}_${next}`;
-        if ((slotAptMap[nextKey] || []).length > 0) break;
-        rowspanSkip.add(nextKey);
-      }
-    });
-  });
-  return rowspanSkip;
-}
-
-/**
  * 1ページ分の tbody 行HTMLを生成
+ * ※週間マトリクス表のまま／rowspan禁止＝開始コマの1マスのみに描画
  * @param {object} opts
  * @returns {string}
  */
 function buildPageBodyRows(opts) {
   const {
-    pageSlots, weekDates, slotAptMap, therapists, rowspanSkip
+    pageSlots, weekDates, slotAptMap, therapists
   } = opts;
 
   let bodyRows = '';
-  pageSlots.forEach((slotTime, slotIdx) => {
+  pageSlots.forEach((slotTime) => {
     bodyRows += `<tr class="slot-row">`;
     bodyRows += `<td class="time-col">${slotTime}</td>`;
 
@@ -174,16 +111,14 @@ function buildPageBodyRows(opts) {
       const isSat = d.getDay() === 6;
       const holidayName = getJapaneseHolidayName(d);
       const key = `${dateStr}_${slotTime}`;
-
-      if (rowspanSkip.has(key)) return;
-
       const apts = slotAptMap[key] || [];
+
       let tdClass = 'slot-cell';
       if (holidayName) tdClass += ' holiday';
       else if (isSat) tdClass += ' sat';
 
       if (apts.length === 0) {
-        // 左列時間軸があるためセル内の重複時刻は出さない（手書き余白のみ）
+        // 空きマスは空白のまま（手書き余白）
         bodyRows += `
           <td class="${tdClass} empty-cell">
             <div class="write-space" aria-hidden="true"></div>
@@ -192,25 +127,10 @@ function buildPageBodyRows(opts) {
         return;
       }
 
-      let rowspan = 1;
-      if (apts.length === 1) {
-        const span = getAptSlotSpan(apts[0]);
-        let actual = 1;
-        for (let i = 1; i < span; i += 1) {
-          const next = pageSlots[slotIdx + i];
-          if (!next) break;
-          const nextKey = `${dateStr}_${next}`;
-          if ((slotAptMap[nextKey] || []).length > 0) break;
-          if (rowspanSkip.has(nextKey)) actual += 1;
-          else break;
-        }
-        rowspan = Math.max(1, actual);
-      }
-
-      const rowspanAttr = rowspan > 1 ? ` rowspan="${rowspan}"` : '';
+      // 開始時間の1マスのみに表示（縦結合なし）
       const cardsHtml = apts.map((apt) => renderBookedCardHtml(apt, therapists)).join('');
       bodyRows += `
-        <td class="${tdClass} booked-cell"${rowspanAttr}>
+        <td class="${tdClass} booked-cell">
           ${cardsHtml}
         </td>
       `;
@@ -240,11 +160,10 @@ function computePageMetrics(slotCount) {
   // 患者名〜11pt固定寄り／時間列は10ptに引き締め
   const namePt = rowMm >= 14 ? 11.5 : 11;
   const staffPt = 8;
-  const badgePt = 7.5;
   const analgesiaPt = 8;
   const timePt = 10;
   return {
-    pageMm, headerMm, theadMm, footerMm, rowMm, namePt, staffPt, badgePt, analgesiaPt, timePt
+    pageMm, headerMm, theadMm, footerMm, rowMm, namePt, staffPt, analgesiaPt, timePt
   };
 }
 
@@ -262,7 +181,7 @@ function renderSheetPage(opts) {
   const last = pageSlots[pageSlots.length - 1] || '-';
   const {
     pageMm, headerMm, theadMm, footerMm, rowMm,
-    namePt, staffPt, badgePt, analgesiaPt, timePt
+    namePt, staffPt, analgesiaPt, timePt
   } = metrics;
 
   return `
@@ -278,7 +197,7 @@ function renderSheetPage(opts) {
         <div class="header-right">
           <div class="legend-chips">
             <span class="chip chip-staff">担当</span>
-            <span class="chip chip-analgesia">⚡ 消炎</span>
+            <span class="chip chip-analgesia">⚡消炎</span>
             <span class="chip chip-empty">白枠＝空き</span>
           </div>
           <div class="meta">出力 ${outStamp} ／ A4縦・全2頁</div>
@@ -323,7 +242,6 @@ function renderSheetPage(opts) {
           --page-mm: ${pageMm}mm;
           --name-pt: ${namePt}pt;
           --staff-pt: ${staffPt}pt;
-          --badge-pt: ${badgePt}pt;
           --analgesia-pt: ${analgesiaPt}pt;
           --time-pt: ${timePt}pt;
         }
@@ -382,7 +300,6 @@ export function printHandwritingWeeklySheet(baseDate) {
 
   const pages = [];
   if (amSlots.length) {
-    const rowspanSkip = buildPageRowspanSkip(amSlots, weekDates, slotAptMap);
     const metrics = computePageMetrics(amSlots.length);
     const amFirst = amSlots[0] || '09:00';
     pages.push({
@@ -391,13 +308,12 @@ export function printHandwritingWeeklySheet(baseDate) {
       pageBadgeClass: 'badge-am',
       pageSlots: amSlots,
       bodyRows: buildPageBodyRows({
-        pageSlots: amSlots, weekDates, slotAptMap, therapists, rowspanSkip
+        pageSlots: amSlots, weekDates, slotAptMap, therapists
       }),
       metrics
     });
   }
   if (pmSlots.length) {
-    const rowspanSkip = buildPageRowspanSkip(pmSlots, weekDates, slotAptMap);
     const metrics = computePageMetrics(pmSlots.length);
     const pmLast = pmSlots[pmSlots.length - 1] || String(OUTPATIENT_HOURS?.pmEnd || '18:00');
     pages.push({
@@ -406,7 +322,7 @@ export function printHandwritingWeeklySheet(baseDate) {
       pageBadgeClass: 'badge-pm',
       pageSlots: pmSlots,
       bodyRows: buildPageBodyRows({
-        pageSlots: pmSlots, weekDates, slotAptMap, therapists, rowspanSkip
+        pageSlots: pmSlots, weekDates, slotAptMap, therapists
       }),
       metrics
     });
@@ -683,7 +599,6 @@ export function printHandwritingWeeklySheet(baseDate) {
           justify-content: flex-start;
           gap: 3px;
         }
-        .badge-disease,
         .badge-staff,
         .badge-analgesia {
           display: inline-flex;
@@ -703,15 +618,6 @@ export function printHandwritingWeeklySheet(baseDate) {
           border: 1px solid #1d4ed8;
           letter-spacing: 0.02em;
         }
-        .badge-disease {
-          font-size: var(--badge-pt, 7.5pt);
-          font-weight: 600;
-          padding: 0 5px;
-          border-radius: 999px;
-          border: 1px solid #e2e8f0;
-          background: #f8fafc;
-          color: #64748b;
-        }
         /* 消炎：アンバー（#d97706）背景タグ */
         .badge-analgesia {
           font-size: var(--analgesia-pt, 8pt);
@@ -723,9 +629,6 @@ export function printHandwritingWeeklySheet(baseDate) {
           border: 1px solid #d97706;
           letter-spacing: 0.02em;
         }
-        .dtype-loco { background: #f0f9ff; color: #0369a1; border-color: #bae6fd; }
-        .dtype-cerebro { background: #f5f3ff; color: #6d28d9; border-color: #ddd6fe; }
-        .dtype-disuse { background: #fffbeb; color: #a16207; border-color: #fde68a; }
 
         .bk-main {
           display: flex;
@@ -746,17 +649,6 @@ export function printHandwritingWeeklySheet(baseDate) {
           overflow-wrap: anywhere;
           letter-spacing: 0.04em;
           text-align: center;
-        }
-        .bk-meta {
-          display: flex;
-          justify-content: flex-end;
-          line-height: 1;
-        }
-        .bk-dur {
-          font-size: 7pt;
-          font-weight: 600;
-          color: #94a3b8;
-          flex-shrink: 0;
         }
         .footer {
           display: flex;
