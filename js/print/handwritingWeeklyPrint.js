@@ -1,7 +1,8 @@
 // js/print/handwritingWeeklyPrint.js
-// 週間予約受付簿 A4横・午前／午後 2ページ印刷
+// 週間予約受付簿 A4縦（portrait）・午前／午後 2ページ印刷
 // ★画面の週間グリッド・予約データには一切干渉しない
 // ★外来専用 OUTPATIENT_HOURS からコマ生成し、午前1枚＋午後1枚で午後欠落を根絶
+// ★縦向きで行高を確保し、患者名・担当タグ・【消炎】を大きく表示する
 
 import { formatDateYMD, getWeekDates } from '../core/dateUtils.js';
 import { TIME_SLOTS } from '../config/appointmentSlots.js';
@@ -258,25 +259,25 @@ function buildPageBodyRows(opts) {
 }
 
 /**
- * 行高・フォントサイズをページ枠数から算出（A4横・余白込みで収める）
+ * 行高・フォントサイズをページ枠数から算出（A4縦・余白込みで収める）
  * @param {number} slotCount
  */
 function computePageMetrics(slotCount) {
-  // A4横: 210 - 5 - 5 = 200mm
-  const pageMm = 200;
-  const headerMm = 14;
-  const theadMm = 8;
-  const footerMm = 6;
-  const borderFudgeMm = Math.min(10, 2 + slotCount * 0.2);
-  const dataAreaMm = Math.max(120, pageMm - headerMm - theadMm - footerMm - borderFudgeMm);
+  // A4縦: 297 - 5 - 4 = 288mm（横向きより縦幅が広く、患者名の縦並びを収容）
+  const pageMm = 288;
+  const headerMm = 15;
+  const theadMm = 9;
+  const footerMm = 6.5;
+  const borderFudgeMm = Math.min(12, 2.5 + slotCount * 0.22);
+  const dataAreaMm = Math.max(180, pageMm - headerMm - theadMm - footerMm - borderFudgeMm);
   const rawRow = dataAreaMm / Math.max(1, slotCount);
-  // 嵩上げ禁止（ページ内クリップ防止）。2枚分割で通常 11mm超の行高になる
-  const rowMm = Math.min(16, rawRow);
-  const namePt = rowMm >= 13 ? 12.5 : (rowMm >= 11 ? 11.5 : (rowMm >= 9 ? 10.5 : 9.5));
-  const staffPt = rowMm >= 13 ? 11.5 : (rowMm >= 11 ? 10.5 : (rowMm >= 9 ? 9.5 : 8.5));
-  const badgePt = rowMm >= 13 ? 10.5 : (rowMm >= 11 ? 9.5 : 8.5);
-  const analgesiaPt = Math.max(staffPt + 0.8, badgePt + 1.2);
-  const timePt = rowMm >= 12 ? 11.5 : (rowMm >= 9 ? 10.5 : 9.5);
+  // 嵩上げ禁止。午前〜12枠／午後〜15枠なら行高 16〜21mm 程度で大文字表示が可能
+  const rowMm = Math.min(22, rawRow);
+  const namePt = rowMm >= 18 ? 14 : (rowMm >= 15 ? 13 : (rowMm >= 12 ? 12 : 10.5));
+  const staffPt = rowMm >= 18 ? 13 : (rowMm >= 15 ? 12 : (rowMm >= 12 ? 11 : 9.5));
+  const badgePt = rowMm >= 18 ? 12 : (rowMm >= 15 ? 11 : (rowMm >= 12 ? 10 : 9));
+  const analgesiaPt = Math.max(staffPt + 1, badgePt + 1.5);
+  const timePt = rowMm >= 16 ? 13 : (rowMm >= 12 ? 12 : 10.5);
   return {
     pageMm, headerMm, theadMm, footerMm, rowMm, namePt, staffPt, badgePt, analgesiaPt, timePt
   };
@@ -320,7 +321,7 @@ function renderSheetPage(opts) {
         </div>
         <div class="meta">
           出力: ${outStamp}<br>
-          A4横・${sanitizeHtml(pageLabel)}／全2頁
+          A4縦・${sanitizeHtml(pageLabel)}／全2頁
         </div>
       </div>
 
@@ -372,7 +373,7 @@ function renderSheetPage(opts) {
 }
 
 /**
- * 週間予約受付簿（A4横・午前1枚＋午後1枚）を印刷する
+ * 週間予約受付簿（A4縦・午前1枚＋午後1枚）を印刷する
  * @param {Date} baseDate
  */
 export function printHandwritingWeeklySheet(baseDate) {
@@ -449,7 +450,7 @@ export function printHandwritingWeeklySheet(baseDate) {
     });
   }
 
-  const printWindow = window.open('', '_blank', 'width=1200,height=900');
+  const printWindow = window.open('', '_blank', 'width=900,height=1200');
   if (!printWindow) {
     showToast('印刷ポップアップがブロックされました。ブラウザ設定をご確認ください。', 'warn');
     return;
@@ -473,8 +474,8 @@ export function printHandwritingWeeklySheet(baseDate) {
       <title>外来リハビリ 週間予約受付簿 午前・午後 (${startStr.replace(/-/g, '/')}〜)</title>
       <style>
         @page {
-          size: A4 landscape;
-          margin: 5mm;
+          size: A4 portrait;
+          margin: 5mm 5mm 4mm 5mm;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         html, body {
@@ -486,13 +487,13 @@ export function printHandwritingWeeklySheet(baseDate) {
           print-color-adjust: exact;
         }
         body {
-          font-size: 10pt;
+          font-size: 11pt;
           line-height: 1.15;
         }
         .sheet-page {
           width: 100%;
-          height: var(--page-mm, 200mm);
-          max-height: var(--page-mm, 200mm);
+          height: var(--page-mm, 288mm);
+          max-height: var(--page-mm, 288mm);
           display: flex;
           flex-direction: column;
           overflow: hidden;
@@ -524,15 +525,15 @@ export function printHandwritingWeeklySheet(baseDate) {
           gap: 6px 8px;
         }
         .title {
-          font-size: 13pt;
+          font-size: 14pt;
           font-weight: 900;
           color: #0f172a;
         }
         .page-badge {
           display: inline-block;
-          font-size: 11pt;
+          font-size: 12pt;
           font-weight: 900;
-          padding: 1px 10px;
+          padding: 2px 12px;
           border-radius: 4px;
           border: 1.5px solid #0f172a;
           letter-spacing: 0.04em;
@@ -554,7 +555,7 @@ export function printHandwritingWeeklySheet(baseDate) {
         }
         .legend {
           margin-top: 2px;
-          font-size: 8pt;
+          font-size: 8.5pt;
           font-weight: 700;
           color: #334155;
           white-space: nowrap;
@@ -608,17 +609,17 @@ export function printHandwritingWeeklySheet(baseDate) {
         }
         .hw-table thead th {
           background: #e2e8f0;
-          font-size: 10pt;
+          font-size: 11pt;
           font-weight: 900;
           text-align: center;
           padding: 1px 2px;
-          height: var(--thead-mm, 8mm);
-          max-height: var(--thead-mm, 8mm);
+          height: var(--thead-mm, 9mm);
+          max-height: var(--thead-mm, 9mm);
           vertical-align: middle;
           color: #0f172a;
         }
         .hw-table thead th .hol-name {
-          font-size: 7.5pt;
+          font-size: 8pt;
           font-weight: 900;
         }
         .hw-table thead th.sat {
@@ -630,25 +631,25 @@ export function printHandwritingWeeklySheet(baseDate) {
           color: #9f1239;
         }
         .slot-row {
-          height: var(--row-mm, 12mm);
-          max-height: var(--row-mm, 12mm);
+          height: var(--row-mm, 18mm);
+          max-height: var(--row-mm, 18mm);
         }
         .time-col {
-          width: 14mm;
+          width: 15mm;
           text-align: center;
           font-weight: 900;
-          font-size: var(--time-pt, 11pt);
+          font-size: var(--time-pt, 13pt);
           vertical-align: middle !important;
           background: #e2e8f0;
           color: #0f172a;
-          height: var(--row-mm, 12mm);
-          max-height: var(--row-mm, 12mm);
+          height: var(--row-mm, 18mm);
+          max-height: var(--row-mm, 18mm);
           padding: 0;
         }
         .slot-cell {
-          height: var(--row-mm, 12mm);
-          max-height: var(--row-mm, 12mm);
-          padding: 0.8mm 1.2mm;
+          height: var(--row-mm, 18mm);
+          max-height: var(--row-mm, 18mm);
+          padding: 1mm 1.4mm;
           position: relative;
           overflow: hidden;
         }
@@ -657,13 +658,13 @@ export function printHandwritingWeeklySheet(baseDate) {
         .empty-cell { background: #ffffff !important; }
         .empty-time {
           position: absolute;
-          top: 0.5mm;
-          left: 0.8mm;
-          font-size: 8pt;
+          top: 0.6mm;
+          left: 1mm;
+          font-size: 9pt;
           font-weight: 700;
           color: #94a3b8;
         }
-        .write-space { height: 100%; min-height: 6mm; }
+        .write-space { height: 100%; min-height: 8mm; }
         .booked-cell {
           background: #f8fafc !important;
           vertical-align: middle;
@@ -704,23 +705,25 @@ export function printHandwritingWeeklySheet(baseDate) {
           vertical-align: middle;
         }
         .badge-staff {
-          font-size: var(--staff-pt, 10pt);
+          font-size: var(--staff-pt, 12pt);
           font-weight: 900;
           letter-spacing: 0.03em;
+          padding: 0.6mm 4px;
         }
         .badge-disease {
-          font-size: var(--badge-pt, 9pt);
+          font-size: var(--badge-pt, 11pt);
           font-weight: 800;
+          padding: 0.5mm 3px;
         }
         .badge-analgesia {
-          font-size: var(--analgesia-pt, 11pt);
+          font-size: var(--analgesia-pt, 13pt);
           font-weight: 900;
           background: #059669;
           color: #ffffff;
           border-color: #065f46;
-          border-width: 1.8px;
+          border-width: 2px;
           letter-spacing: 0.06em;
-          padding: 0.4mm 5px;
+          padding: 0.6mm 6px;
         }
         .dtype-loco {
           background: #dbeafe;
@@ -745,7 +748,7 @@ export function printHandwritingWeeklySheet(baseDate) {
           overflow: hidden;
         }
         .bk-name {
-          font-size: var(--name-pt, 11pt);
+          font-size: var(--name-pt, 13pt);
           font-weight: 900;
           color: #000000;
           line-height: 1.1;
@@ -755,7 +758,7 @@ export function printHandwritingWeeklySheet(baseDate) {
           max-width: 100%;
         }
         .bk-dur {
-          font-size: 9pt;
+          font-size: 10pt;
           font-weight: 800;
           color: #334155;
           flex-shrink: 0;
@@ -765,18 +768,18 @@ export function printHandwritingWeeklySheet(baseDate) {
           justify-content: space-between;
           gap: 8px;
           margin-top: 1mm;
-          font-size: 7.5pt;
+          font-size: 8pt;
           font-weight: 600;
           color: #334155;
           flex: 0 0 auto;
-          height: var(--footer-mm, 6mm);
-          max-height: var(--footer-mm, 6mm);
+          height: var(--footer-mm, 6.5mm);
+          max-height: var(--footer-mm, 6.5mm);
           overflow: hidden;
         }
         @media print {
           .sheet-page {
-            height: var(--page-mm, 200mm) !important;
-            max-height: var(--page-mm, 200mm) !important;
+            height: var(--page-mm, 288mm) !important;
+            max-height: var(--page-mm, 288mm) !important;
             overflow: hidden !important;
           }
           .sheet-page:not(.sheet-page-last) {

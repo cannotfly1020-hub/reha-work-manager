@@ -1,6 +1,6 @@
 // js/views/appointmentCalendarView.js
 // 外来予約カレンダーの初期化・週/月の切り替え
-// ★A4横「週間予約受付簿（午前・午後2枚）」へ一本化（旧週間表印刷ボタンは非表示）。画面マス目描画には非干渉。
+// ★A4縦「週間予約受付簿（午前・午後2枚）」へ一本化（旧週間表印刷ボタンは非表示）。画面マス目描画には非干渉。
 
 import { getJapaneseHolidayName } from '../core/holidayCalc.js';
 import { formatDateYMD } from '../core/dateUtils.js';
@@ -14,7 +14,7 @@ import { renderWeeklyTimetable } from './appointment/weeklyTimetable.js';
 import { renderMonthlyCalendar } from './appointment/monthlyCalendar.js';
 
 /**
- * 週間予約受付簿（A4横・午前／午後 2ページ）印刷
+ * 週間予約受付簿（A4縦・午前／午後 2ページ）印刷
  * 画面の週間マス目描画には一切触れず、印刷ポップアップのみ生成する。
  */
 export function handlePrintHandwritingWeeklySheet() {
@@ -22,7 +22,7 @@ export function handlePrintHandwritingWeeklySheet() {
 }
 
 /**
- * 旧「🖨 週間表 (A4横)」を非表示にし、主要ボタン「📝 週間予約受付簿 (A4横・午前午後)」を配置する。
+ * 旧「🖨 週間表 (A4横)」を非表示にし、主要ボタン「📝 週間予約受付簿 (A4縦・午前午後)」を配置する。
  * index.html は改変せず DOM 操作のみでツールバーを整理する。
  */
 function ensureReceptionBookPrintToolbar() {
@@ -43,7 +43,7 @@ function ensureReceptionBookPrintToolbar() {
     btn = document.createElement('button');
     btn.id = 'btnAptPrintHandwritingWeekly';
     btn.type = 'button';
-    btn.title = '対面受付・次週案内用。A4横で午前1枚＋午後1枚の予約受付簿を印刷します（空き枠は手書き可／画面表示は変わりません）';
+    btn.title = '対面受付・次週案内用。A4縦で午前1枚＋午後1枚の予約受付簿を印刷します（空き枠は手書き可／画面表示は変わりません）';
     btn.style.cssText = [
       'display:flex',
       'align-items:center',
@@ -72,8 +72,8 @@ function ensureReceptionBookPrintToolbar() {
     }
   }
 
-  btn.innerHTML = '<span>📝</span><span>週間予約受付簿 (A4横・午前午後)</span>';
-  btn.title = '対面受付・次週案内用。A4横で午前1枚＋午後1枚の予約受付簿を印刷します（空き枠は手書き可／画面表示は変わりません）';
+  btn.innerHTML = '<span>📝</span><span>週間予約受付簿 (A4縦・午前午後)</span>';
+  btn.title = '対面受付・次週案内用。A4縦で午前1枚＋午後1枚の予約受付簿を印刷します（空き枠は手書き可／画面表示は変わりません）';
   btn.style.display = 'flex';
 }
 
