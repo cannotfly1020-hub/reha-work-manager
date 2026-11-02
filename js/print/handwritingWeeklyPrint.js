@@ -1,10 +1,12 @@
 // js/print/handwritingWeeklyPrint.js
 // 週間予約受付簿 A4縦印刷（手書き余白完備・疾患／消炎／担当の視認性強化）
-// ★画面の週間グリッドには一切干渉しない。全 TIME_SLOTS を歯抜けなく印字し、A4縦1枚にジャスト収容する。
+// ★画面の週間グリッドには一切干渉しない。
+// ★外来専用 OUTPATIENT_HOURS から午前〜午後の全コマを生成し、A4縦1枚に収めて午後切れを防ぐ。
 
 import { formatDateYMD, getWeekDates } from '../core/dateUtils.js';
 import { TIME_SLOTS } from '../config/appointmentSlots.js';
 import { snapToNearestAppointmentSlot } from '../core/timeSlotUtil.js';
+import { generateAppointmentTimeStrings } from '../core/timeSlotGenerator.js';
 import { OUTPATIENT_HOURS, REHA_RULES } from '../config/rules.js';
 import { sanitizeHtml } from '../core/dataNormalizer.js';
 import { getJapaneseHolidayName } from '../core/holidayCalc.js';
@@ -12,6 +14,22 @@ import { getPatientById } from '../store/patientStore.js';
 import { getAllTherapists } from '../store/therapistStore.js';
 import { getAllAppointments } from '../store/appointmentStore.js';
 import { showToast } from '../ui/toast.js';
+
+/**
+ * 印刷用スロット開始時刻（外来専用時間から午前〜午後を漏れなく生成）
+ * メモリ配列が空／欠落していても OUTPATIENT_HOURS から再生成する
+ * @returns {string[]}
+ */
+function resolvePrintSlotTimes() {
+  const fromHours = generateAppointmentTimeStrings(OUTPATIENT_HOURS || {});
+  if (Array.isArray(fromHours) && fromHours.length > 0) {
+    return fromHours.map((t) => String(t));
+  }
+  if (Array.isArray(TIME_SLOTS) && TIME_SLOTS.length > 0) {
+    return TIME_SLOTS.map((t) => String(t));
+  }
+  return [];
+}
 
 /**
  * 所要時間（分）→ 20分コマ数
@@ -159,10 +177,11 @@ export function printHandwritingWeeklySheet(baseDate) {
   const weekDates = getWeekDates(baseDate);
   const startStr = formatDateYMD(weekDates[0]);
   const endStr = formatDateYMD(weekDates[5]);
-  const allSlotTimes = [...TIME_SLOTS];
+  // 外来専用設定から 09:00〜18:00 等の全日コマを取得（午前のみ切り捨て防止）
+  const allSlotTimes = resolvePrintSlotTimes();
 
   if (!allSlotTimes.length) {
-    showToast('施設時間枠が未設定のため印刷できません', 'warn');
+    showToast('外来予約の時間枠が未設定のため印刷できません', 'warn');
     return;
   }
 
@@ -220,17 +239,27 @@ export function printHandwritingWeeklySheet(baseDate) {
   const periodLabel = `${startStr.slice(0, 4)}年${Number(startStr.slice(5, 7))}月${Number(startStr.slice(8, 10))}日(月) 〜 ${endStr.slice(0, 4)}年${Number(endStr.slice(5, 7))}月${Number(endStr.slice(8, 10))}日(土)`;
 
   // A4縦 印字可能高さ ≈ 297 - 5 - 4 = 288mm
-  // ヘッダー帯≈13mm + thead≈7.5mm + 昼境界≈3.5mm + footer≈6mm → データ行に ≈258mm
-  // スロット数 N に対し 1行 ≈ 258/N mm（視認性のため下限・上限をやや拡大）
+  // ★午後切れの主因: 行高下限(6.8mm等)＋罫線余白で合計が288mm超 → overflow:hidden で午後がクリップ
+  // → ヘッダー／thead／昼帯／footer／罫線分を差し引き、残りをスロット数で均等分割（下限で押し上げない）
   const slotCount = allSlotTimes.length;
-  const dataAreaMm = 258;
-  const lunchMm = 3.5;
-  const rowMm = Math.max(6.8, Math.min(10.2, (dataAreaMm - lunchMm) / Math.max(1, slotCount)));
-  const namePt = rowMm >= 9 ? 9.6 : (rowMm >= 7.8 ? 8.9 : 8.2);
-  const badgePt = rowMm >= 9 ? 7.6 : (rowMm >= 7.8 ? 7.0 : 6.5);
-  const staffPt = rowMm >= 9 ? 8.2 : (rowMm >= 7.8 ? 7.5 : 7.0);
-  const timePt = rowMm >= 8.5 ? 9.0 : 8.2;
-  const analgesiaPt = Math.max(staffPt, badgePt + 0.6);
+  const pageMm = 288;
+  const headerMm = 11.5;
+  const theadMm = 6.8;
+  const footerMm = 5.2;
+  const lunchMm = breakMin > 0 ? 3.2 : 2.6;
+  const borderFudgeMm = Math.min(14, 2.5 + slotCount * 0.22); // collapse罫線の実効厚み
+  const dataAreaMm = Math.max(160, pageMm - headerMm - theadMm - footerMm - lunchMm - borderFudgeMm);
+  const rawRow = dataAreaMm / Math.max(1, slotCount);
+  // 行高は予算内に厳密に収める（嵩上げ禁止＝午後クリップ防止）。極端に狭いときだけ 3.6mm 下限。
+  const rowMm = rawRow < 3.6 ? 3.6 : Math.min(9.2, rawRow);
+  const namePt = rowMm >= 8.2 ? 9.0 : (rowMm >= 6.5 ? 8.0 : (rowMm >= 5.2 ? 7.2 : 6.4));
+  const badgePt = rowMm >= 8.2 ? 7.0 : (rowMm >= 6.5 ? 6.4 : 5.6);
+  const staffPt = rowMm >= 8.2 ? 7.6 : (rowMm >= 6.5 ? 6.8 : 6.0);
+  const timePt = rowMm >= 8.0 ? 8.4 : (rowMm >= 6.0 ? 7.4 : 6.6);
+  const analgesiaPt = Math.max(staffPt, badgePt + 0.4);
+  const firstSlot = allSlotTimes[0];
+  const lastSlot = allSlotTimes[slotCount - 1];
+  const hasAfternoon = allSlotTimes.some((t) => String(t) >= pmStart);
 
   const printWindow = window.open('', '_blank', 'width=900,height=1200');
   if (!printWindow) {
@@ -330,15 +359,15 @@ export function printHandwritingWeeklySheet(baseDate) {
           font-family: "Meiryo UI", Meiryo, system-ui, -apple-system, sans-serif;
           color: #0f172a;
           background: #fff;
-          font-size: 9pt;
-          line-height: 1.15;
+          font-size: 8.5pt;
+          line-height: 1.1;
           -webkit-print-color-adjust: exact;
           print-color-adjust: exact;
           display: flex;
           flex-direction: column;
           height: 288mm; /* 297 - 5 - 4 */
           max-height: 288mm;
-          overflow: hidden;
+          overflow: hidden; /* 行高を枠数で均等分割済みのため午後は切れない */
           page-break-after: avoid;
           page-break-inside: avoid;
         }
@@ -347,27 +376,29 @@ export function printHandwritingWeeklySheet(baseDate) {
           justify-content: space-between;
           align-items: flex-start;
           gap: 6px;
-          border-bottom: 2px solid #0f172a;
-          padding-bottom: 2px;
-          margin-bottom: 2px;
+          border-bottom: 1.6px solid #0f172a;
+          padding-bottom: 1px;
+          margin-bottom: 1px;
           flex: 0 0 auto;
-          max-height: 13mm;
+          height: ${headerMm}mm;
+          max-height: ${headerMm}mm;
+          overflow: hidden;
         }
         .title-block { min-width: 0; flex: 1; }
         .title {
-          font-size: 12pt;
+          font-size: 11pt;
           font-weight: 900;
           color: #0f172a;
         }
         .period {
-          font-size: 9pt;
+          font-size: 8pt;
           font-weight: 800;
           color: #047857;
           margin-left: 6px;
         }
         .legend {
-          margin-top: 1.5px;
-          font-size: 7.2pt;
+          margin-top: 1px;
+          font-size: 6.6pt;
           font-weight: 700;
           color: #334155;
           white-space: nowrap;
@@ -423,11 +454,12 @@ export function printHandwritingWeeklySheet(baseDate) {
         }
         .hw-table thead th {
           background: #e2e8f0;
-          font-size: 8.5pt;
+          font-size: 8pt;
           font-weight: 900;
           text-align: center;
-          padding: 1px 1px;
-          height: 7.2mm;
+          padding: 0 1px;
+          height: ${theadMm}mm;
+          max-height: ${theadMm}mm;
           vertical-align: middle;
           color: #0f172a;
         }
@@ -597,12 +629,14 @@ export function printHandwritingWeeklySheet(baseDate) {
           display: flex;
           justify-content: space-between;
           gap: 6px;
-          margin-top: 1.5mm;
-          font-size: 6.5pt;
+          margin-top: 0.8mm;
+          font-size: 6pt;
           font-weight: 600;
           color: #334155;
           flex: 0 0 auto;
-          max-height: 6mm;
+          height: ${footerMm}mm;
+          max-height: ${footerMm}mm;
+          overflow: hidden;
           page-break-inside: avoid;
         }
         @media print {
@@ -664,8 +698,8 @@ export function printHandwritingWeeklySheet(baseDate) {
       </div>
 
       <div class="footer">
-        <span>※ 色付き担当バッジ＝セラピスト即時把握　／　【消炎】＝消炎鎮痛　／　空き枠は手書き可</span>
-        <span>予約 ${weekAptList.length} 件／${slotCount} 枠全表示／行高 ${rowMm.toFixed(1)}mm</span>
+        <span>※ 色付き担当バッジ＝セラピスト　／　【消炎】＝消炎鎮痛　／　空き枠は手書き可</span>
+        <span>予約 ${weekAptList.length} 件／${firstSlot}〜${lastSlot} ${slotCount}枠${hasAfternoon ? '（午後含む）' : ''}／行高 ${rowMm.toFixed(1)}mm</span>
       </div>
       <script>
         window.onload = function() { window.print(); };
