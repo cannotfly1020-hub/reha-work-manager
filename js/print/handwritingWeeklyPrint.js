@@ -1,8 +1,8 @@
 // js/print/handwritingWeeklyPrint.js
-// 週間予約受付簿 A4縦（portrait）・午前／午後 2ページ印刷
+// 週間予約受付表 A4縦（portrait）1枚完結印刷
 // ★画面の週間グリッド・予約データには一切干渉しない
-// ★外来専用 OUTPATIENT_HOURS からコマ生成し、午前1枚＋午後1枚で午後欠落を根絶
-// ★縦向きで行高を確保し、患者名・担当タグ・【消炎】を大きく表示する
+// ★外来専用 OUTPATIENT_HOURS から全日コマを生成／昼休みは全列結合1行で圧縮
+// ★予約枠＝担当・患者名・【消炎】／空き枠＝手書き余白
 
 import { formatDateYMD, getWeekDates } from '../core/dateUtils.js';
 import { TIME_SLOTS } from '../config/appointmentSlots.js';
@@ -15,9 +15,6 @@ import { getPatientById } from '../store/patientStore.js';
 import { getAllTherapists } from '../store/therapistStore.js';
 import { getAllAppointments } from '../store/appointmentStore.js';
 import { showToast } from '../ui/toast.js';
-
-/** 午前／午後の分割境界（既定 13:00＝ユーザー指定の午後開始） */
-const DEFAULT_PM_SPLIT = '13:00';
 
 /**
  * 印刷用スロット開始時刻（外来専用時間から午前〜午後を漏れなく生成）
@@ -161,17 +158,48 @@ function renderBookedCardHtml(apt, therapists) {
 }
 
 /**
- * ページ内スロット用の rowspan スキップ集合を構築（ページ境界をまたがない）
- * @param {string[]} pageSlots
- * @param {Date[]} weekDates
- * @param {Record<string, object[]>} slotAptMap
- * @returns {Set<string>}
+ * HH:MM → 通算分
+ * @param {string} t
+ * @returns {number}
  */
-function buildPageRowspanSkip(pageSlots, weekDates, slotAptMap) {
+function timeToMin(t) {
+  const [h, m] = String(t || '').split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+
+/**
+ * 週間予約受付表（A4縦・1枚完結）を印刷する
+ * @param {Date} baseDate
+ */
+export function printHandwritingWeeklySheet(baseDate) {
+  const weekDates = getWeekDates(baseDate);
+  const startStr = formatDateYMD(weekDates[0]);
+  const endStr = formatDateYMD(weekDates[5]);
+  const allSlotTimes = resolvePrintSlotTimes();
+
+  if (!allSlotTimes.length) {
+    showToast('外来予約の時間枠が未設定のため印刷できません', 'warn');
+    return;
+  }
+
+  const allAppointments = getAllAppointments();
+  const weekDatesSet = new Set(weekDates.map(formatDateYMD));
+  const weekAptList = Object.values(allAppointments).filter((apt) => {
+    return apt && apt.status !== 'CANCELLED' && weekDatesSet.has(apt.date);
+  });
+
+  const slotAptMap = {};
+  weekAptList.forEach((apt) => {
+    const snapped = snapToNearestAppointmentSlot(apt.startTime, allSlotTimes);
+    const k = `${apt.date}_${snapped}`;
+    if (!slotAptMap[k]) slotAptMap[k] = [];
+    slotAptMap[k].push(apt);
+  });
+
   const rowspanSkip = new Set();
   weekDates.forEach((d) => {
     const dateStr = formatDateYMD(d);
-    pageSlots.forEach((slotTime, idx) => {
+    allSlotTimes.forEach((slotTime, idx) => {
       const key = `${dateStr}_${slotTime}`;
       if (rowspanSkip.has(key)) return;
       const apts = slotAptMap[key] || [];
@@ -179,7 +207,7 @@ function buildPageRowspanSkip(pageSlots, weekDates, slotAptMap) {
       const span = getAptSlotSpan(apts[0]);
       if (span <= 1) return;
       for (let i = 1; i < span; i += 1) {
-        const next = pageSlots[idx + i];
+        const next = allSlotTimes[idx + i];
         if (!next) break;
         const nextKey = `${dateStr}_${next}`;
         if ((slotAptMap[nextKey] || []).length > 0) break;
@@ -187,21 +215,64 @@ function buildPageRowspanSkip(pageSlots, weekDates, slotAptMap) {
       }
     });
   });
-  return rowspanSkip;
-}
 
-/**
- * 1ページ分の tbody 行HTMLを生成
- * @param {object} opts
- * @returns {string}
- */
-function buildPageBodyRows(opts) {
-  const {
-    pageSlots, weekDates, slotAptMap, therapists, rowspanSkip
-  } = opts;
+  const therapists = getAllTherapists();
+  const dayNames = ['月', '火', '水', '木', '金', '土'];
+
+  // 昼休み帯: 外来 amEnd〜pmStart（例 12:00〜13:00 / 13:00〜13:00＝帯のみの境界表示）
+  const amEnd = String(OUTPATIENT_HOURS?.amEnd || '13:00');
+  const pmStart = String(OUTPATIENT_HOURS?.pmStart || '13:00');
+  // ユーザー指定の「12:00〜13:00」表示を優先しつつ、設定値があればそれを使う
+  const lunchLabelStart = amEnd <= '12:00' ? amEnd : (amEnd < pmStart ? amEnd : '12:00');
+  const lunchLabelEnd = pmStart >= '13:00' ? pmStart : (pmStart > amEnd ? pmStart : '13:00');
+  const breakMin = Math.max(0, timeToMin(pmStart) - timeToMin(amEnd));
+  const showLunchBand = true; // 常に1行圧縮帯を入れ、縦高を節約しつつ午前／午後を視覚分離
+
+  const now = new Date();
+  const outStamp = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const periodLabel = `${startStr.slice(0, 4)}年${Number(startStr.slice(5, 7))}月${Number(startStr.slice(8, 10))}日(月) 〜 ${endStr.slice(0, 4)}年${Number(endStr.slice(5, 7))}月${Number(endStr.slice(8, 10))}日(土)`;
+
+  // A4縦 1枚: 297 - 5 - 4 = 288mm
+  const slotCount = allSlotTimes.length;
+  const pageMm = 288;
+  const headerMm = 12;
+  const theadMm = 8;
+  const footerMm = 5.5;
+  const lunchMm = 4.2; // 昼休みは全列結合の薄い1行
+  const borderFudgeMm = Math.min(12, 2.2 + slotCount * 0.2);
+  const dataAreaMm = Math.max(160, pageMm - headerMm - theadMm - footerMm - lunchMm - borderFudgeMm);
+  const rawRow = dataAreaMm / Math.max(1, slotCount);
+  // 嵩上げ禁止＝1枚からはみ出して午後が消えるのを防ぐ
+  const rowMm = Math.min(11, rawRow);
+  const namePt = rowMm >= 9.5 ? 9.2 : (rowMm >= 8 ? 8.4 : (rowMm >= 6.5 ? 7.6 : 6.8));
+  const staffPt = rowMm >= 9.5 ? 8.4 : (rowMm >= 8 ? 7.6 : 6.8);
+  const badgePt = rowMm >= 9.5 ? 7.6 : (rowMm >= 8 ? 7.0 : 6.2);
+  const analgesiaPt = Math.max(staffPt + 0.4, badgePt + 0.8);
+  const timePt = rowMm >= 9 ? 8.8 : (rowMm >= 7 ? 7.8 : 7.0);
+
+  const printWindow = window.open('', '_blank', 'width=900,height=1200');
+  if (!printWindow) {
+    showToast('印刷ポップアップがブロックされました。ブラウザ設定をご確認ください。', 'warn');
+    return;
+  }
 
   let bodyRows = '';
-  pageSlots.forEach((slotTime, slotIdx) => {
+  let lunchBandInserted = false;
+
+  allSlotTimes.forEach((slotTime, slotIdx) => {
+    // 午後最初のコマの直前に昼休み帯（全列結合1行）を挿入
+    if (showLunchBand && !lunchBandInserted && String(slotTime) >= pmStart) {
+      lunchBandInserted = true;
+      const breakText = breakMin > 0
+        ? `── 昼休み（${lunchLabelStart} 〜 ${lunchLabelEnd} / ${breakMin}分）──`
+        : `── 昼休み帯（${lunchLabelStart} 〜 ${lunchLabelEnd}）／午前／午後境界 ──`;
+      bodyRows += `
+        <tr class="lunch-band">
+          <td colspan="7">${breakText}</td>
+        </tr>
+      `;
+    }
+
     bodyRows += `<tr class="slot-row">`;
     bodyRows += `<td class="time-col">${slotTime}</td>`;
 
@@ -222,7 +293,7 @@ function buildPageBodyRows(opts) {
         bodyRows += `
           <td class="${tdClass} empty-cell">
             <span class="empty-time">${slotTime}</span>
-            <div class="write-space"></div>
+            <div class="write-space" aria-hidden="true"></div>
           </td>
         `;
         return;
@@ -233,7 +304,7 @@ function buildPageBodyRows(opts) {
         const span = getAptSlotSpan(apts[0]);
         let actual = 1;
         for (let i = 1; i < span; i += 1) {
-          const next = pageSlots[slotIdx + i];
+          const next = allSlotTimes[slotIdx + i];
           if (!next) break;
           const nextKey = `${dateStr}_${next}`;
           if ((slotAptMap[nextKey] || []).length > 0) break;
@@ -255,223 +326,25 @@ function buildPageBodyRows(opts) {
     bodyRows += `</tr>`;
   });
 
-  return bodyRows;
-}
-
-/**
- * 行高・フォントサイズをページ枠数から算出（A4縦・余白込みで収める）
- * @param {number} slotCount
- */
-function computePageMetrics(slotCount) {
-  // A4縦: 297 - 5 - 4 = 288mm（横向きより縦幅が広く、患者名の縦並びを収容）
-  const pageMm = 288;
-  const headerMm = 15;
-  const theadMm = 9;
-  const footerMm = 6.5;
-  const borderFudgeMm = Math.min(12, 2.5 + slotCount * 0.22);
-  const dataAreaMm = Math.max(180, pageMm - headerMm - theadMm - footerMm - borderFudgeMm);
-  const rawRow = dataAreaMm / Math.max(1, slotCount);
-  // 嵩上げ禁止。午前〜12枠／午後〜15枠なら行高 16〜21mm 程度で大文字表示が可能
-  const rowMm = Math.min(22, rawRow);
-  const namePt = rowMm >= 18 ? 14 : (rowMm >= 15 ? 13 : (rowMm >= 12 ? 12 : 10.5));
-  const staffPt = rowMm >= 18 ? 13 : (rowMm >= 15 ? 12 : (rowMm >= 12 ? 11 : 9.5));
-  const badgePt = rowMm >= 18 ? 12 : (rowMm >= 15 ? 11 : (rowMm >= 12 ? 10 : 9));
-  const analgesiaPt = Math.max(staffPt + 1, badgePt + 1.5);
-  const timePt = rowMm >= 16 ? 13 : (rowMm >= 12 ? 12 : 10.5);
-  return {
-    pageMm, headerMm, theadMm, footerMm, rowMm, namePt, staffPt, badgePt, analgesiaPt, timePt
-  };
-}
-
-/**
- * @param {object} opts
- * @returns {string}
- */
-function renderSheetPage(opts) {
-  const {
-    pageKey, pageLabel, pageBadgeClass, periodLabel, outStamp,
-    pageSlots, weekDates, dayNames, bodyRows, weekAptCount, metrics, isLast
-  } = opts;
-
-  const first = pageSlots[0] || '-';
-  const last = pageSlots[pageSlots.length - 1] || '-';
-  const {
-    pageMm, headerMm, theadMm, footerMm, rowMm,
-    namePt, staffPt, badgePt, analgesiaPt, timePt
-  } = metrics;
-
-  return `
-    <section class="sheet-page ${isLast ? 'sheet-page-last' : ''}" data-page="${sanitizeHtml(pageKey)}">
-      <div class="page-header">
-        <div class="title-block">
-          <div class="title-line">
-            <span class="title">【外来リハビリ 週間予約受付簿】</span>
-            <span class="page-badge ${pageBadgeClass}">${sanitizeHtml(pageLabel)}</span>
-            <span class="period">${periodLabel}</span>
-          </div>
-          <div class="legend">
-            【凡例】
-            <span class="lg lg-staff">担当名</span>色分け＝セラピスト
-            <span class="lg lg-loco">[運]</span>運動器
-            <span class="lg lg-cerebro">[脳]</span>脳血管
-            <span class="lg lg-disuse">[廃]</span>廃用
-            <span class="lg lg-analgesia">【消炎】</span>消炎鎮痛
-            ｜白い空き枠＝手書き可
-          </div>
-        </div>
-        <div class="meta">
-          出力: ${outStamp}<br>
-          A4縦・${sanitizeHtml(pageLabel)}／全2頁
-        </div>
-      </div>
-
-      <div class="sheet-wrap">
-        <table class="hw-table">
-          <thead>
-            <tr>
-              <th style="width:14mm;">時間</th>
-              ${weekDates.map((d, idx) => {
-                const mmdd = `${d.getMonth() + 1}/${d.getDate()}`;
-                const holidayName = getJapaneseHolidayName(d);
-                const isSat = d.getDay() === 6;
-                let cls = '';
-                if (holidayName) cls = 'holiday';
-                else if (isSat) cls = 'sat';
-                const hol = holidayName
-                  ? `<div class="hol-name">${sanitizeHtml(holidayName)}</div>`
-                  : '';
-                return `<th class="${cls}">${dayNames[idx]} ${mmdd}${hol}</th>`;
-              }).join('')}
-            </tr>
-          </thead>
-          <tbody>
-            ${bodyRows}
-          </tbody>
-        </table>
-      </div>
-
-      <div class="footer">
-        <span>※ 色付き担当バッジ＝セラピスト即時把握　／　【消炎】＝消炎鎮痛　／　空き枠は手書き可</span>
-        <span>${sanitizeHtml(pageLabel)} ${first}〜${last}（${pageSlots.length}枠）／週予約 ${weekAptCount} 件／行高 ${rowMm.toFixed(1)}mm</span>
-      </div>
-      <style>
-        .sheet-page[data-page="${sanitizeHtml(pageKey)}"] {
-          --row-mm: ${rowMm}mm;
-          --header-mm: ${headerMm}mm;
-          --thead-mm: ${theadMm}mm;
-          --footer-mm: ${footerMm}mm;
-          --page-mm: ${pageMm}mm;
-          --name-pt: ${namePt}pt;
-          --staff-pt: ${staffPt}pt;
-          --badge-pt: ${badgePt}pt;
-          --analgesia-pt: ${analgesiaPt}pt;
-          --time-pt: ${timePt}pt;
-        }
-      </style>
-    </section>
-  `;
-}
-
-/**
- * 週間予約受付簿（A4縦・午前1枚＋午後1枚）を印刷する
- * @param {Date} baseDate
- */
-export function printHandwritingWeeklySheet(baseDate) {
-  const weekDates = getWeekDates(baseDate);
-  const startStr = formatDateYMD(weekDates[0]);
-  const endStr = formatDateYMD(weekDates[5]);
-  const allSlotTimes = resolvePrintSlotTimes();
-
-  if (!allSlotTimes.length) {
-    showToast('外来予約の時間枠が未設定のため印刷できません', 'warn');
-    return;
+  // 午後コマが無くても昼休み帯を末尾に出す（午前のみ設定時）
+  if (showLunchBand && !lunchBandInserted) {
+    const breakText = `── 昼休み（${lunchLabelStart} 〜 ${lunchLabelEnd}）──`;
+    bodyRows += `
+      <tr class="lunch-band">
+        <td colspan="7">${breakText}</td>
+      </tr>
+    `;
   }
 
-  // 分割境界: 外来 pmStart（既定13:00）。午前＝境界未満／午後＝境界以上
-  const pmSplit = String(OUTPATIENT_HOURS?.pmStart || DEFAULT_PM_SPLIT);
-  const amSlots = allSlotTimes.filter((t) => String(t) < pmSplit);
-  const pmSlots = allSlotTimes.filter((t) => String(t) >= pmSplit);
-
-  if (!amSlots.length && !pmSlots.length) {
-    showToast('印刷可能な時間枠がありません', 'warn');
-    return;
-  }
-
-  const allAppointments = getAllAppointments();
-  const weekDatesSet = new Set(weekDates.map(formatDateYMD));
-  const weekAptList = Object.values(allAppointments).filter((apt) => {
-    return apt && apt.status !== 'CANCELLED' && weekDatesSet.has(apt.date);
-  });
-
-  // 吸着は全日スロット基準（ページ分割で予約が落ちない）
-  const slotAptMap = {};
-  weekAptList.forEach((apt) => {
-    const snapped = snapToNearestAppointmentSlot(apt.startTime, allSlotTimes);
-    const k = `${apt.date}_${snapped}`;
-    if (!slotAptMap[k]) slotAptMap[k] = [];
-    slotAptMap[k].push(apt);
-  });
-
-  const therapists = getAllTherapists();
-  const dayNames = ['月', '火', '水', '木', '金', '土'];
-  const now = new Date();
-  const outStamp = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  const periodLabel = `${startStr.slice(0, 4)}年${Number(startStr.slice(5, 7))}月${Number(startStr.slice(8, 10))}日(月) 〜 ${endStr.slice(0, 4)}年${Number(endStr.slice(5, 7))}月${Number(endStr.slice(8, 10))}日(土)`;
-
-  const pages = [];
-  if (amSlots.length) {
-    const rowspanSkip = buildPageRowspanSkip(amSlots, weekDates, slotAptMap);
-    const metrics = computePageMetrics(amSlots.length);
-    const amEndLabel = amSlots[amSlots.length - 1] || '12:00';
-    pages.push({
-      pageKey: 'am',
-      pageLabel: `午前（〜${amEndLabel}）`,
-      pageBadgeClass: 'badge-am',
-      pageSlots: amSlots,
-      bodyRows: buildPageBodyRows({
-        pageSlots: amSlots, weekDates, slotAptMap, therapists, rowspanSkip
-      }),
-      metrics
-    });
-  }
-  if (pmSlots.length) {
-    const rowspanSkip = buildPageRowspanSkip(pmSlots, weekDates, slotAptMap);
-    const metrics = computePageMetrics(pmSlots.length);
-    const pmLast = pmSlots[pmSlots.length - 1] || '18:00';
-    pages.push({
-      pageKey: 'pm',
-      pageLabel: `午後（${pmSlots[0] || pmSplit}〜${pmLast}）`,
-      pageBadgeClass: 'badge-pm',
-      pageSlots: pmSlots,
-      bodyRows: buildPageBodyRows({
-        pageSlots: pmSlots, weekDates, slotAptMap, therapists, rowspanSkip
-      }),
-      metrics
-    });
-  }
-
-  const printWindow = window.open('', '_blank', 'width=900,height=1200');
-  if (!printWindow) {
-    showToast('印刷ポップアップがブロックされました。ブラウザ設定をご確認ください。', 'warn');
-    return;
-  }
-
-  const pagesHtml = pages.map((p, idx) => renderSheetPage({
-    ...p,
-    periodLabel,
-    outStamp,
-    weekDates,
-    dayNames,
-    weekAptCount: weekAptList.length,
-    isLast: idx === pages.length - 1
-  })).join('');
+  const firstSlot = allSlotTimes[0];
+  const lastSlot = allSlotTimes[slotCount - 1];
 
   const html = `
     <!DOCTYPE html>
     <html lang="ja">
     <head>
       <meta charset="UTF-8">
-      <title>外来リハビリ 週間予約受付簿 午前・午後 (${startStr.replace(/-/g, '/')}〜)</title>
+      <title>外来リハビリ 週間予約受付表 (${startStr.replace(/-/g, '/')}〜)</title>
       <style>
         @page {
           size: A4 portrait;
@@ -480,82 +353,52 @@ export function printHandwritingWeeklySheet(baseDate) {
         * { box-sizing: border-box; margin: 0; padding: 0; }
         html, body {
           width: 100%;
-          background: #fff;
-          color: #0f172a;
-          font-family: "Meiryo UI", Meiryo, system-ui, -apple-system, sans-serif;
-          -webkit-print-color-adjust: exact;
-          print-color-adjust: exact;
+          height: 100%;
         }
         body {
-          font-size: 11pt;
-          line-height: 1.15;
-        }
-        .sheet-page {
-          width: 100%;
-          height: var(--page-mm, 288mm);
-          max-height: var(--page-mm, 288mm);
+          font-family: "Meiryo UI", Meiryo, system-ui, -apple-system, sans-serif;
+          color: #0f172a;
+          background: #fff;
+          font-size: 9pt;
+          line-height: 1.12;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
           display: flex;
           flex-direction: column;
+          height: ${pageMm}mm;
+          max-height: ${pageMm}mm;
           overflow: hidden;
-          page-break-after: always;
-          break-after: page;
-        }
-        .sheet-page-last {
-          page-break-after: auto;
-          break-after: auto;
+          page-break-after: avoid;
+          page-break-inside: avoid;
         }
         .page-header {
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
-          gap: 8px;
+          gap: 6px;
           border-bottom: 2px solid #0f172a;
-          padding-bottom: 2px;
-          margin-bottom: 2px;
+          padding-bottom: 1px;
+          margin-bottom: 1px;
           flex: 0 0 auto;
-          height: var(--header-mm, 14mm);
-          max-height: var(--header-mm, 14mm);
+          height: ${headerMm}mm;
+          max-height: ${headerMm}mm;
           overflow: hidden;
         }
         .title-block { min-width: 0; flex: 1; }
-        .title-line {
-          display: flex;
-          align-items: center;
-          flex-wrap: wrap;
-          gap: 6px 8px;
-        }
         .title {
-          font-size: 14pt;
+          font-size: 12pt;
           font-weight: 900;
           color: #0f172a;
         }
-        .page-badge {
-          display: inline-block;
-          font-size: 12pt;
-          font-weight: 900;
-          padding: 2px 12px;
-          border-radius: 4px;
-          border: 1.5px solid #0f172a;
-          letter-spacing: 0.04em;
-        }
-        .page-badge.badge-am {
-          background: #dbeafe;
-          color: #1e3a8a;
-          border-color: #1d4ed8;
-        }
-        .page-badge.badge-pm {
-          background: #ffedd5;
-          color: #9a3412;
-          border-color: #ea580c;
-        }
         .period {
-          font-size: 9.5pt;
+          font-size: 8.5pt;
           font-weight: 800;
           color: #047857;
+          margin-left: 6px;
         }
         .legend {
-          margin-top: 2px;
-          font-size: 8.5pt;
+          margin-top: 1px;
+          font-size: 7pt;
           font-weight: 700;
           color: #334155;
           white-space: nowrap;
@@ -564,8 +407,8 @@ export function printHandwritingWeeklySheet(baseDate) {
         }
         .legend .lg {
           display: inline-block;
-          border: 1.2px solid #475569;
-          padding: 0 4px;
+          border: 1px solid #475569;
+          padding: 0 3px;
           margin-right: 2px;
           border-radius: 2px;
           font-weight: 900;
@@ -575,16 +418,16 @@ export function printHandwritingWeeklySheet(baseDate) {
         .legend .lg-disuse { background: #fef3c7; }
         .legend .lg-analgesia {
           background: #059669;
-          color: #ffffff;
+          color: #fff;
           border-color: #065f46;
         }
         .legend .lg-staff {
           background: #1d4ed8;
-          color: #ffffff;
+          color: #fff;
           border-color: #1e3a8a;
         }
         .meta {
-          font-size: 8.5pt;
+          font-size: 7.5pt;
           font-weight: 700;
           color: #334155;
           text-align: right;
@@ -601,25 +444,35 @@ export function printHandwritingWeeklySheet(baseDate) {
           height: 100%;
           border-collapse: collapse;
           table-layout: fixed;
+          page-break-inside: avoid;
         }
         .hw-table th,
         .hw-table td {
-          border: 1.2px solid #334155;
+          border: 1px solid #334155;
           vertical-align: top;
         }
         .hw-table thead th {
           background: #e2e8f0;
-          font-size: 11pt;
+          font-size: 9.5pt;
           font-weight: 900;
           text-align: center;
-          padding: 1px 2px;
-          height: var(--thead-mm, 9mm);
-          max-height: var(--thead-mm, 9mm);
+          padding: 1px 1px;
+          height: ${theadMm}mm;
+          max-height: ${theadMm}mm;
           vertical-align: middle;
           color: #0f172a;
         }
+        .hw-table thead th .dow {
+          font-size: 10pt;
+          font-weight: 900;
+          letter-spacing: 0.04em;
+        }
+        .hw-table thead th .date {
+          font-size: 9pt;
+          font-weight: 900;
+        }
         .hw-table thead th .hol-name {
-          font-size: 8pt;
+          font-size: 6.5pt;
           font-weight: 900;
         }
         .hw-table thead th.sat {
@@ -631,99 +484,102 @@ export function printHandwritingWeeklySheet(baseDate) {
           color: #9f1239;
         }
         .slot-row {
-          height: var(--row-mm, 18mm);
-          max-height: var(--row-mm, 18mm);
+          height: ${rowMm}mm;
+          max-height: ${rowMm}mm;
         }
         .time-col {
-          width: 15mm;
+          width: 13mm;
           text-align: center;
           font-weight: 900;
-          font-size: var(--time-pt, 13pt);
+          font-size: ${timePt}pt;
           vertical-align: middle !important;
           background: #e2e8f0;
           color: #0f172a;
-          height: var(--row-mm, 18mm);
-          max-height: var(--row-mm, 18mm);
+          height: ${rowMm}mm;
+          max-height: ${rowMm}mm;
           padding: 0;
         }
         .slot-cell {
-          height: var(--row-mm, 18mm);
-          max-height: var(--row-mm, 18mm);
-          padding: 1mm 1.4mm;
+          height: ${rowMm}mm;
+          max-height: ${rowMm}mm;
+          padding: 0.5mm 0.7mm;
           position: relative;
           overflow: hidden;
         }
         .slot-cell.sat { background: #f8fbff; }
         .slot-cell.holiday { background: #fff7f7; }
-        .empty-cell { background: #ffffff !important; }
+        .empty-cell {
+          background: #ffffff !important;
+        }
         .empty-time {
           position: absolute;
-          top: 0.6mm;
-          left: 1mm;
-          font-size: 9pt;
+          top: 0.3mm;
+          left: 0.5mm;
+          font-size: 6pt;
           font-weight: 700;
-          color: #94a3b8;
+          color: #cbd5e1;
         }
-        .write-space { height: 100%; min-height: 8mm; }
+        .write-space {
+          height: 100%;
+          min-height: ${Math.max(3.2, rowMm - 1.5)}mm;
+          border-bottom: 1px dotted #e2e8f0;
+        }
         .booked-cell {
           background: #f8fafc !important;
           vertical-align: middle;
           overflow: hidden;
         }
         .booked-card {
-          padding: 0.3mm 0;
+          padding: 0.15mm 0;
           margin: 0;
         }
         .booked-card.is-analgesia {
           background: repeating-linear-gradient(
             -45deg,
             #ecfdf5,
-            #ecfdf5 2px,
-            #a7f3d0 2px,
-            #a7f3d0 4px
+            #ecfdf5 1.6px,
+            #a7f3d0 1.6px,
+            #a7f3d0 3.2px
           );
-          border: 2px solid #047857;
-          border-radius: 3px;
-          padding: 0.5mm 1.2mm;
+          border: 1.4px solid #047857;
+          border-radius: 2px;
+          padding: 0.2mm 0.8mm;
         }
         .bk-staff-row {
           display: flex;
           align-items: center;
-          gap: 3px;
-          margin-bottom: 0.6mm;
+          gap: 2px;
+          margin-bottom: 0.2mm;
           overflow: hidden;
         }
         .badge-disease,
         .badge-staff,
         .badge-analgesia {
           display: inline-block;
-          line-height: 1.15;
-          padding: 0.4mm 3px;
-          border-radius: 3px;
-          border: 1.4px solid #0f172a;
+          line-height: 1.1;
+          padding: 0.15mm 2px;
+          border-radius: 2px;
+          border: 1.1px solid #0f172a;
           white-space: nowrap;
           vertical-align: middle;
         }
         .badge-staff {
-          font-size: var(--staff-pt, 12pt);
+          font-size: ${staffPt}pt;
           font-weight: 900;
-          letter-spacing: 0.03em;
-          padding: 0.6mm 4px;
         }
         .badge-disease {
-          font-size: var(--badge-pt, 11pt);
+          font-size: ${badgePt}pt;
           font-weight: 800;
-          padding: 0.5mm 3px;
         }
         .badge-analgesia {
-          font-size: var(--analgesia-pt, 13pt);
+          font-size: ${analgesiaPt}pt;
           font-weight: 900;
           background: #059669;
-          color: #ffffff;
+          color: #fff;
           border-color: #065f46;
-          border-width: 2px;
-          letter-spacing: 0.06em;
-          padding: 0.6mm 6px;
+          border-width: 1.4px;
+          letter-spacing: 0.04em;
+          padding: 0.1mm 3px;
         }
         .dtype-loco {
           background: #dbeafe;
@@ -744,52 +600,119 @@ export function printHandwritingWeeklySheet(baseDate) {
           display: flex;
           flex-wrap: nowrap;
           align-items: baseline;
-          gap: 4px 6px;
+          gap: 2px 4px;
           overflow: hidden;
         }
         .bk-name {
-          font-size: var(--name-pt, 13pt);
+          font-size: ${namePt}pt;
           font-weight: 900;
-          color: #000000;
-          line-height: 1.1;
+          color: #000;
+          line-height: 1.05;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
           max-width: 100%;
         }
         .bk-dur {
-          font-size: 10pt;
+          font-size: ${Math.max(6.2, namePt - 1)}pt;
           font-weight: 800;
           color: #334155;
           flex-shrink: 0;
         }
+        tr.lunch-band td {
+          background: #cbd5e1;
+          text-align: center;
+          font-size: 7.5pt;
+          font-weight: 900;
+          color: #1e293b;
+          letter-spacing: 0.1em;
+          padding: 0;
+          height: ${lunchMm}mm;
+          max-height: ${lunchMm}mm;
+          border: 1px solid #334155;
+          vertical-align: middle;
+        }
         .footer {
           display: flex;
           justify-content: space-between;
-          gap: 8px;
-          margin-top: 1mm;
-          font-size: 8pt;
+          gap: 6px;
+          margin-top: 0.8mm;
+          font-size: 6.5pt;
           font-weight: 600;
           color: #334155;
           flex: 0 0 auto;
-          height: var(--footer-mm, 6.5mm);
-          max-height: var(--footer-mm, 6.5mm);
+          height: ${footerMm}mm;
+          max-height: ${footerMm}mm;
           overflow: hidden;
+          page-break-inside: avoid;
         }
         @media print {
-          .sheet-page {
-            height: var(--page-mm, 288mm) !important;
-            max-height: var(--page-mm, 288mm) !important;
+          html, body {
+            height: ${pageMm}mm !important;
+            max-height: ${pageMm}mm !important;
             overflow: hidden !important;
           }
-          .sheet-page:not(.sheet-page-last) {
-            page-break-after: always !important;
+          .sheet-wrap, .hw-table, .slot-row, .slot-cell {
+            page-break-inside: avoid;
+          }
+          body {
+            page-break-after: avoid;
           }
         }
       </style>
     </head>
     <body>
-      ${pagesHtml}
+      <div class="page-header">
+        <div class="title-block">
+          <div>
+            <span class="title">【外来リハビリ 週間予約受付表】</span>
+            <span class="period">${periodLabel}</span>
+          </div>
+          <div class="legend">
+            【凡例】
+            <span class="lg lg-staff">担当名</span>セラピスト
+            <span class="lg lg-loco">[運]</span>運動器
+            <span class="lg lg-cerebro">[脳]</span>脳血管
+            <span class="lg lg-disuse">[廃]</span>廃用
+            <span class="lg lg-analgesia">【消炎】</span>消炎鎮痛
+            ｜白い空き枠＝手書き可
+          </div>
+        </div>
+        <div class="meta">
+          出力: ${outStamp}<br>
+          リハビリテーション科／A4縦1枚完結
+        </div>
+      </div>
+
+      <div class="sheet-wrap">
+        <table class="hw-table">
+          <thead>
+            <tr>
+              <th style="width:13mm;">時間</th>
+              ${weekDates.map((d, idx) => {
+                const mmdd = `${d.getMonth() + 1}/${d.getDate()}`;
+                const holidayName = getJapaneseHolidayName(d);
+                const isSat = d.getDay() === 6;
+                let cls = '';
+                if (holidayName) cls = 'holiday';
+                else if (isSat) cls = 'sat';
+                const hol = holidayName
+                  ? `<div class="hol-name">${sanitizeHtml(holidayName)}</div>`
+                  : '';
+                return `<th class="${cls}"><div class="dow">${dayNames[idx]}</div><div class="date">${mmdd}</div>${hol}</th>`;
+              }).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${bodyRows}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="footer">
+        <span>※ 予約枠＝担当タグ・患者名・【消炎】　／　空き枠＝手書き余白　／　昼休みは1行圧縮</span>
+        <span>予約 ${weekAptList.length} 件／${firstSlot}〜${lastSlot} ${slotCount}枠／行高 ${rowMm.toFixed(1)}mm</span>
+      </div>
       <script>
         window.onload = function() { window.print(); };
       </script>
