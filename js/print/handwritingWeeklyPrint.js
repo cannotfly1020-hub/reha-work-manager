@@ -43,17 +43,6 @@ function getAptSlotSpan(apt) {
   return Math.max(1, Math.ceil(duration / 20));
 }
 
-const STAFF_BADGE_PALETTE = Object.freeze([
-  { bg: '#1d4ed8', fg: '#ffffff', border: '#1e3a8a' },
-  { bg: '#b45309', fg: '#ffffff', border: '#92400e' },
-  { bg: '#6d28d9', fg: '#ffffff', border: '#4c1d95' },
-  { bg: '#be123c', fg: '#ffffff', border: '#9f1239' },
-  { bg: '#0f766e', fg: '#ffffff', border: '#115e59' },
-  { bg: '#c2410c', fg: '#ffffff', border: '#9a3412' },
-  { bg: '#0369a1', fg: '#ffffff', border: '#075985' },
-  { bg: '#4d7c0f', fg: '#ffffff', border: '#3f6212' }
-]);
-
 /**
  * 担当表示（フルネーム可・省略しない）
  * @param {object[]} therapists
@@ -65,26 +54,6 @@ function formatStaffBadgeLabel(therapists, therapistId) {
   if (therapistId === 'ANALGESIA') return '物療';
   const staff = therapists.find((t) => t.id === therapistId);
   return String(staff?.name || therapistId).trim() || String(therapistId);
-}
-
-/**
- * @param {string} therapistId
- * @returns {{ bg: string, fg: string, border: string }}
- */
-function resolveStaffBadgeColor(therapistId) {
-  if (!therapistId || therapistId === 'NONE') {
-    return { bg: '#475569', fg: '#ffffff', border: '#334155' };
-  }
-  if (therapistId === 'ANALGESIA') {
-    return { bg: '#047857', fg: '#ffffff', border: '#065f46' };
-  }
-  const id = String(therapistId);
-  let hash = 0;
-  for (let i = 0; i < id.length; i += 1) {
-    hash = ((hash << 5) - hash) + id.charCodeAt(i);
-    hash |= 0;
-  }
-  return STAFF_BADGE_PALETTE[Math.abs(hash) % STAFF_BADGE_PALETTE.length];
 }
 
 /**
@@ -134,20 +103,17 @@ function renderBookedCardHtml(apt, therapists) {
   const patient = getPatientById(apt.patientId);
   const pName = patient?.name || apt.patientId || '（氏名不明）';
   const staffLabel = formatStaffBadgeLabel(therapists, apt.therapistId);
-  const staffColor = resolveStaffBadgeColor(apt.therapistId);
   const dur = Number(apt.durationMinutes) || 20;
   const vis = resolveDiseaseVisual(patient, apt);
 
   const diseaseBadge = vis.isAnalgesia
-    ? `<span class="badge-analgesia" title="消炎鎮痛">【⚡消炎】</span>`
-    : `<span class="badge-disease ${vis.diseaseClass}">[${sanitizeHtml(vis.diseaseTag)}]</span>`;
-
-  const staffStyle = `background:${staffColor.bg};color:${staffColor.fg};border-color:${staffColor.border};`;
+    ? `<span class="badge-analgesia" title="消炎鎮痛">⚡ 消炎鎮痛</span>`
+    : `<span class="badge-disease ${vis.diseaseClass}">${sanitizeHtml(vis.diseaseTag)}</span>`;
 
   return `
     <div class="booked-card${vis.isAnalgesia ? ' is-analgesia' : ''}">
       <div class="bk-staff-row">
-        <span class="badge-staff" style="${staffStyle}">[${sanitizeHtml(staffLabel)}]</span>
+        <span class="badge-staff">[${sanitizeHtml(staffLabel)}]</span>
         ${diseaseBadge}
       </div>
       <div class="bk-main">
@@ -217,10 +183,10 @@ function buildPageBodyRows(opts) {
       else if (isSat) tdClass += ' sat';
 
       if (apts.length === 0) {
+        // 左列時間軸があるためセル内の重複時刻は出さない（手書き余白のみ）
         bodyRows += `
           <td class="${tdClass} empty-cell">
-            <span class="empty-time">${slotTime}</span>
-            <div class="write-space"></div>
+            <div class="write-space" aria-hidden="true"></div>
           </td>
         `;
         return;
@@ -263,9 +229,9 @@ function buildPageBodyRows(opts) {
 function computePageMetrics(slotCount) {
   // A4縦: 297 - 5 - 4 = 288mm（横向きより縦幅が広く、患者名の縦並びを収容）
   const pageMm = 288;
-  const headerMm = 15;
+  const headerMm = 16;
   const theadMm = 9;
-  const footerMm = 6.5;
+  const footerMm = 5.5;
   const borderFudgeMm = Math.min(12, 2.5 + slotCount * 0.22);
   const dataAreaMm = Math.max(180, pageMm - headerMm - theadMm - footerMm - borderFudgeMm);
   const rawRow = dataAreaMm / Math.max(1, slotCount);
@@ -303,23 +269,18 @@ function renderSheetPage(opts) {
       <div class="page-header">
         <div class="title-block">
           <div class="title-line">
-            <span class="title">【外来リハビリ 週間予約受付簿】</span>
+            <span class="title">外来リハビリ 週間予約受付簿</span>
             <span class="page-badge ${pageBadgeClass}">${sanitizeHtml(pageLabel)}</span>
-            <span class="period">${periodLabel}</span>
           </div>
-          <div class="legend">
-            【凡例】
-            <span class="lg lg-staff">担当名</span>色分け＝セラピスト
-            <span class="lg lg-loco">[運]</span>運動器
-            <span class="lg lg-cerebro">[脳]</span>脳血管
-            <span class="lg lg-disuse">[廃]</span>廃用
-            <span class="lg lg-analgesia">【⚡消炎】</span>消炎鎮痛
-            ｜白い空き枠＝手書き可
-          </div>
+          <div class="period">${periodLabel}</div>
         </div>
-        <div class="meta">
-          出力: ${outStamp}<br>
-          A4縦・${sanitizeHtml(pageLabel)}／全2頁
+        <div class="header-right">
+          <div class="legend-chips">
+            <span class="chip chip-staff">担当</span>
+            <span class="chip chip-analgesia">⚡ 消炎</span>
+            <span class="chip chip-empty">白枠＝空き</span>
+          </div>
+          <div class="meta">出力 ${outStamp} ／ A4縦・全2頁</div>
         </div>
       </div>
 
@@ -327,18 +288,18 @@ function renderSheetPage(opts) {
         <table class="hw-table">
           <thead>
             <tr>
-              <th style="width:14mm;">時間</th>
+              <th class="th-time">時間</th>
               ${weekDates.map((d, idx) => {
                 const mmdd = `${d.getMonth() + 1}/${d.getDate()}`;
                 const holidayName = getJapaneseHolidayName(d);
                 const isSat = d.getDay() === 6;
-                let cls = '';
-                if (holidayName) cls = 'holiday';
-                else if (isSat) cls = 'sat';
+                let cls = 'th-day';
+                if (holidayName) cls += ' holiday';
+                else if (isSat) cls += ' sat';
                 const hol = holidayName
                   ? `<div class="hol-name">${sanitizeHtml(holidayName)}</div>`
                   : '';
-                return `<th class="${cls}">${dayNames[idx]} ${mmdd}${hol}</th>`;
+                return `<th class="${cls}"><span class="dow">${dayNames[idx]}</span><span class="date">${mmdd}</span>${hol}</th>`;
               }).join('')}
             </tr>
           </thead>
@@ -349,8 +310,8 @@ function renderSheetPage(opts) {
       </div>
 
       <div class="footer">
-        <span>※ [担当名]＝セラピスト　／　【⚡消炎】＝消炎鎮痛　／　患者名はフルネーム表示　／　空き枠＝手書き可</span>
-        <span>${sanitizeHtml(pageLabel)} ${first}〜${last}（${pageSlots.length}枠）／週予約 ${weekAptCount} 件／行高 ${rowMm.toFixed(1)}mm</span>
+        <span>${sanitizeHtml(pageLabel)} ${first}〜${last}（${pageSlots.length}枠）</span>
+        <span>週予約 ${weekAptCount} 件</span>
       </div>
       <style>
         .sheet-page[data-page="${sanitizeHtml(pageKey)}"] {
@@ -482,14 +443,11 @@ export function printHandwritingWeeklySheet(baseDate) {
           width: 100%;
           background: #fff;
           color: #0f172a;
-          font-family: "Meiryo UI", Meiryo, system-ui, -apple-system, sans-serif;
+          font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Meiryo UI", Meiryo, sans-serif;
           -webkit-print-color-adjust: exact;
           print-color-adjust: exact;
         }
-        body {
-          font-size: 11pt;
-          line-height: 1.15;
-        }
+        body { font-size: 10pt; line-height: 1.25; color: #1e293b; }
         .sheet-page {
           width: 100%;
           height: var(--page-mm, 288mm);
@@ -500,22 +458,21 @@ export function printHandwritingWeeklySheet(baseDate) {
           page-break-after: always;
           break-after: page;
         }
-        .sheet-page-last {
-          page-break-after: auto;
-          break-after: auto;
-        }
+        .sheet-page-last { page-break-after: auto; break-after: auto; }
+
+        /* —— ヘッダー（凡例崩れ防止・右上チップ） —— */
         .page-header {
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
-          gap: 8px;
-          border-bottom: 2px solid #0f172a;
-          padding-bottom: 2px;
-          margin-bottom: 2px;
+          gap: 10px;
+          border-bottom: 1px solid #cbd5e1;
+          padding-bottom: 3px;
+          margin-bottom: 3px;
           flex: 0 0 auto;
-          height: var(--header-mm, 14mm);
-          max-height: var(--header-mm, 14mm);
-          overflow: hidden;
+          min-height: var(--header-mm, 15mm);
+          max-height: 18mm;
+          overflow: visible;
         }
         .title-block { min-width: 0; flex: 1; }
         .title-line {
@@ -525,72 +482,86 @@ export function printHandwritingWeeklySheet(baseDate) {
           gap: 6px 8px;
         }
         .title {
-          font-size: 14pt;
-          font-weight: 900;
+          font-size: 13pt;
+          font-weight: 700;
           color: #0f172a;
+          letter-spacing: 0.02em;
         }
         .page-badge {
-          display: inline-block;
-          font-size: 12pt;
-          font-weight: 900;
-          padding: 2px 12px;
-          border-radius: 4px;
-          border: 1.5px solid #0f172a;
-          letter-spacing: 0.04em;
+          display: inline-flex;
+          align-items: center;
+          font-size: 9pt;
+          font-weight: 700;
+          padding: 2px 10px;
+          border-radius: 999px;
+          border: 1px solid #cbd5e1;
+          background: #f8fafc;
+          color: #334155;
         }
         .page-badge.badge-am {
-          background: #dbeafe;
-          color: #1e3a8a;
-          border-color: #1d4ed8;
+          background: #eff6ff;
+          color: #1d4ed8;
+          border-color: #bfdbfe;
         }
         .page-badge.badge-pm {
-          background: #ffedd5;
-          color: #9a3412;
-          border-color: #ea580c;
+          background: #fff7ed;
+          color: #c2410c;
+          border-color: #fed7aa;
         }
         .period {
-          font-size: 9.5pt;
-          font-weight: 800;
-          color: #047857;
-        }
-        .legend {
           margin-top: 2px;
           font-size: 8.5pt;
+          font-weight: 600;
+          color: #64748b;
+        }
+        .header-right {
+          flex-shrink: 0;
+          text-align: right;
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 3px;
+        }
+        .legend-chips {
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+          gap: 4px;
+        }
+        .chip {
+          display: inline-flex;
+          align-items: center;
+          font-size: 7.5pt;
           font-weight: 700;
-          color: #334155;
+          padding: 1px 8px;
+          border-radius: 999px;
+          border: 1px solid #e2e8f0;
+          background: #fff;
+          color: #475569;
           white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
         }
-        .legend .lg {
-          display: inline-block;
-          border: 1.2px solid #475569;
-          padding: 0 4px;
-          margin-right: 2px;
-          border-radius: 2px;
-          font-weight: 900;
+        .chip-staff {
+          background: #eff6ff;
+          color: #1d4ed8;
+          border-color: #bfdbfe;
         }
-        .legend .lg-loco { background: #dbeafe; }
-        .legend .lg-cerebro { background: #e9e5f5; }
-        .legend .lg-disuse { background: #fef3c7; }
-        .legend .lg-analgesia {
-          background: #059669;
-          color: #ffffff;
-          border-color: #065f46;
+        .chip-analgesia {
+          background: #fffbeb;
+          color: #b45309;
+          border-color: #fde68a;
         }
-        .legend .lg-staff {
-          background: #1d4ed8;
-          color: #ffffff;
-          border-color: #1e3a8a;
+        .chip-empty {
+          background: #fff;
+          color: #64748b;
+          border-color: #cbd5e1;
         }
         .meta {
-          font-size: 8.5pt;
-          font-weight: 700;
-          color: #334155;
-          text-align: right;
+          font-size: 7pt;
+          font-weight: 600;
+          color: #94a3b8;
           white-space: nowrap;
-          flex-shrink: 0;
         }
+
         .sheet-wrap {
           flex: 1 1 auto;
           min-height: 0;
@@ -602,46 +573,58 @@ export function printHandwritingWeeklySheet(baseDate) {
           border-collapse: collapse;
           table-layout: fixed;
         }
+        /* 極細スレートグレー枠線 */
         .hw-table th,
         .hw-table td {
-          border: 1.2px solid #334155;
+          border: 0.5px solid #cbd5e1;
           vertical-align: top;
         }
         .hw-table thead th {
-          background: #e2e8f0;
-          font-size: 11pt;
-          font-weight: 900;
+          background: #f8fafc;
+          font-size: 9.5pt;
+          font-weight: 700;
           text-align: center;
-          padding: 1px 2px;
+          padding: 2px 2px;
           height: var(--thead-mm, 9mm);
           max-height: var(--thead-mm, 9mm);
           vertical-align: middle;
+          color: #334155;
+        }
+        .hw-table thead th.th-time { width: 14mm; color: #64748b; font-size: 8.5pt; }
+        .hw-table thead th .dow {
+          display: block;
+          font-size: 9pt;
+          font-weight: 700;
           color: #0f172a;
         }
+        .hw-table thead th .date {
+          display: block;
+          font-size: 8.5pt;
+          font-weight: 600;
+          color: #64748b;
+        }
         .hw-table thead th .hol-name {
-          font-size: 8pt;
-          font-weight: 900;
+          font-size: 6.5pt;
+          font-weight: 700;
+          color: #e11d48;
         }
-        .hw-table thead th.sat {
-          background: #dbeafe;
-          color: #1e3a8a;
-        }
-        .hw-table thead th.holiday {
-          background: #fecdd3;
-          color: #9f1239;
-        }
+        .hw-table thead th.sat { background: #f0f9ff; }
+        .hw-table thead th.sat .dow { color: #0369a1; }
+        .hw-table thead th.holiday { background: #fff1f2; }
+        .hw-table thead th.holiday .dow { color: #e11d48; }
+
         .slot-row {
           height: var(--row-mm, 18mm);
           max-height: var(--row-mm, 18mm);
         }
         .time-col {
-          width: 15mm;
+          width: 14mm;
           text-align: center;
-          font-weight: 900;
-          font-size: var(--time-pt, 13pt);
+          font-weight: 700;
+          font-size: var(--time-pt, 11pt);
           vertical-align: middle !important;
-          background: #e2e8f0;
-          color: #0f172a;
+          background: #f8fafc;
+          color: #475569;
           height: var(--row-mm, 18mm);
           max-height: var(--row-mm, 18mm);
           padding: 0;
@@ -649,137 +632,121 @@ export function printHandwritingWeeklySheet(baseDate) {
         .slot-cell {
           height: var(--row-mm, 18mm);
           max-height: var(--row-mm, 18mm);
-          padding: 1mm 1.4mm;
+          padding: 1.2mm 1.6mm;
           position: relative;
           overflow: hidden;
         }
-        .slot-cell.sat { background: #f8fbff; }
-        .slot-cell.holiday { background: #fff7f7; }
+        .slot-cell.sat { background: #fafcff; }
+        .slot-cell.holiday { background: #fffafa; }
         .empty-cell { background: #ffffff !important; }
-        .empty-time {
-          position: absolute;
-          top: 0.6mm;
-          left: 1mm;
-          font-size: 9pt;
-          font-weight: 700;
-          color: #94a3b8;
+        .write-space {
+          height: 100%;
+          min-height: 7mm;
+          border-radius: 2px;
         }
-        .write-space { height: 100%; min-height: 8mm; }
+
         .booked-cell {
-          background: #f8fafc !important;
+          background: #ffffff !important;
           vertical-align: middle;
           overflow: hidden;
         }
         .booked-card {
-          padding: 0.3mm 0;
+          padding: 0.2mm 0;
           margin: 0;
         }
+        /* 消炎：アイボリー＋琥珀色左アクセント */
         .booked-card.is-analgesia {
-          background: repeating-linear-gradient(
-            -45deg,
-            #ecfdf5,
-            #ecfdf5 2px,
-            #a7f3d0 2px,
-            #a7f3d0 4px
-          );
-          border: 2px solid #047857;
-          border-radius: 3px;
-          padding: 0.5mm 1.2mm;
+          background: #fffbeb;
+          border: none;
+          border-left: 3px solid #d97706;
+          border-radius: 0 3px 3px 0;
+          padding: 0.8mm 1.4mm 0.8mm 1.8mm;
         }
         .bk-staff-row {
           display: flex;
-          align-items: flex-start;
+          align-items: center;
           flex-wrap: wrap;
           gap: 3px;
-          margin-bottom: 0.6mm;
-          overflow: visible;
+          margin-bottom: 0.8mm;
         }
         .badge-disease,
         .badge-staff,
         .badge-analgesia {
-          display: inline-block;
-          line-height: 1.15;
-          padding: 0.4mm 3px;
-          border-radius: 3px;
-          border: 1.4px solid #0f172a;
-          white-space: nowrap;
+          display: inline-flex;
+          align-items: center;
+          line-height: 1.2;
           vertical-align: middle;
+          white-space: nowrap;
         }
+        /* 淡いブルーの担当ピル */
         .badge-staff {
-          font-size: var(--staff-pt, 12pt);
-          font-weight: 900;
-          letter-spacing: 0.03em;
-          padding: 0.6mm 4px;
-          max-width: 100%;
-          white-space: normal;
-          word-break: break-word;
+          font-size: var(--staff-pt, 9pt);
+          font-weight: 700;
+          padding: 1px 7px;
+          border-radius: 999px;
+          background: #eff6ff;
+          color: #1d4ed8;
+          border: 1px solid #bfdbfe;
+          letter-spacing: 0.01em;
         }
         .badge-disease {
-          font-size: var(--badge-pt, 11pt);
-          font-weight: 800;
-          padding: 0.5mm 3px;
+          font-size: var(--badge-pt, 8pt);
+          font-weight: 600;
+          padding: 0 5px;
+          border-radius: 999px;
+          border: 1px solid #e2e8f0;
+          background: #f8fafc;
+          color: #64748b;
         }
         .badge-analgesia {
-          font-size: var(--analgesia-pt, 13pt);
-          font-weight: 900;
-          background: #059669;
-          color: #ffffff;
-          border-color: #065f46;
-          border-width: 2px;
-          letter-spacing: 0.06em;
-          padding: 0.6mm 6px;
+          font-size: var(--analgesia-pt, 8.5pt);
+          font-weight: 700;
+          padding: 1px 7px;
+          border-radius: 999px;
+          background: #fffbeb;
+          color: #b45309;
+          border: 1px solid #fde68a;
+          letter-spacing: 0.02em;
         }
-        .dtype-loco {
-          background: #dbeafe;
-          color: #0f172a;
-          border-color: #1e40af;
-        }
-        .dtype-cerebro {
-          background: #e9e5f5;
-          color: #0f172a;
-          border-color: #5b21b6;
-        }
-        .dtype-disuse {
-          background: #fef3c7;
-          color: #0f172a;
-          border-color: #b45309;
-        }
+        .dtype-loco { background: #f0f9ff; color: #0369a1; border-color: #bae6fd; }
+        .dtype-cerebro { background: #f5f3ff; color: #6d28d9; border-color: #ddd6fe; }
+        .dtype-disuse { background: #fffbeb; color: #a16207; border-color: #fde68a; }
+
         .bk-main {
           display: flex;
           flex-wrap: wrap;
           align-items: baseline;
           gap: 2px 6px;
-          overflow: visible;
         }
         .bk-name {
-          font-size: var(--name-pt, 13pt);
-          font-weight: 900;
-          color: #000000;
-          line-height: 1.15;
+          font-size: var(--name-pt, 12pt);
+          font-weight: 700;
+          color: #0f172a;
+          line-height: 1.25;
           white-space: normal;
           word-break: break-word;
           overflow-wrap: anywhere;
-          overflow: visible;
-          text-overflow: clip;
-          max-width: 100%;
+          letter-spacing: 0.02em;
         }
         .bk-dur {
-          font-size: 10pt;
-          font-weight: 800;
-          color: #334155;
+          font-size: 8pt;
+          font-weight: 600;
+          color: #94a3b8;
           flex-shrink: 0;
         }
         .footer {
           display: flex;
           justify-content: space-between;
           gap: 8px;
-          margin-top: 1mm;
-          font-size: 8pt;
+          margin-top: 2mm;
+          padding-top: 2px;
+          border-top: 1px solid #e2e8f0;
+          font-size: 7.5pt;
           font-weight: 600;
-          color: #334155;
+          color: #94a3b8;
           flex: 0 0 auto;
-          height: var(--footer-mm, 6.5mm);
-          max-height: var(--footer-mm, 6.5mm);
+          height: var(--footer-mm, 6mm);
+          max-height: var(--footer-mm, 6mm);
           overflow: hidden;
         }
         @media print {
