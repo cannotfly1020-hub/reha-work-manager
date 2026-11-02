@@ -92,7 +92,8 @@ function statsFromHistorical(hist, month) {
   if (!hist || !m) return st;
 
   // —— 新スキーマ（原本スクリーンショット確定値）——
-  // ※ 1〜9月の数値は原本どおり units に格納し、以後の加工で値を変えない
+  // ※ 1〜9月の数値は原本どおり・加工なし。フィールド名は units だが表・グラフ上は「点数」として扱う。
+  //    グラフが points を読む経路でも 0 にならないよう、同一確定値を points にもミラーする。
   if (hist.grandTotalPoints || hist.diseaseTotals || hist.earlyBonusTotal) {
     const cerebro = Number(hist.diseaseTotals?.cerebrovascular?.units?.[m]) || 0;
     const loco = Number(hist.diseaseTotals?.locomotive?.units?.[m]) || 0;
@@ -100,16 +101,23 @@ function statsFromHistorical(hist, month) {
     const early = Number(hist.earlyBonusTotal?.units?.[m]) || 0;
     const grandPts = Number(hist.grandTotalPoints?.[m]) || 0;
 
-    // 原本は入院+外来合算の疾患別値 → 入院行に合算を載せ、外来は0（二重計上防止）
+    // 原本は入院+外来合算の疾患別値 → 入院側に合算を載せ、外来は0（二重計上防止）
     st.in.CEREBROVASCULAR.units = cerebro;
+    st.in.CEREBROVASCULAR.points = cerebro;
     st.in.LOCOMOTIVE.units = loco;
+    st.in.LOCOMOTIVE.points = loco;
     st.in.DISUSE.units = disuse;
+    st.in.DISUSE.points = disuse;
     st.in.units = cerebro + loco + disuse;
+    st.in.points = cerebro + loco + disuse;
 
     st.early.units = early;
+    st.early.points = early;
     st.grandUnits = st.in.units;
     // 総点数は原本「総点数」を優先（入外・加算の内訳合算ではない）
     st.grandPoints = grandPts;
+    // 入外内訳が無いため、請求総点数折れ線が 0 にならないよう入院系列に総点数を載せる
+    if (grandPts > 0) st.in.points = grandPts;
     return st;
   }
 
@@ -284,23 +292,55 @@ function combinedDiseasePoints(st, diseaseKey) {
 }
 
 /**
- * 表・グラフ用の疾患別表示値
- * - historical（1〜9月確定）: 原本値を一切変更せず units フィールドをそのまま使用
- * - live（10月〜等）: 規定単価込みの点数
+ * 点数優先・units フォールバック（1〜9月確定が units のみでも折れ線が 0 にならない）
+ * @param {{ units?: number, points?: number }|null|undefined} bucket
  */
-function tableDiseaseValue(st, diseaseKey) {
-  if (!st || st.isBlank) return 0;
-  if (st.source === 'historical') return combinedDiseaseUnits(st, diseaseKey);
-  return combinedDiseasePoints(st, diseaseKey);
+function pointsOrUnits(bucket) {
+  const pts = Number(bucket?.points);
+  if (Number.isFinite(pts) && pts !== 0) return pts;
+  const u = Number(bucket?.units);
+  if (Number.isFinite(u) && u !== 0) return u;
+  if (Number.isFinite(pts)) return pts;
+  return Number.isFinite(u) ? u : 0;
 }
 
 /**
- * 早期加算の表示値（確定月は原本 units、ライブ月は points）
+ * 表・グラフ用の疾患別表示値（通年「点数」）
+ * - historical（1〜9月確定）: 原本値を加工せず points||units で取得
+ * - live（10月〜等）: 規定単価込みの点数（0 なら units フォールバック）
+ */
+function tableDiseaseValue(st, diseaseKey) {
+  if (!st || st.isBlank) return 0;
+  if (st.source === 'historical') {
+    return pointsOrUnits(st.in?.[diseaseKey]) + pointsOrUnits(st.out?.[diseaseKey]);
+  }
+  const pts = combinedDiseasePoints(st, diseaseKey);
+  if (pts !== 0) return pts;
+  return combinedDiseaseUnits(st, diseaseKey);
+}
+
+/**
+ * 早期加算の表示値（通年「点数」: points||units）
  */
 function tableEarlyValue(st) {
   if (!st || st.isBlank) return 0;
-  if (st.source === 'historical') return Number(st.early?.units) || 0;
-  return Number(st.early?.points) || 0;
+  return pointsOrUnits(st.early);
+}
+
+/** グラフ①入院点数: points||units（確定月は総点数ミラー済み） */
+function chartInpatientPoints(st) {
+  if (!st || st.isBlank) return 0;
+  const pts = Number(st.in?.points);
+  if (Number.isFinite(pts) && pts !== 0) return pts;
+  return Number(st.in?.units) || 0;
+}
+
+/** グラフ①外来点数: points||units */
+function chartOutpatientPoints(st) {
+  if (!st || st.isBlank) return 0;
+  const pts = Number(st.out?.points);
+  if (Number.isFinite(pts) && pts !== 0) return pts;
+  return Number(st.out?.units) || 0;
 }
 
 function styleHeader() {
@@ -539,7 +579,7 @@ export function writeYearlyTrendSheet(wb, year, _month) {
   setStyledCell(ws, chartAnchorRow, 0, '■ 請求総点数推移', {
     font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '0369A1' } }
   });
-  setStyledCell(ws, chartAnchorRow, 8, '■ 3大疾患 推移（1〜9月=確定／10月〜=点数）', {
+  setStyledCell(ws, chartAnchorRow, 8, '■ 3大疾患 点数推移（1〜12月・点数統一）', {
     font: { name: 'Meiryo UI', sz: 9, bold: true, color: { rgb: '047857' } }
   });
   rowHeights[chartAnchorRow] = 14;
@@ -552,8 +592,8 @@ export function writeYearlyTrendSheet(wb, year, _month) {
       calendarYear,
       calendarMode: true,
       grandPointsByMonth: monthNum((s) => s.grandPoints),
-      inpatientPointsByMonth: monthNum((s) => s.in.points),
-      outpatientPointsByMonth: monthNum((s) => s.out.points),
+      inpatientPointsByMonth: monthNum((s) => chartInpatientPoints(s)),
+      outpatientPointsByMonth: monthNum((s) => chartOutpatientPoints(s)),
       width: chartW,
       height: chartH,
       pixelRatio: 2
@@ -568,20 +608,29 @@ export function writeYearlyTrendSheet(wb, year, _month) {
         heightPx: chartH
       });
     }
-    // 疾患グラフも表と同じ値源（確定月は原本値、ライブ月は点数）
+    // 疾患グラフ: 表と同じ点数（1〜9月=原本確定 points||units／10月〜=ライブ点数）
+    const diseasePointsByMonth = {
+      cerebrovascular: monthNum((s) => tableDiseaseValue(s, 'CEREBROVASCULAR')),
+      locomotive: monthNum((s) => tableDiseaseValue(s, 'LOCOMOTIVE')),
+      disuse: monthNum((s) => tableDiseaseValue(s, 'DISUSE'))
+    };
     const diseaseChart = renderDiseaseUnitsChartPng({
       calendarYear,
       calendarMode: true,
-      cerebrovascularUnits: monthNum((s) => tableDiseaseValue(s, 'CEREBROVASCULAR')),
-      locomotiveUnits: monthNum((s) => tableDiseaseValue(s, 'LOCOMOTIVE')),
-      disuseUnits: monthNum((s) => tableDiseaseValue(s, 'DISUSE')),
+      metricLabel: '点数',
+      cerebrovascularUnits: diseasePointsByMonth.cerebrovascular,
+      locomotiveUnits: diseasePointsByMonth.locomotive,
+      disuseUnits: diseasePointsByMonth.disuse,
+      cerebrovascularPoints: diseasePointsByMonth.cerebrovascular,
+      locomotivePoints: diseasePointsByMonth.locomotive,
+      disusePoints: diseasePointsByMonth.disuse,
       width: chartW,
       height: chartH,
       pixelRatio: 2
     });
     if (diseaseChart?.png) {
       embedded.push({
-        name: 'disease_units_chart',
+        name: 'disease_points_chart',
         png: diseaseChart.png,
         fromCol: 8,
         fromRow: chartImgRow,

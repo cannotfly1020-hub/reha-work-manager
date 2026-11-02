@@ -1,6 +1,6 @@
 // js/excel/yearlyTrendChart.js
 // 年間推移シート埋め込み用トレンドチャート（Canvas描画 → PNG）
-// ①請求点数（棒＋折れ線） ②主要3疾患単位（折れ線） ※マクロ不要・静的画像
+// ①請求点数（棒＋折れ線） ②主要3疾患点数（折れ線） ※マクロ不要・静的画像・通年「点数」統一
 
 /** 暦年 1〜12月 */
 const MONTH_LABELS_CALENDAR = Object.freeze([
@@ -258,11 +258,15 @@ export function renderRevenuePointsChartPng(opts) {
 }
 
 /**
- * グラフ②: 主要3疾患 実施単位推移（入院＋外来合算）
+ * グラフ②: 主要3疾患 点数推移（入院＋外来合算・通年点数）
  * @param {{
  *   calendarYear?: number,
  *   fiscalStartYear?: number,
  *   calendarMode?: boolean,
+ *   metricLabel?: string,
+ *   cerebrovascularPoints?: number[],
+ *   locomotivePoints?: number[],
+ *   disusePoints?: number[],
  *   cerebrovascularUnits?: number[],
  *   locomotiveUnits?: number[],
  *   disuseUnits?: number[],
@@ -281,13 +285,35 @@ export function renderDiseaseUnitsChartPng(opts) {
   const calendarMode = opts?.calendarMode !== false;
   const yearLabel = Number(opts?.calendarYear || opts?.fiscalStartYear) || new Date().getFullYear();
   const MONTH_LABELS = resolveMonthLabels(calendarMode);
+  const metricLabel = String(opts?.metricLabel || '点数');
+
+  /** points 配列を優先し、無ければ units（互換） */
+  const pickSeriesValues = (pointsArr, unitsArr) => {
+    const p = Array.isArray(pointsArr) ? pointsArr : null;
+    const u = Array.isArray(unitsArr) ? unitsArr : null;
+    if (p && p.some((n) => Number(n) !== 0)) return p;
+    if (u && u.some((n) => Number(n) !== 0)) return u;
+    return p || u || [];
+  };
 
   let series = Array.isArray(opts?.series) ? opts.series.filter((s) => s && Array.isArray(s.values)) : [];
   if (!series.length) {
     series = [
-      { label: '脳血管', color: '#2563EB', values: opts?.cerebrovascularUnits || [] },
-      { label: '運動器', color: '#EA580C', values: opts?.locomotiveUnits || [] },
-      { label: '廃用症候群', color: '#16A34A', values: opts?.disuseUnits || [] }
+      {
+        label: '脳血管',
+        color: '#2563EB',
+        values: pickSeriesValues(opts?.cerebrovascularPoints, opts?.cerebrovascularUnits)
+      },
+      {
+        label: '運動器',
+        color: '#EA580C',
+        values: pickSeriesValues(opts?.locomotivePoints, opts?.locomotiveUnits)
+      },
+      {
+        label: '廃用症候群',
+        color: '#16A34A',
+        values: pickSeriesValues(opts?.disusePoints, opts?.disuseUnits)
+      }
     ];
   }
   series = series.map((s, idx) => {
@@ -311,7 +337,7 @@ export function renderDiseaseUnitsChartPng(opts) {
   ctx.fillRect(4, 4, width - 8, height - 8);
   ctx.strokeRect(4.5, 4.5, width - 9, height - 9);
 
-  const pad = { top: 50, right: 14, bottom: 54, left: 52 };
+  const pad = { top: 50, right: 14, bottom: 54, left: 58 };
   const plotW = width - pad.left - pad.right;
   const plotH = height - pad.top - pad.bottom;
   const slot = plotW / 12;
@@ -321,11 +347,11 @@ export function renderDiseaseUnitsChartPng(opts) {
   ctx.fillStyle = '#0F172A';
   ctx.font = 'bold 12px "Meiryo UI", "Hiragino Sans", sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillText(`【グラフ2】${yearTitle(yearLabel, calendarMode)} 3大疾患 単位推移`, pad.left, 22);
+  ctx.fillText(`【グラフ2】${yearTitle(yearLabel, calendarMode)} 3大疾患 ${metricLabel}推移`, pad.left, 22);
 
   ctx.font = '9.5px "Meiryo UI", sans-serif';
   ctx.fillStyle = '#64748B';
-  ctx.fillText('青＝脳血管　橙＝運動器　緑＝廃用　（いずれも入院＋外来合算単位）', pad.left, 38);
+  ctx.fillText(`青＝脳血管　橙＝運動器　緑＝廃用　（入院＋外来合算${metricLabel}）`, pad.left, 38);
 
   drawPlotFrame(ctx, pad, plotW, plotH);
   drawYGrid(ctx, pad, plotW, plotH, yMax);
@@ -358,14 +384,14 @@ export function renderDiseaseUnitsChartPng(opts) {
   ctx.textAlign = 'center';
   ctx.fillStyle = '#64748B';
   ctx.font = 'bold 10px "Meiryo UI", sans-serif';
-  ctx.fillText('実施単位数', 0, 0);
+  ctx.fillText(`${metricLabel}（点）`, 0, 0);
   ctx.restore();
 
   return canvasToResult(canvas, width, height);
 }
 
 /**
- * 互換: 旧API名 → 疾患単位グラフ
+ * 互換: 旧API名 → 疾患点数グラフ
  * @param {Parameters<typeof renderDiseaseUnitsChartPng>[0]} opts
  */
 export function renderYearlyTrendChartPng(opts) {
