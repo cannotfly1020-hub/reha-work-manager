@@ -99,6 +99,39 @@ function buildDateStr(year, month, day) {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
+/**
+ * billingPlan → 略称区分（Ⅰ初 / Ⅰ継 / Ⅱ初 / Ⅱ継）
+ * @param {string} billingPlan
+ * @returns {string}
+ */
+function formatBillingPlanTag(billingPlan) {
+  const key = String(billingPlan || '');
+  if (key === 'PLAN_1_FIRST') return 'Ⅰ初';
+  if (key === 'PLAN_1_FOLLOW') return 'Ⅰ継';
+  if (key === 'PLAN_2_FIRST') return 'Ⅱ初';
+  if (key === 'PLAN_2_FOLLOW') return 'Ⅱ継';
+  if (key.includes('PLAN_2') && key.includes('FOLLOW')) return 'Ⅱ継';
+  if (key.includes('PLAN_2')) return 'Ⅱ初';
+  if (key.includes('PLAN_1') && key.includes('FOLLOW')) return 'Ⅰ継';
+  if (key.includes('PLAN_1')) return 'Ⅰ初';
+  return '';
+}
+
+/**
+ * 計画書列表示: `5/12\n(Ⅰ初)`（日付＋区分）
+ * @param {string} dateStr YYYY-MM-DD
+ * @param {string} billingPlan
+ * @returns {string}
+ */
+function formatPlanColumnLabel(dateStr, billingPlan) {
+  const parts = String(dateStr || '').split('-');
+  const md = parts.length >= 3
+    ? `${Number(parts[1])}/${Number(parts[2])}`
+    : String(dateStr || '').slice(5).replace('-', '/');
+  const tag = formatBillingPlanTag(billingPlan);
+  return tag ? `${md}\n(${tag})` : md;
+}
+
 function formatAdmissionShort(dateStr) {
   if (!dateStr || typeof dateStr !== 'string') return '';
   const m = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -375,8 +408,10 @@ function analyzePatientItem(item, year, month, daysInMonth) {
     const role = getTherapistRole(tid, tObj?.name || s.therapistName || '', therapistsMaster);
 
     if (s.billingPlan) {
-      planByDay[dNum] = s.date.slice(5);
-      planByDayByRole[role][dNum] = s.date.slice(5);
+      // 日付＋区分（Ⅰ初/Ⅰ継/Ⅱ初/Ⅱ継）を保持。日セルの isPlan 判定は truthy のまま
+      const planLabel = formatPlanColumnLabel(s.date, s.billingPlan);
+      planByDay[dNum] = planLabel;
+      planByDayByRole[role][dNum] = planLabel;
     }
 
     if (isIn && baseEarlyDate) {
@@ -925,8 +960,8 @@ function writePatientMatrixRow(ws, curRow, row, year, month, daysInMonth, zebraB
     setStyledCell(ws, curRow, COL_PLAN, planValue || '-', {
       ...STYLE_DATA_C,
       fill: zebraBg,
-      font: { name: 'Meiryo UI', sz: 8, bold: true, color: { rgb: 'B45309' } },
-      alignment: { horizontal: 'center', vertical: 'center' }
+      font: { name: 'Meiryo UI', sz: 7.5, bold: true, color: { rgb: 'B45309' } },
+      alignment: { horizontal: 'center', vertical: 'center', wrapText: true }
     });
   } else {
     setStyledCell(ws, curRow, COL_SESS, '', { ...STYLE_DATA_C, fill: zebraBg });
@@ -1100,7 +1135,8 @@ function buildSingleGroupWorksheet(aggregated, groupRows, def, pageMeta = {}) {
   }
 
   const rHeights = [{ hpt: 22 }, { hpt: 16 }, { hpt: 14 }];
-  for (let r = 3; r < curRow; r += 1) rHeights.push({ hpt: 16 });
+  // 計画列の日付＋区分（2行 wrap）を読めるようデータ行をわずかに確保
+  for (let r = 3; r < curRow; r += 1) rHeights.push({ hpt: 18 });
   ws['!rows'] = rHeights;
   ws['!merges'] = merges;
 
@@ -1114,13 +1150,13 @@ function buildSingleGroupWorksheet(aggregated, groupRows, def, pageMeta = {}) {
     { wch: 6.5 },  // 入院日
     { wch: 3.5 }   // 職
   ];
-  for (let d = 0; d < DAY_COLS; d += 1) colProps.push({ wch: 2.72 });
+  for (let d = 0; d < DAY_COLS; d += 1) colProps.push({ wch: 2.7 });
   colProps.push(
     { wch: 3.6 },  // 回数（実施日数）
     { wch: 4.2 },  // 総
     { wch: 3.8 },  // 早Ⅰ
     { wch: 3.8 },  // 早Ⅱ
-    { wch: 5 }     // 計画
+    { wch: 5.5 }   // 計画（日付＋区分の2行）
   );
   ws['!cols'] = colProps;
 

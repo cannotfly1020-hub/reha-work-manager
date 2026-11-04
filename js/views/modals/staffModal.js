@@ -97,22 +97,45 @@ function fillFacilityHoursForm(hours) {
 }
 
 /**
+ * 外来カレンダーの午前終了〜午後開始から昼休み帯を解決
+ * （専用セレクトが無いため、提供時間のギャップ＝昼休み）
+ * @param {string} amEnd
+ * @param {string} pmStart
+ * @returns {{ start: string, end: string }}
+ */
+function resolveOutpatientLunchFromGap(amEnd, pmStart) {
+  const end = String(amEnd || '').trim();
+  const startPm = String(pmStart || '').trim();
+  if (end && startPm && end < startPm) {
+    return { start: end, end: startPm };
+  }
+  // ギャップなし（連続）のときは開始＝終了として記録
+  const fallback = end || startPm || DEFAULT_OUTPATIENT_HOURS.defaultLunchStart;
+  return { start: fallback, end: fallback };
+}
+
+/**
  * フォームから外来専用時間を読み取る
- * @returns {{ amStart: string, amEnd: string, pmStart: string, pmEnd: string }}
+ * @returns {{ amStart: string, amEnd: string, pmStart: string, pmEnd: string, defaultLunchStart: string, defaultLunchEnd: string }}
  */
 function readOutpatientHoursFromForm() {
+  const amStart = document.getElementById('settingAptAmStartInput')?.value || '';
+  const amEnd = document.getElementById('settingAptAmEndInput')?.value || '';
+  const pmStart = document.getElementById('settingAptPmStartInput')?.value || '';
+  const pmEnd = document.getElementById('settingAptPmEndInput')?.value || '';
+  const lunch = resolveOutpatientLunchFromGap(amEnd, pmStart);
   return {
-    amStart: document.getElementById('settingAptAmStartInput')?.value || '',
-    amEnd: document.getElementById('settingAptAmEndInput')?.value || '',
-    pmStart: document.getElementById('settingAptPmStartInput')?.value || '',
-    pmEnd: document.getElementById('settingAptPmEndInput')?.value || '',
-    defaultLunchStart: DEFAULT_OUTPATIENT_HOURS.defaultLunchStart,
-    defaultLunchEnd: DEFAULT_OUTPATIENT_HOURS.defaultLunchEnd
+    amStart,
+    amEnd,
+    pmStart,
+    pmEnd,
+    defaultLunchStart: lunch.start,
+    defaultLunchEnd: lunch.end
   };
 }
 
 /**
- * 外来専用時間をフォームへセット
+ * 外来専用時間をフォームへセット（保存済み am/pm を確実に復元）
  * @param {Partial<import('../../core/timeSlotGenerator.js').FacilityHours>|null|undefined} [hours]
  */
 function fillOutpatientHoursForm(hours) {
@@ -121,6 +144,7 @@ function fillOutpatientHoursForm(hours) {
   const amEnd = document.getElementById('settingAptAmEndInput');
   const pmStart = document.getElementById('settingAptPmStartInput');
   const pmEnd = document.getElementById('settingAptPmEndInput');
+  // time input は HH:MM 必須。保存値をそのまま復元（デフォルト補完は欠落時のみ）
   if (amStart) amStart.value = h.amStart || DEFAULT_OUTPATIENT_HOURS.amStart;
   if (amEnd) amEnd.value = h.amEnd || DEFAULT_OUTPATIENT_HOURS.amEnd;
   if (pmStart) pmStart.value = h.pmStart || DEFAULT_OUTPATIENT_HOURS.pmStart;

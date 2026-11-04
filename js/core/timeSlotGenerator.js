@@ -136,25 +136,39 @@ export function getFacilityDefaultLunchBreak() {
   };
 }
 
+/** 施設時間の旧昼休みギャップを一度だけ連続枠へ寄せた印 */
+const FACILITY_HOURS_LEGACY_GAP_MIGRATED_FLAG = 'reha_facility_hours_legacy_gap_migrated_v1';
+
 /**
- * 旧「昼休憩で 13:00〜14:00 欠落」設定を現行の連続枠へ変換する。
- * - pmStart が 14:00 かつ amEnd が 13:00 → pmStart を 13:00 に置換
- * - 旧既定4キー完全一致の場合も同様（明示）
+ * 旧「昼休憩で 13:00〜14:00 欠落」だった施設既定のみ、現行の連続枠へ一度変換する。
+ * ★意図的な amEnd=13:00 / pmStart=14:00（昼休みあり）は、移行済みフラグ後は絶対に巻き戻さない。
+ * ★外来専用キー（OUTPATIENT_HOURS_STORAGE_KEY）では呼び出さないこと。
  * @param {Partial<FacilityHours>|null|undefined} hours
  * @returns {{ hours: FacilityHours, migrated: boolean }}
  */
 export function migrateFacilityHoursIfNeeded(hours) {
   const h = normalizeFacilityHours(hours);
-  const isLegacyGap =
-    h.pmStart === '14:00' &&
-    h.amEnd === '13:00';
+  let alreadyMigrated = false;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      alreadyMigrated = localStorage.getItem(FACILITY_HOURS_LEGACY_GAP_MIGRATED_FLAG) === '1';
+    }
+  } catch (_) {
+    alreadyMigrated = false;
+  }
+
+  // 既に一度移行済み → ユーザーが意図的に昼休みギャップを戻しても消さない
+  if (alreadyMigrated) {
+    return { hours: h, migrated: false };
+  }
+
   const isExactLegacyDefault =
     h.amStart === LEGACY_LUNCH_GAP_FACILITY_HOURS.amStart &&
     h.amEnd === LEGACY_LUNCH_GAP_FACILITY_HOURS.amEnd &&
     h.pmStart === LEGACY_LUNCH_GAP_FACILITY_HOURS.pmStart &&
     h.pmEnd === LEGACY_LUNCH_GAP_FACILITY_HOURS.pmEnd;
 
-  if (isLegacyGap || isExactLegacyDefault) {
+  if (isExactLegacyDefault) {
     return {
       hours: {
         ...h,
@@ -164,6 +178,14 @@ export function migrateFacilityHoursIfNeeded(hours) {
     };
   }
   return { hours: h, migrated: false };
+}
+
+function markFacilityLegacyGapMigrated() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(FACILITY_HOURS_LEGACY_GAP_MIGRATED_FLAG, '1');
+    }
+  } catch (_) { /* ignore */ }
 }
 
 /**
@@ -239,6 +261,7 @@ export function getSavedFacilityHours() {
     if (migrated) {
       try {
         localStorage.setItem(FACILITY_HOURS_STORAGE_KEY, JSON.stringify(check.hours));
+        markFacilityLegacyGapMigrated();
       } catch (_) {
         // 読込側マイグレーション結果は返しつつ、書き込み失敗は握りつぶす
       }
@@ -263,6 +286,8 @@ export function saveFacilityHours(hours) {
   try {
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem(FACILITY_HOURS_STORAGE_KEY, JSON.stringify(check.hours));
+      // 保存成功時点で移行フラグを立て、以降の強制巻き戻しを止める（意図的な昼休みを許容）
+      markFacilityLegacyGapMigrated();
     }
     return { success: true, message: '施設リハビリ提供時間を保存しました', hours: check.hours };
   } catch (_) {
@@ -302,7 +327,8 @@ export function validateOutpatientHours(hours) {
 
 /**
  * 保存済みの外来予約カレンダー専用提供時間を取得
- * 未保存時は現行施設時間を1回だけシードして独立キーへ永続化し、以後は施設変更の影響を受けない
+ * ★ migrateFacilityHoursIfNeeded は一切適用しない（意図的な昼休み＝amEnd < pmStart を保持）
+ * 未保存時は施設時間の「生値」または既定を1回だけシードし、以後は施設変更の影響を受けない
  * @returns {FacilityHours}
  */
 export function getSavedOutpatientHours() {
@@ -312,9 +338,15 @@ export function getSavedOutpatientHours() {
     }
     const raw = localStorage.getItem(OUTPATIENT_HOURS_STORAGE_KEY);
     if (!raw) {
-      // 初回: 既存の外来見た目を維持するため施設時間をコピーして独立保存
-      const seeded = normalizeOutpatientHours(getSavedFacilityHours());
-      const check = validateOutpatientHours(seeded);
+      // 初回シード: 施設キーの生JSONを優先（施設側マイグレーションの巻き戻しを持ち込まない）
+      let seedSource = { ...DEFAULT_OUTPATIENT_HOURS };
+      try {
+        const facilityRaw = localStorage.getItem(FACILITY_HOURS_STORAGE_KEY);
+        if (facilityRaw) {
+          seedSource = normalizeOutpatientHours(JSON.parse(facilityRaw));
+        }
+      } catch (_) { /* keep default */ }
+      const check = validateOutpatientHours(seedSource);
       const hours = check.ok ? check.hours : { ...DEFAULT_OUTPATIENT_HOURS };
       try {
         localStorage.setItem(OUTPATIENT_HOURS_STORAGE_KEY, JSON.stringify(hours));
@@ -323,6 +355,7 @@ export function getSavedOutpatientHours() {
     }
 
     const parsed = JSON.parse(raw);
+    // ★強制マイグレーションなし。保存された am/pm / 昼休みをそのまま検証・返却
     const check = validateOutpatientHours(parsed);
     if (!check.ok) return { ...DEFAULT_OUTPATIENT_HOURS };
     return check.hours;
@@ -333,6 +366,7 @@ export function getSavedOutpatientHours() {
 
 /**
  * 外来予約カレンダー専用提供時間を検証して保存
+ * ★ migrateFacilityHoursIfNeeded は呼ばない（昼休みギャップを消さない）
  * @param {Partial<FacilityHours>} hours
  * @returns {{ success: boolean, message: string, hours: FacilityHours }}
  */
