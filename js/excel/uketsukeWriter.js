@@ -2,7 +2,6 @@
 // 受付提出用Excelのシート組み立て
 // ★個別リハ: 物理タブ分割 ＋ 当月切替患者の通常/減算日割りマトリクス
 
-import { ANALGESIA_SHEET } from './sheetUtils.js';
 import { writeExecutiveSummarySheet } from './sheets/summarySheet.js';
 import { writeYearlyTrendSheet } from './sheets/yearlyTrendSheet.js';
 import { writeIndividualRehaSheets } from './sheets/individualRehaSheet.js';
@@ -23,7 +22,12 @@ export function generateUketsukeWorkbook(aggregated) {
     console.info('[uketsuke] 個別リハ物理タブ:', individualTabs.length ? individualTabs.join(' / ') : '(該当なし)');
   }
 
-  writeAnalgesiaDedicatedSheet(wb, aggregated, ANALGESIA_SHEET);
+  // 消炎鎮痛: 入院／外来を独立タブへ分割（該当患者がいる場合のみ）
+  const analgesiaTabs = writeAnalgesiaDedicatedSheet(wb, aggregated);
+  if (typeof console !== 'undefined' && console.info) {
+    console.info('[uketsuke] 消炎鎮痛物理タブ:', analgesiaTabs.length ? analgesiaTabs.join(' / ') : '(該当なし)');
+  }
+
   buildPatientMonthlyListSheet(wb, aggregated);
 
   return wb;
