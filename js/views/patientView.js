@@ -101,18 +101,26 @@ function syncStatusFromExitDate(statusSelect, exitDateInput) {
  * @returns {string}
  */
 function getPlanPhaseCellHtml(patient, deadlines) {
+  const isCare = patient.careInsuranceType === 'CARE';
+  // 要介護かつ評価2切替日到達済み → 保存値が未更新でも計画2フェーズとして動的表示
+  const reachedPlan2 = isCare && Boolean(deadlines?.isPlan2Required);
+  const storedPlan2 = patient.planStatus === 'PLAN_2_FOLLOW';
+
   let badgeHtml = '<span style="color:#64748b; font-size:0.72rem;">未算定(初回)</span>';
-  if (patient.planStatus === 'PLAN_2_FOLLOW') {
+  if (storedPlan2) {
     badgeHtml = '<span style="color:#7c3aed; font-weight:800; background:#f5f3ff; border:1px solid #ddd6fe; padding:2px 5px; border-radius:3px; font-size:0.72rem;">計2継続(196点)</span>';
+  } else if (reachedPlan2) {
+    // 台帳が未算定/計画1のままでも、期日到達で計画2へ動的反映（要支援・医療のみは対象外）
+    badgeHtml = '<span style="color:#7c3aed; font-weight:800; background:#f5f3ff; border:1px solid #ddd6fe; padding:2px 5px; border-radius:3px; font-size:0.72rem;">計2移行(196点)</span>';
   } else if (patient.planStatus === 'PLAN_1_FOLLOW') {
     badgeHtml = '<span style="color:#0369a1; font-weight:700; background:#e0f2fe; padding:2px 5px; border-radius:3px; font-size:0.72rem;">計1継続(240点)</span>';
   }
 
   let subTextHtml = '';
   // 評価2切替日は要介護（CARE）のみ表示。要支援は評価料2対象外
-  if (patient.careInsuranceType === 'CARE' && deadlines.plan2TransitionDateStr) {
+  if (isCare && deadlines.plan2TransitionDateStr) {
     const switchSlash = formatSlashDate(deadlines.plan2TransitionDateStr);
-    if (deadlines.isPlan2Required || patient.planStatus === 'PLAN_2_FOLLOW') {
+    if (reachedPlan2 || storedPlan2) {
       subTextHtml = `<div class="plan2-switch-date" style="font-size:0.68rem; color:#7c3aed; font-weight:700; margin-top:3px; line-height:1.3;">評価2切替日: ${switchSlash} <span style="font-weight:600;">(到達済)</span></div>`;
     } else {
       const remain = deadlines.plan2RemainingDays !== null ? ` <span style="color:#0284c7; font-weight:600;">(残${deadlines.plan2RemainingDays}日)</span>` : '';
@@ -455,7 +463,17 @@ function openPatientModal(patientId) {
   document.getElementById('patientFormCareType').value = p ? p.careInsuranceType : 'NONE';
 
   const planSelect = document.getElementById('patientFormPlanStatus');
-  if (planSelect) planSelect.value = p ? (p.planStatus || 'NOT_YET') : 'NOT_YET';
+  if (planSelect) {
+    let planValue = p ? (p.planStatus || 'NOT_YET') : 'NOT_YET';
+    // 要介護かつ評価2切替日到達済み → セレクトを計画書2へ自動連動（要支援は除外）
+    if (p && p.careInsuranceType === 'CARE') {
+      const dl = calculatePatientDeadlines(p, new Date());
+      if (dl.isPlan2Required) {
+        planValue = 'PLAN_2_FOLLOW';
+      }
+    }
+    planSelect.value = planValue;
+  }
 
   document.getElementById('patientFormAdmissionDate').value = p ? (p.admissionDate || '') : '';
   document.getElementById('patientFormEarlyStartDate').value = p ? (p.earlyBonusStartDate || '') : '';
