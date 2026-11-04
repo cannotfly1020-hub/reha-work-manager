@@ -118,6 +118,7 @@ export function setupSlotModalListeners(onUpdate) {
         planSelect.style.background = '#fff';
         planSelect.style.color = '#0f172a';
 
+        // 期日到来・初回/継続を反映した最新推奨区分をセット（手動変更も可）
         const patient = getPatientById(pId);
         if (patient) {
           const hasPastPlan = hasPatientPastPlan(pId, currentDateStr);
@@ -349,6 +350,8 @@ function handleSlotFormSubmit() {
     return;
   }
 
+  // 台帳フェーズ自動昇格バックアップ:
+  // PLAN_1_FIRST → PLAN_1_FOLLOW / PLAN_2_* → PLAN_2_FOLLOW（ダウングレード禁止）
   if (billingPlan) {
     updatePatientPlanStatus(patientId, billingPlan);
   }
@@ -607,6 +610,7 @@ function updateModalPatientPlanRecommendation(pId) {
   } else {
     if (planCheck) planCheck.disabled = false;
     const hasPastPlan = hasPatientPastPlan(pId, currentDateStr);
+    // 台帳ベタ書きではなく evaluateRecommendedPlan（期日＋初回/継続）経由
     const recommendation = evaluateRecommendedPlan(patient, currentDateStr, hasPastPlan);
 
     if (planCheck && planCheck.checked) {
@@ -614,7 +618,15 @@ function updateModalPatientPlanRecommendation(pId) {
         planSelect.disabled = false;
         planSelect.style.background = '#fff';
         planSelect.style.color = '#0f172a';
-        planSelect.value = recommendation.recommendedPlan || 'PLAN_1_FIRST';
+        // 既存コマ編集時は保存済み区分を尊重。新規／未設定時のみ推奨を初期セット
+        const existingPlan = activeModalSlot?.currentItem?.billingPlan
+          ? String(activeModalSlot.currentItem.billingPlan)
+          : '';
+        if (existingPlan) {
+          planSelect.value = existingPlan;
+        } else {
+          planSelect.value = recommendation.recommendedPlan || 'PLAN_1_FIRST';
+        }
       }
     } else {
       if (planSelect) {
@@ -626,7 +638,10 @@ function updateModalPatientPlanRecommendation(pId) {
     }
 
     if (recommendation.recommendedPlan && patientInfoEl) {
-      patientInfoEl.innerHTML += `<div style="color:#0284c7; font-size:0.75rem; margin-top:4px; font-weight:600; background:#f0f9ff; padding:3px 6px; border-radius:4px; border:1px solid #bae6fd;">💡 算定時の推奨: ${recommendation.label}</div>`;
+      const reason = recommendation.reason
+        ? ` <span style="font-weight:500;color:#64748b;">（${sanitizeHtml(recommendation.reason)}）</span>`
+        : '';
+      patientInfoEl.innerHTML += `<div style="color:#0284c7; font-size:0.75rem; margin-top:4px; font-weight:600; background:#f0f9ff; padding:3px 6px; border-radius:4px; border:1px solid #bae6fd;">💡 算定時の推奨: ${sanitizeHtml(recommendation.label)}${reason}</div>`;
     }
   }
 }

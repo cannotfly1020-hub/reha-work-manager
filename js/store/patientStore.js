@@ -302,19 +302,39 @@ export function upsertPatient(rawData) {
 
 /**
  * 時間割等からの計画書算定実績確定に伴い、患者の計画書ステータスを更新する
+ *
+ * マッピング（台帳の有効値は NOT_YET / PLAN_1_FOLLOW / PLAN_2_FOLLOW）:
+ * - PLAN_1_FIRST 算定 → PLAN_1_FOLLOW（ただし既に PLAN_2_FOLLOW ならダウングレード禁止）
+ * - PLAN_1_FOLLOW 算定 → PLAN_1_FOLLOW（同上）
+ * - PLAN_2_FIRST / PLAN_2_FOLLOW 算定 → PLAN_2_FOLLOW 固定
+ *
+ * @param {string} patientId
+ * @param {string} planType PLAN_1_FIRST | PLAN_1_FOLLOW | PLAN_2_FIRST | PLAN_2_FOLLOW
+ * @returns {boolean}
  */
 export function updatePatientPlanStatus(patientId, planType) {
   const patient = getPatientById(patientId);
   if (!patient) return false;
 
-  let newStatus = patient.planStatus || 'NOT_YET';
-  if (String(planType).includes('PLAN_2')) {
-    newStatus = 'PLAN_2_FOLLOW'; // 計画書2を一度でも算定したら今後は2回目以降固定
-  } else if (String(planType).includes('PLAN_1')) {
-    if (newStatus !== 'PLAN_2_FOLLOW') newStatus = 'PLAN_1_FOLLOW';
+  const current = String(patient.planStatus || 'NOT_YET');
+  const billed = String(planType || '');
+  let newStatus = current;
+
+  if (billed === 'PLAN_2_FIRST' || billed === 'PLAN_2_FOLLOW' || billed.includes('PLAN_2')) {
+    // 計画2を一度でも算定したら今後は継続固定
+    newStatus = 'PLAN_2_FOLLOW';
+  } else if (billed === 'PLAN_1_FIRST' || billed === 'PLAN_1_FOLLOW' || billed.includes('PLAN_1')) {
+    // 計画2継続中からの勝手なダウングレードを防ぐ
+    if (current !== 'PLAN_2_FOLLOW') {
+      newStatus = 'PLAN_1_FOLLOW';
+    }
   }
 
-  if (patient.planStatus !== newStatus) {
+  if (!['NOT_YET', 'PLAN_1_FOLLOW', 'PLAN_2_FOLLOW'].includes(newStatus)) {
+    newStatus = 'NOT_YET';
+  }
+
+  if (current !== newStatus) {
     patient.planStatus = newStatus;
     const list = getAllPatients(true);
     const idx = list.findIndex((p) => p.id === patient.id);

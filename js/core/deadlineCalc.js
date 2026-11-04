@@ -227,11 +227,14 @@ export function calculatePatientDeadlines(patient, baseDate = new Date()) {
   let plan2RemainingDays = null;
   let isPlan2Required = false;
 
-  if (patient?.careInsuranceType === 'CARE' && startDateStr && disease.oneThirdDays < 9000) {
+  // 評価料2移行は要介護（CARE）のみ。要支援（SUPPORT）・医療のみ（NONE）は対象外
+  const isCare = patient?.careInsuranceType === 'CARE';
+  if (isCare && startDateStr && disease.oneThirdDays < 9000) {
     // 「3分の1を超えた」翌日が移行日。50日なら起算日から数えて51日目 = 起算日+50日。
     plan2TransitionDateStr = addDays(startDateStr, disease.oneThirdDays);
     const diffToPlan2 = getDiffDays(baseDate, plan2TransitionDateStr);
     plan2RemainingDays = diffToPlan2 !== null ? diffToPlan2 : null;
+    // 基準日 >= 移行日 なら計画2必須（同日含む）
     isPlan2Required = plan2RemainingDays !== null && plan2RemainingDays <= 0;
   }
 
@@ -343,7 +346,15 @@ export function getDailyBasePoints(patient, sessionDateStr) {
 
 /**
  * リハ総合計画評価料（4区分）の推奨選択肢を自動判定する純粋関数
- * 患者マスターの planStatus（計画書2継続中固定など）を最優先に評価する
+ *
+ * ライフサイクル:
+ * - 要介護（CARE）かつ基準日 >= plan2TransitionDateStr
+ *   → 算定歴なし: PLAN_2_FIRST / あり: PLAN_2_FOLLOW
+ * - 要支援（SUPPORT）・医療保険のみ（NONE）、または要介護でも3分の1経過日前
+ *   → 算定歴なし: PLAN_1_FIRST / あり: PLAN_1_FOLLOW（評価料2対象外）
+ * - 台帳で PLAN_2_FOLLOW 明示固定 → 期日前でも PLAN_2_FOLLOW を最優先
+ * - 台帳が NOT_YET / PLAN_1_FOLLOW でも（要介護かつ）期日到来なら計画2へ自動推奨・昇格
+ *
  * @param {Object} patient 患者マスター情報
  * @param {string} targetDateStr 算定対象日 (YYYY-MM-DD)
  * @param {boolean} hasPastPlan 過去（対象日より前）に算定実績があるか
@@ -354,68 +365,79 @@ export function evaluateRecommendedPlan(patient, targetDateStr, hasPastPlan = fa
     return { recommendedPlan: '', label: 'なし (算定しない)', points: 0, reason: '物療または患者未選択' };
   }
 
-  // A: 患者マスターで「計画書2継続中」が指定されている場合は、無条件で196点固定
-  if (patient.planStatus === 'PLAN_2_FOLLOW') {
+  const planStatus = String(patient.planStatus || 'NOT_YET');
+  // ★評価料2は要介護認定のみ。要支援（SUPPORT）は含めない
+  const isCare = patient.careInsuranceType === 'CARE';
+
+  // A: 台帳で計画書2継続を明示固定 → 期日前でも196点固定（手動上書き最優先）
+  if (planStatus === 'PLAN_2_FOLLOW') {
     return {
       recommendedPlan: 'PLAN_2_FOLLOW',
       label: '総合実施計画書2 (2回目以降: 196点)',
       points: REHA_RULES.PLAN_POINTS.PLAN_2_FOLLOW,
-      reason: '患者台帳: 計画書2継続中 (196点固定)'
+      reason: '患者台帳: 計画書2継続中 (196点固定・手動上書き尊重)'
     };
   }
 
   const deadlines = calculatePatientDeadlines(patient, targetDateStr);
-  const isPlan2 = deadlines.isPlan2Required;
+  // 基準日時点で移行日に到達しているか（同日含む）を厳密判定（要介護のみ deadlines に設定される）
+  const transitionStr = String(deadlines.plan2TransitionDateStr || '');
+  const targetNorm = normalizeDateString(targetDateStr) || String(targetDateStr || '');
+  const reachedPlan2ByDate = Boolean(
+    isCare
+    && transitionStr
+    && targetNorm
+    && targetNorm >= transitionStr
+  );
+  const isPlan2 = isCare && (Boolean(deadlines.isPlan2Required) || reachedPlan2ByDate);
 
-  // B: 患者マスターで「計画書1継続中」が指定されている場合
-  if (patient.planStatus === 'PLAN_1_FOLLOW') {
-    if (isPlan2) {
+  // 算定歴: 引数 or 台帳が継続フェーズ
+  const hadPast = Boolean(hasPastPlan)
+    || planStatus === 'PLAN_1_FOLLOW'
+    || planStatus === 'PLAN_2_FOLLOW';
+
+  // B: 要介護かつ計画2期日到来（台帳が未算定/計画1でも自動昇格推奨）
+  if (isPlan2) {
+    if (hadPast || planStatus === 'PLAN_1_FOLLOW') {
       return {
         recommendedPlan: 'PLAN_2_FOLLOW',
         label: '総合実施計画書2 (2回目以降: 196点)',
         points: REHA_RULES.PLAN_POINTS.PLAN_2_FOLLOW,
-        reason: '計画書2への移行日到達 (2回目以降)'
+        reason: planStatus === 'PLAN_1_FOLLOW'
+          ? '3分の1経過日到達 → 計画1継続から計画2継続へ自動昇格'
+          : '要介護認定 ＋ 3分の1経過日到達 (2回目以降)'
       };
     }
+    return {
+      recommendedPlan: 'PLAN_2_FIRST',
+      label: '総合実施計画書2 (初回: 240点)',
+      points: REHA_RULES.PLAN_POINTS.PLAN_2_FIRST,
+      reason: '要介護認定 ＋ 3分の1経過日到達 (初回)'
+    };
+  }
+
+  // C: 計画1（要支援・医療のみ、または要介護でも移行日前）
+  if (planStatus === 'PLAN_1_FOLLOW' || hadPast) {
     return {
       recommendedPlan: 'PLAN_1_FOLLOW',
       label: '総合実施計画書1 (2回目以降: 240点)',
       points: REHA_RULES.PLAN_POINTS.PLAN_1_FOLLOW,
-      reason: '患者台帳: 計画書1継続中 (2回目以降)'
+      reason: planStatus === 'PLAN_1_FOLLOW'
+        ? '患者台帳: 計画書1継続中 (2回目以降)'
+        : (isCare
+          ? '通常算定 (2回目以降・算定歴あり)'
+          : '要支援/医療のみ → 評価料1継続 (評価料2対象外)')
     };
   }
 
-  // C: 未算定（初回対象）または未設定の場合
-  const isFirst = !hasPastPlan;
-  if (isPlan2) {
-    return isFirst
-      ? {
-          recommendedPlan: 'PLAN_2_FIRST',
-          label: '総合実施計画書2 (初回: 240点)',
-          points: REHA_RULES.PLAN_POINTS.PLAN_2_FIRST,
-          reason: '要介護認定 ＋ 3分の1日数経過 (初回)'
-        }
-      : {
-          recommendedPlan: 'PLAN_2_FOLLOW',
-          label: '総合実施計画書2 (2回目以降: 196点)',
-          points: REHA_RULES.PLAN_POINTS.PLAN_2_FOLLOW,
-          reason: '要介護認定 ＋ 3分の1日数経過 (2回目以降)'
-        };
-  }
-
-  return isFirst
-    ? {
-        recommendedPlan: 'PLAN_1_FIRST',
-        label: '総合実施計画書1 (初回: 300点)',
-        points: REHA_RULES.PLAN_POINTS.PLAN_1_FIRST,
-        reason: '通常算定 (初回)'
-      }
-    : {
-        recommendedPlan: 'PLAN_1_FOLLOW',
-        label: '総合実施計画書1 (2回目以降: 240点)',
-        points: REHA_RULES.PLAN_POINTS.PLAN_1_FOLLOW,
-        reason: '通常算定 (2回目以降)'
-      };
+  return {
+    recommendedPlan: 'PLAN_1_FIRST',
+    label: '総合実施計画書1 (初回: 300点)',
+    points: REHA_RULES.PLAN_POINTS.PLAN_1_FIRST,
+    reason: isCare
+      ? '通常算定 (初回・未算定)'
+      : '要支援/医療のみ → 評価料1初回 (評価料2対象外)'
+  };
 }
 
 function sumUnits(dailyUnitsMap) {

@@ -109,6 +109,7 @@ function getPlanPhaseCellHtml(patient, deadlines) {
   }
 
   let subTextHtml = '';
+  // 評価2切替日は要介護（CARE）のみ表示。要支援は評価料2対象外
   if (patient.careInsuranceType === 'CARE' && deadlines.plan2TransitionDateStr) {
     const switchSlash = formatSlashDate(deadlines.plan2TransitionDateStr);
     if (deadlines.isPlan2Required || patient.planStatus === 'PLAN_2_FOLLOW') {
@@ -499,6 +500,7 @@ function updatePlan2GuidePreview() {
   const admin = document.getElementById('patientFormAdmissionDate').value;
   const base = onset || admin;
 
+  // 要介護（CARE）のみガイド表示（要支援 SUPPORT は評価料2対象外のため非表示）
   if (careType === 'CARE' && base) {
     const dummyPatient = { diseaseType, careInsuranceType: 'CARE', onsetDate: onset, admissionDate: admin };
     const res = calculatePatientDeadlines(dummyPatient, new Date());
