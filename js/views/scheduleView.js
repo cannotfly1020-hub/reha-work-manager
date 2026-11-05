@@ -18,6 +18,7 @@ import {
 import { setupSlotModalListeners } from './modals/slotModal.js';
 import { setupStaffSettingsModalListeners } from './modals/staffModal.js';
 import { setupAnalgesiaModalListeners } from './modals/analgesiaModal.js';
+import { setupDialysisModalListeners } from './modals/dialysisModal.js';
 import { scheduleState } from './schedule/scheduleState.js';
 import { setupSchedulePaletteEvents, renderPatientPalette } from './schedule/palette.js';
 import { renderDailyKPIStrip } from './schedule/kpiStrip.js';
@@ -243,6 +244,7 @@ export function initScheduleView() {
   setupSlotModalListeners(renderScheduleView);
   setupStaffSettingsModalListeners(renderScheduleView);
   setupAnalgesiaModalListeners(renderScheduleView);
+  setupDialysisModalListeners(renderScheduleView);
 }
 
 export function renderScheduleView() {

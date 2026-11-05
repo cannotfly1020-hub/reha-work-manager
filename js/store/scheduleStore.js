@@ -92,6 +92,10 @@ export function checkSwapConflict(schedule, therapistA, slotA, therapistB, slotB
       temp.analgesia = schedule.analgesia;
       return;
     }
+    if (key === 'dialysis') {
+      temp.dialysis = schedule.dialysis;
+      return;
+    }
     temp[key] = { ...(schedule[key] || {}) };
   });
   if (temp[therapistA]) delete temp[therapistA][slotA];
@@ -206,13 +210,13 @@ function getStorageKey(dateStr) {
   return `${STORAGE_PREFIX}${normalizeDateString(dateStr)}`;
 }
 
-/** スケジュールオブジェクトからセラピスト列ID一覧を取得（analgesia を除外） */
+/** スケジュールオブジェクトからセラピスト列ID一覧を取得（analgesia / dialysis を除外） */
 export function listTherapistIdsFromSchedule(schedule) {
-  return Object.keys(schedule || {}).filter((key) => key !== 'analgesia');
+  return Object.keys(schedule || {}).filter((key) => key !== 'analgesia' && key !== 'dialysis');
 }
 
 export function getDailySchedule(dateStr) {
-  const defaultSchedule = { A: {}, B: {}, C: {}, analgesia: {} };
+  const defaultSchedule = { A: {}, B: {}, C: {}, analgesia: {}, dialysis: {} };
   const cleanDate = normalizeDateString(dateStr);
   if (!cleanDate) return { ...defaultSchedule };
 
@@ -221,9 +225,12 @@ export function getDailySchedule(dateStr) {
     if (!raw) return { ...defaultSchedule };
     const parsed = JSON.parse(raw);
     // A/B/C 以外（D以降の増員枠）も永続化データを欠落させない
-    const result = { analgesia: parsed.analgesia || {} };
+    const result = {
+      analgesia: parsed.analgesia || {},
+      dialysis: parsed.dialysis || {}
+    };
     Object.keys(parsed).forEach((key) => {
-      if (key === 'analgesia') return;
+      if (key === 'analgesia' || key === 'dialysis') return;
       if (parsed[key] && typeof parsed[key] === 'object' && !Array.isArray(parsed[key])) {
         result[key] = parsed[key];
       }
@@ -381,6 +388,60 @@ export function getAnalgesiaSlotPatients(dateStr, slotId) {
   const schedule = getDailySchedule(dateStr);
   const patientIds = schedule.analgesia?.[slotId] || [];
   return patientIds.map((id) => getPatientById(id) || { id, name: '未登録患者', category: 'OUTPATIENT', diseaseType: 'ANALGESIA' });
+}
+
+/**
+ * 透析時運動指導等加算: コマへ患者追加（並行指導・重複防止）
+ * @param {string} dateStr
+ * @param {string} slotId
+ * @param {string} patientId
+ * @returns {boolean}
+ */
+export function addDialysisPatient(dateStr, slotId, patientId) {
+  if (!dateStr || !slotId || !patientId) return false;
+  const current = getDailySchedule(dateStr);
+  if (!current.dialysis) current.dialysis = {};
+  if (!Array.isArray(current.dialysis[slotId])) current.dialysis[slotId] = [];
+
+  if (!current.dialysis[slotId].includes(patientId)) {
+    current.dialysis[slotId].push(patientId);
+    return saveDailySchedule(dateStr, current);
+  }
+  return true;
+}
+
+/**
+ * 透析コマから患者を削除
+ * @param {string} dateStr
+ * @param {string} slotId
+ * @param {string} patientId
+ * @returns {boolean}
+ */
+export function removeDialysisPatient(dateStr, slotId, patientId) {
+  if (!dateStr || !slotId || !patientId) return false;
+  const current = getDailySchedule(dateStr);
+  if (!current.dialysis?.[slotId]) return true;
+
+  current.dialysis[slotId] = current.dialysis[slotId].filter((id) => id !== patientId);
+  if (current.dialysis[slotId].length === 0) delete current.dialysis[slotId];
+  return saveDailySchedule(dateStr, current);
+}
+
+/**
+ * 透析コマの登録患者オブジェクト配列を取得
+ * @param {string} dateStr
+ * @param {string} slotId
+ * @returns {object[]}
+ */
+export function getDialysisSlotPatients(dateStr, slotId) {
+  const schedule = getDailySchedule(dateStr);
+  const patientIds = schedule.dialysis?.[slotId] || [];
+  return patientIds.map((id) => getPatientById(id) || {
+    id,
+    name: '未登録患者',
+    category: 'OUTPATIENT',
+    diseaseType: 'LOCOMOTIVE'
+  });
 }
 
 export function getDailyStats(dateStr) {
@@ -572,6 +633,23 @@ export function aggregateFromAppSchedule(year, month) {
           }
         });
       }
+    });
+
+    // 3. 透析時運動指導等加算枠（並行レーン・75点／Excel・印刷互換で isDialysisReha スロット生成）
+    const dSlots = schedule.dialysis || {};
+    Object.entries(dSlots).forEach(([slotId, pIds]) => {
+      if (!Array.isArray(pIds)) return;
+      pIds.forEach((pId) => {
+        const p = getPatientById(pId);
+        const entry = ensurePatientEntry(pId, p);
+        entry.slots.push({
+          date: dayStr,
+          therapist: 'DIALYSIS',
+          slotId,
+          units: 0,
+          isDialysisReha: true
+        });
+      });
     });
   }
 

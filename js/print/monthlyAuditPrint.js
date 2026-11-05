@@ -171,8 +171,8 @@ function collectEarlyAndPlanDatesFromSlots(item, opts = {}) {
       }
     }
 
-    // いとう腎クリニック: 透析時運動指導等加算
-    if (s.isDialysisReha === true) {
+    // いとう腎クリニック: 透析時運動指導等加算（並行レーン集計スロット含む）
+    if (s.isDialysisReha === true || s.therapist === 'DIALYSIS') {
       const d = String(s.date);
       if (!seenDialysis.has(d)) {
         seenDialysis.add(d);

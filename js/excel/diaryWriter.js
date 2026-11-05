@@ -203,10 +203,7 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
             ptStats[t.id].pSet.add(item.patientId);
           }
 
-          // いとう腎クリニック専用: 透析時運動指導等加算・装具採型採寸の実績抽出
-          if (item.isDialysisReha === true) {
-            dialysisRehaCount += 1;
-          }
+          // 装具採型採寸（個別スロット）／透析は並行レーン集計を後段で加算
           if (item.orthoticsBilling && typeof item.orthoticsBilling === 'object') {
             const orthoMeta = resolveOrthoticsType(item.orthoticsBilling.typeCode);
             orthoticsRecords.push({
@@ -248,6 +245,16 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
             planYen += REHA_RULES.PLAN_POINTS[item.billingPlan] * 10;
           }
         }
+      });
+    });
+
+    // 透析時運動指導等加算: 並行レーン（schedule.dialysis）＋旧スロット互換
+    Object.values(schedule.dialysis || {}).forEach((ids) => {
+      if (Array.isArray(ids)) dialysisRehaCount += ids.length;
+    });
+    activeStaffList.forEach((t) => {
+      Object.values(schedule[t.id] || {}).forEach((item) => {
+        if (item?.isDialysisReha === true) dialysisRehaCount += 1;
       });
     });
 

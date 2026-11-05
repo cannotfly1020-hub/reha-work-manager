@@ -50,7 +50,7 @@ export function validateTimeConflict(
     return { valid: false, message: 'コマの終了時間が診療時間枠を超過しています。' };
   }
 
-  const therapists = Object.keys(dailySchedule || {}).filter((key) => key !== 'analgesia');
+  const therapists = Object.keys(dailySchedule || {}).filter((key) => key !== 'analgesia' && key !== 'dialysis');
   for (const tId of therapists) {
     const tSchedule = dailySchedule[tId] || {};
     for (const [sId, item] of Object.entries(tSchedule)) {
@@ -90,7 +90,7 @@ export function validateTimeConflict(
  */
 export function validateDailyLimit(dailySchedule, patient, currentDate, newUnits, currentSlotUnits = 0) {
   let dailyTotal = 0;
-  Object.keys(dailySchedule || {}).filter((key) => key !== 'analgesia').forEach((tId) => {
+  Object.keys(dailySchedule || {}).filter((key) => key !== 'analgesia' && key !== 'dialysis').forEach((tId) => {
     const tSchedule = dailySchedule[tId] || {};
     Object.values(tSchedule).forEach((item) => {
       if (item && item.patientId === patient.id) {

@@ -178,13 +178,14 @@ export function setupSlotModalListeners(onUpdate) {
 }
 
 /**
- * 施設フラグに応じて病院B専用入力コンテナの表示を切替（病院Aは常に非表示）
+ * 施設フラグに応じて病院B専用入力コンテナの表示を切替
+ * ※透析加算は並行レーン（dialysisModal）へ一本化するため、個別スロット内チェックは常に非表示
  */
 function applyFacilitySlotBillingUi() {
   const dialysisEl = document.getElementById('slotDialysisContainer');
   const orthoticsEl = document.getElementById('slotOrthoticsContainer');
   if (dialysisEl) {
-    dialysisEl.style.display = isFeatureEnabled('hasDialysisReha') ? 'block' : 'none';
+    dialysisEl.style.display = 'none';
   }
   if (orthoticsEl) {
     orthoticsEl.style.display = isFeatureEnabled('hasOrthoticsBilling') ? 'block' : 'none';
@@ -204,10 +205,9 @@ function syncOrthoticsDetailsVisibility() {
  * @param {Object|null|undefined} currentItem
  */
 function restoreFacilitySlotBillingFields(currentItem) {
+  // 透析は専用レーン登録のため個別スロットでは常にオフ
   const dialysisCheck = document.getElementById('slotDialysisCheck');
-  if (dialysisCheck) {
-    dialysisCheck.checked = Boolean(currentItem?.isDialysisReha) && isFeatureEnabled('hasDialysisReha');
-  }
+  if (dialysisCheck) dialysisCheck.checked = false;
 
   const orthoticsCheck = document.getElementById('slotOrthoticsCheck');
   const typeSelect = document.getElementById('slotOrthoTypeSelect');
@@ -227,14 +227,11 @@ function restoreFacilitySlotBillingFields(currentItem) {
 }
 
 /**
- * 保存用: 施設フラグ有効時のみ透析・装具フィールドを組み立て
- * @returns {{ isDialysisReha?: boolean, orthoticsBilling?: { typeCode: string, doctorName: string } }}
+ * 保存用: 装具のみ個別スロットへ格納（透析は dialysis レーン専用）
+ * @returns {{ orthoticsBilling?: { typeCode: string, doctorName: string } }}
  */
 function collectFacilitySlotBillingFields() {
   const out = {};
-  if (isFeatureEnabled('hasDialysisReha')) {
-    out.isDialysisReha = Boolean(document.getElementById('slotDialysisCheck')?.checked);
-  }
   if (isFeatureEnabled('hasOrthoticsBilling')) {
     const checked = Boolean(document.getElementById('slotOrthoticsCheck')?.checked);
     if (checked) {

@@ -12,6 +12,7 @@ import { getPatientById } from '../../store/patientStore.js';
 import {
   getDailySchedule, moveScheduleSlot, swapScheduleSlots, checkSwapConflict,
   setScheduleSlot, addAnalgesiaPatient, getAnalgesiaSlotPatients,
+  addDialysisPatient, getDialysisSlotPatients,
   isNonPatientBlock, getSlotSpan, slotRangeOverlaps, getPatientMonthDailyRehaUnitsMap
 } from '../../store/scheduleStore.js';
 import {
@@ -27,9 +28,11 @@ import {
   getTherapistWeeklyUnitsMeter,
   buildTherapistHeaderUnitsHtml
 } from '../../core/therapistWeeklyUnits.js';
+import { isFeatureEnabled } from '../../config/facilityConfig.js';
 import { showToast } from '../../ui/toast.js';
 import { openSlotModal } from '../modals/slotModal.js';
 import { openAnalgesiaModal } from '../modals/analgesiaModal.js';
+import { openDialysisModal } from '../modals/dialysisModal.js';
 import { scheduleState } from './scheduleState.js';
 import { renderScheduleView } from '../scheduleView.js';
 
@@ -168,10 +171,14 @@ export function renderTimetableGrid() {
   const therapists = getActiveTherapists();
   const schedule = getDailySchedule(scheduleState.dateStr);
   const therapistCount = therapists.length;
+  // いとう腎クリニックのみ透析並行レーンを描画（伊藤内科は従来構成のまま）
+  const showDialysisLane = isFeatureEnabled('hasDialysisReha');
 
   gridEl.style.display = 'grid';
   // 人数増で列が狭まっても名前優先のコンパクト表示へ切替できるよう下限を 96px に
-  gridEl.style.gridTemplateColumns = `88px repeat(${therapistCount}, minmax(96px, 1fr)) 100px`;
+  gridEl.style.gridTemplateColumns = showDialysisLane
+    ? `88px repeat(${therapistCount}, minmax(96px, 1fr)) 100px 110px`
+    : `88px repeat(${therapistCount}, minmax(96px, 1fr)) 100px`;
   gridEl.style.overflowX = 'auto';
 
   let html = '<div class="timetable-header">時間帯</div>';
@@ -184,6 +191,9 @@ export function renderTimetableGrid() {
       </div>`;
   });
   html += '<div class="timetable-header" style="background:#f0fdf4; color:#166534;">消炎鎮痛</div>';
+  if (showDialysisLane) {
+    html += '<div class="timetable-header th-dialysis" style="width:110px; background:#0284c7; color:#fff;">⚡ 透析運動</div>';
+  }
 
   const coveredUntil = {};
   therapists.forEach((t) => {
@@ -229,7 +239,24 @@ export function renderTimetableGrid() {
       const inC = aPatients.filter((p) => p.category === 'INPATIENT').length;
       bHtml = `<button class="badge-analgesia-count has-patients" data-analgesia-slot="${slot.id}"><span style="font-weight:800; font-size:0.85rem; color:#15803d;">${aCount}名</span><span style="font-size:0.65rem; color:#64748b; margin-left:4px;">入${inC}/外${aCount - inC}</span></button>`;
     }
-    html += `<div class="cell-slot analgesia-slot-cell" data-analgesia-drop="${slot.id}">${bHtml}</div></div>`;
+    html += `<div class="cell-slot analgesia-slot-cell" data-analgesia-drop="${slot.id}">${bHtml}</div>`;
+
+    if (showDialysisLane) {
+      const dPatients = getDialysisSlotPatients(scheduleState.dateStr, slot.id);
+      let dInner = `<button type="button" class="badge-dialysis-count" data-dialysis-slot="${slot.id}" style="color:#94a3b8; font-size:0.75rem;">＋</button>`;
+      if (dPatients.length > 0) {
+        const badges = dPatients.map((p) => (
+          `<span class="dialysis-name-badge" title="${sanitizeHtml(p.id)}">${sanitizeHtml(p.name || p.id)}</span>`
+        )).join('');
+        dInner = `<button type="button" class="badge-dialysis-count has-patients" data-dialysis-slot="${slot.id}">
+          <div class="dialysis-badge-stack">${badges}</div>
+          <span style="font-size:0.65rem; color:#0369a1; font-weight:700;">${dPatients.length}名</span>
+        </button>`;
+      }
+      html += `<div class="cell-slot cell-dialysis dialysis-slot-cell" data-slot-id="${slot.id}" data-dialysis-drop="${slot.id}">${dInner}</div>`;
+    }
+
+    html += '</div>';
   });
 
   gridEl.innerHTML = html;
@@ -660,6 +687,43 @@ function attachGridEventListeners(gridEl) {
           window.triggerDailyBackup();
         }
 
+        renderScheduleView();
+      }
+    });
+  });
+
+  // 透析運動並行レーン（いとう腎クリニックのみ DOM が存在）
+  gridEl.querySelectorAll('.badge-dialysis-count').forEach((b) => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openDialysisModal(b.dataset.dialysisSlot);
+    });
+  });
+  gridEl.querySelectorAll('.cell-slot[data-dialysis-drop]').forEach((cell) => {
+    cell.addEventListener('click', (e) => {
+      if (e.target.closest('.badge-dialysis-count')) return;
+      const sId = cell.dataset.dialysisDrop || cell.dataset.slotId;
+      if (sId) openDialysisModal(sId);
+    });
+    cell.addEventListener('dragover', (e) => e.preventDefault());
+    cell.addEventListener('drop', (e) => {
+      e.preventDefault();
+      let pId = e.dataTransfer.getData('text/plain');
+      try {
+        const d = JSON.parse(e.dataTransfer.getData('application/json'));
+        if (d?.patientId) pId = d.patientId;
+      } catch (_) { /* ignore */ }
+      const sId = cell.dataset.dialysisDrop;
+      if (pId && sId && !pId.includes(':')) {
+        const added = addDialysisPatient(scheduleState.dateStr, sId, pId);
+        if (!added) {
+          renderScheduleView();
+          return;
+        }
+        showToast('透析運動加算に患者を追加しました', 'success');
+        if (typeof window.triggerDailyBackup === 'function') {
+          window.triggerDailyBackup();
+        }
         renderScheduleView();
       }
     });

@@ -51,10 +51,18 @@ function collectFacilityBillingFromMonthSchedule(patientId, year, month, daysInM
   for (let d = 1; d <= daysInMonth; d += 1) {
     const dayStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     const schedule = getDailySchedule(dayStr);
-    Object.values(schedule || {}).forEach((slotsMap) => {
+    Object.entries(schedule || {}).forEach(([key, slotsMap]) => {
+      // 透析並行レーン: slotId → patientId[]
+      if (key === 'dialysis' && slotsMap && typeof slotsMap === 'object' && !Array.isArray(slotsMap)) {
+        Object.values(slotsMap).forEach((ids) => {
+          if (!Array.isArray(ids) || !ids.includes(pId)) return;
+          if (!dailyDialysis[d]) dailyDialysis[d] = true;
+          totalDialysisCount += 1;
+        });
+        return;
+      }
       if (!slotsMap || typeof slotsMap !== 'object') return;
-      // analgesia 配列などはスキップ
-      if (Array.isArray(slotsMap)) return;
+      if (key === 'analgesia' || Array.isArray(slotsMap)) return;
       Object.values(slotsMap).forEach((item) => {
         if (!item || item.patientId !== pId) return;
         if (item.isDialysisReha === true) {
@@ -65,9 +73,9 @@ function collectFacilityBillingFromMonthSchedule(patientId, year, month, daysInM
         }
         if (item.orthoticsBilling && typeof item.orthoticsBilling === 'object') {
           const meta = resolveOrthoticsMeta(item.orthoticsBilling.typeCode);
-          const key = `${dayStr}|${item.orthoticsBilling.typeCode || ''}|${item.orthoticsBilling.doctorName || ''}`;
-          if (!orthoticsByKey.has(key)) {
-            orthoticsByKey.set(key, {
+          const keyOrtho = `${dayStr}|${item.orthoticsBilling.typeCode || ''}|${item.orthoticsBilling.doctorName || ''}`;
+          if (!orthoticsByKey.has(keyOrtho)) {
+            orthoticsByKey.set(keyOrtho, {
               date: dayStr,
               typeCode: String(item.orthoticsBilling.typeCode || ''),
               doctorName: String(item.orthoticsBilling.doctorName || '').trim(),

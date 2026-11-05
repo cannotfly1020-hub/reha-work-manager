@@ -417,6 +417,62 @@ border-color: #86efac;
 background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
 }
 
+.dialysis-slot-cell,
+.cell-dialysis {
+display: flex;
+align-items: center;
+justify-content: center;
+padding: 3px;
+background: #f0f9ff;
+}
+.badge-dialysis-count {
+width: 100%;
+min-height: 44px;
+background: #f1f5f9;
+border: 1px solid #bae6fd;
+border-radius: 6px;
+display: flex;
+flex-direction: column;
+align-items: center;
+justify-content: center;
+cursor: pointer;
+transition: all 0.15s ease;
+padding: 3px 4px;
+gap: 2px;
+}
+.badge-dialysis-count:hover {
+background: #e0f2fe;
+border-color: #7dd3fc;
+transform: translateY(-1px);
+}
+.badge-dialysis-count.has-patients {
+background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
+border-color: #38bdf8;
+}
+.dialysis-badge-stack {
+display: flex;
+flex-direction: column;
+align-items: stretch;
+gap: 2px;
+width: 100%;
+max-height: 72px;
+overflow-y: auto;
+}
+.dialysis-name-badge {
+display: block;
+font-size: 0.68rem;
+font-weight: 700;
+color: #0369a1;
+background: #fff;
+border: 1px solid #7dd3fc;
+border-radius: 3px;
+padding: 1px 3px;
+text-align: center;
+white-space: nowrap;
+overflow: hidden;
+text-overflow: ellipsis;
+}
+
 .reha-slot-card {
 position: absolute;
 top: 2px;
