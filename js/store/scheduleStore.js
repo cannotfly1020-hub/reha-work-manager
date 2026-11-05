@@ -273,6 +273,16 @@ export function setScheduleSlot(dateStr, therapistId, slotId, slotData) {
     record.slotsCount = units;
   } else if (record.patientId) {
     record.itemType = 'PATIENT';
+    // 病院B専用加算（施設フラグ有効時のみ slotModal から渡される）
+    if (slotData.isDialysisReha === true) {
+      record.isDialysisReha = true;
+    }
+    if (slotData.orthoticsBilling && typeof slotData.orthoticsBilling === 'object') {
+      record.orthoticsBilling = {
+        typeCode: String(slotData.orthoticsBilling.typeCode || ''),
+        doctorName: String(slotData.orthoticsBilling.doctorName || '').trim()
+      };
+    }
   }
 
   const prev = current[therapistId]?.[slotId] || null;

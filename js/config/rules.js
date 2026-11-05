@@ -279,6 +279,20 @@ export const THERAPISTS = [
   { id: 'C', name: 'PT C', label: 'PT C' }
 ];
 
+/**
+ * 装具採型採寸料マスター（病院B: hasOrthoticsBilling）
+ * 透析時運動指導等加算点数も含む
+ */
+export const ORTHOTICS_RULES = {
+  TYPES: [
+    { code: 'ORTHO_LONG_LIMB', label: '長肢装具 採型採寸料', points: 1000 },
+    { code: 'ORTHO_SHORT_LIMB', label: '短肢装具 採型採寸料', points: 650 },
+    { code: 'ORTHO_TRUNK', label: '体幹装具 採型採寸料', points: 1000 },
+    { code: 'ORTHO_SHOE', label: '靴型装具 採寸料', points: 400 }
+  ],
+  DIALYSIS_REHA_POINTS: 75
+};
+
 // 単位数別 UI 幾何学パラメータ＆ハイブリッド配色（パターンC 第2層）
 export const UNIT_CONFIG = {
   1: {

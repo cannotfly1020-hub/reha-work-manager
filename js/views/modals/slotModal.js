@@ -3,6 +3,7 @@
 // ★検索デバウンス・先頭候補自動選択・Enterキー即確定対応
 
 import { TIME_SLOTS } from '../../config/rules.js';
+import { isFeatureEnabled } from '../../config/facilityConfig.js';
 import { sanitizeHtml, safeParseInt } from '../../core/dataNormalizer.js';
 import { getAllTherapists, getActiveTherapists } from '../../store/therapistStore.js';
 import { getPatientById, searchPatients, updatePatientPlanStatus } from '../../store/patientStore.js';
@@ -164,11 +165,86 @@ export function setupSlotModalListeners(onUpdate) {
     });
   });
 
+  // 病院B: 装具チェックONで詳細欄を表示
+  document.getElementById('slotOrthoticsCheck')?.addEventListener('change', () => {
+    syncOrthoticsDetailsVisibility();
+  });
+
   // コマ保存処理
   form?.addEventListener('submit', (e) => {
     e.preventDefault();
     handleSlotFormSubmit();
   });
+}
+
+/**
+ * 施設フラグに応じて病院B専用入力コンテナの表示を切替（病院Aは常に非表示）
+ */
+function applyFacilitySlotBillingUi() {
+  const dialysisEl = document.getElementById('slotDialysisContainer');
+  const orthoticsEl = document.getElementById('slotOrthoticsContainer');
+  if (dialysisEl) {
+    dialysisEl.style.display = isFeatureEnabled('hasDialysisReha') ? 'block' : 'none';
+  }
+  if (orthoticsEl) {
+    orthoticsEl.style.display = isFeatureEnabled('hasOrthoticsBilling') ? 'block' : 'none';
+  }
+}
+
+function syncOrthoticsDetailsVisibility() {
+  const check = document.getElementById('slotOrthoticsCheck');
+  const details = document.getElementById('slotOrthoticsDetails');
+  if (!details) return;
+  const show = Boolean(check?.checked) && isFeatureEnabled('hasOrthoticsBilling');
+  details.style.display = show ? 'flex' : 'none';
+}
+
+/**
+ * 既存コマから病院B専用加算UIを復元
+ * @param {Object|null|undefined} currentItem
+ */
+function restoreFacilitySlotBillingFields(currentItem) {
+  const dialysisCheck = document.getElementById('slotDialysisCheck');
+  if (dialysisCheck) {
+    dialysisCheck.checked = Boolean(currentItem?.isDialysisReha) && isFeatureEnabled('hasDialysisReha');
+  }
+
+  const orthoticsCheck = document.getElementById('slotOrthoticsCheck');
+  const typeSelect = document.getElementById('slotOrthoTypeSelect');
+  const doctorInput = document.getElementById('slotOrthoDoctorInput');
+  const ortho = currentItem?.orthoticsBilling;
+  const hasOrtho = Boolean(ortho) && isFeatureEnabled('hasOrthoticsBilling');
+  if (orthoticsCheck) orthoticsCheck.checked = hasOrtho;
+  if (typeSelect) {
+    typeSelect.value = hasOrtho && ortho?.typeCode
+      ? String(ortho.typeCode)
+      : 'ORTHO_SHORT_LIMB';
+  }
+  if (doctorInput) {
+    doctorInput.value = hasOrtho && ortho?.doctorName ? String(ortho.doctorName) : '';
+  }
+  syncOrthoticsDetailsVisibility();
+}
+
+/**
+ * 保存用: 施設フラグ有効時のみ透析・装具フィールドを組み立て
+ * @returns {{ isDialysisReha?: boolean, orthoticsBilling?: { typeCode: string, doctorName: string } }}
+ */
+function collectFacilitySlotBillingFields() {
+  const out = {};
+  if (isFeatureEnabled('hasDialysisReha')) {
+    out.isDialysisReha = Boolean(document.getElementById('slotDialysisCheck')?.checked);
+  }
+  if (isFeatureEnabled('hasOrthoticsBilling')) {
+    const checked = Boolean(document.getElementById('slotOrthoticsCheck')?.checked);
+    if (checked) {
+      out.orthoticsBilling = {
+        typeCode: document.getElementById('slotOrthoTypeSelect')?.value || 'ORTHO_SHORT_LIMB',
+        doctorName: String(document.getElementById('slotOrthoDoctorInput')?.value || '').trim()
+      };
+    }
+  }
+  return out;
 }
 
 /**
@@ -342,8 +418,9 @@ function handleSlotFormSubmit() {
     clearScheduleSlot(currentDateStr, origTherapist, origSlot);
   }
 
+  const facilityBilling = collectFacilitySlotBillingFields();
   const saved = setScheduleSlot(currentDateStr, newTherapistId, newSlotId, {
-    itemType: 'PATIENT', patientId, units, note, billingPlan
+    itemType: 'PATIENT', patientId, units, note, billingPlan, ...facilityBilling
   });
   if (!saved) {
     if (typeof onScheduleUpdatedCallback === 'function') onScheduleUpdatedCallback();
@@ -489,6 +566,10 @@ export function openSlotModal(therapistId, slotId, currentItem) {
   }
 
   updateModalPatientPlanRecommendation(pId);
+
+  // 病院B専用加算UI（病院Aは display:none 維持）
+  applyFacilitySlotBillingUi();
+  restoreFacilitySlotBillingFields(currentItem);
 
   const units = currentItem?.units || 1;
   const unitsInput = document.getElementById('slotUnitsInput');

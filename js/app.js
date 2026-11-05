@@ -30,6 +30,7 @@ import { showToast } from './ui/toast.js';
 import { setupAppointmentModalListeners } from './views/modals/appointmentModal.js';
 import { initAuditLogView, renderAuditTimeline, refreshOperatorBadge } from './views/auditLogView.js';
 import { mergeAuditLogs } from './store/auditLogStore.js';
+import { isFeatureEnabled } from './config/facilityConfig.js';
 
 /** @type {ReturnType<typeof setTimeout>|null} */
 let sharedMasterSaveTimer = null;
@@ -282,9 +283,31 @@ export function renderAllViews() {
   try { refreshArchiveStatusUi(); } catch (_) { /* ignore */ }
 }
 
+/**
+ * 施設プロファイルの機能フラグに応じてナビタブを表示/非表示
+ * ※remove せず style.display のみ変更（DOM参照の副作用防止）
+ * 病院A（デフォルト）では外来予約・物品貸出とも表示のまま
+ */
+function applyFacilityNavigationFeatures() {
+  const hasApt = isFeatureEnabled('hasOutpatientReservation');
+  const hasLoan = isFeatureEnabled('hasInventoryManagement');
+
+  const aptTab = document.querySelector('.nav-tab[data-target="viewAppointmentCalendar"]');
+  if (aptTab) {
+    aptTab.style.display = hasApt ? '' : 'none';
+  }
+
+  const loanTab = document.querySelector('.nav-tab[data-target="viewLoan"]');
+  if (loanTab) {
+    loanTab.style.display = hasLoan ? '' : 'none';
+  }
+}
+
 function initNavigationTabs() {
   const tabs = document.querySelectorAll('.nav-tab');
   const panels = document.querySelectorAll('.view-panel');
+
+  applyFacilityNavigationFeatures();
 
   tabs.forEach((tab) => {
     tab.addEventListener('click', () => {

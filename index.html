@@ -539,6 +539,31 @@
           </select>
           <div id="slotPlanRecommendGuide" style="display:none; font-size:0.72rem; margin-top:6px; background:#eff6ff; border:1px solid #bfdbfe; color:#1d4ed8; padding:4px 8px; border-radius:4px;"></div>
         </div>
+
+        <!-- 病院B専用: 透析時運動加算（施設フラグ hasDialysisReha 時のみ表示） -->
+        <div id="slotDialysisContainer" style="display:none; margin-top:8px; padding:6px 10px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:4px;">
+          <label style="font-size:0.82rem; font-weight:700; color:#1e40af; display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" id="slotDialysisCheck">
+            <span>⚡ 透析時運動指導等加算 (75点) を算定</span>
+          </label>
+        </div>
+
+        <!-- 病院B専用: 装具採型採寸料（施設フラグ hasOrthoticsBilling 時のみ表示） -->
+        <div id="slotOrthoticsContainer" style="display:none; margin-top:8px; padding:8px 10px; background:#fdf4ff; border:1px solid #f5d0fe; border-radius:4px;">
+          <label style="font-size:0.82rem; font-weight:700; color:#86198f; display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" id="slotOrthoticsCheck">
+            <span>🛡️ 装具採型採寸料を算定</span>
+          </label>
+          <div id="slotOrthoticsDetails" style="display:none; margin-top:6px; flex-direction:column; gap:6px;">
+            <select id="slotOrthoTypeSelect" style="font-size:0.8rem; padding:3px; border-radius:3px; border:1px solid #d8b4fe;">
+              <option value="ORTHO_SHORT_LIMB">短肢装具 採型採寸 (650点)</option>
+              <option value="ORTHO_LONG_LIMB">長肢装具 採型採寸 (1,000点)</option>
+              <option value="ORTHO_TRUNK">体幹装具 採型採寸 (1,000点)</option>
+              <option value="ORTHO_SHOE">靴型装具 採寸 (400点)</option>
+            </select>
+            <input type="text" id="slotOrthoDoctorInput" placeholder="立会医師名 (例: 佐藤医師)" style="font-size:0.8rem; padding:3px 6px; border-radius:3px; border:1px solid #d8b4fe;">
+          </div>
+        </div>
         </div>
 
         <div id="slotTaskSection" style="display:none; flex-direction:column; gap:10px;">
