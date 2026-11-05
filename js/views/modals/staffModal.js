@@ -32,6 +32,7 @@ import {
   TOTAL_SLOT_COUNT
 } from '../../config/rules.js';
 import { renderAppointmentCalendarView } from '../appointmentCalendarView.js';
+import { getCurrentFacilityId, setFacilityProfile } from '../../config/facilityConfig.js';
 
 let onStaffUpdatedCallback = null;
 
@@ -306,6 +307,12 @@ export function setupStaffSettingsModalListeners(onUpdate) {
     fillFacilityHoursForm(getSavedFacilityHours());
     fillOutpatientHoursForm(getSavedOutpatientHours());
 
+    // ★施設プロファイル（未設定時は HOSPITAL_A）
+    const facilitySelect = document.getElementById('settingFacilityProfileSelect');
+    if (facilitySelect) {
+      facilitySelect.value = getCurrentFacilityId() || 'HOSPITAL_A';
+    }
+
     modal?.classList.add('active');
   });
 
@@ -459,7 +466,26 @@ export function setupStaffSettingsModalListeners(onUpdate) {
     const assistantSaved = saveAssistantSettings(a1Val, a2Val);
     if (!staffSaved || !assistantSaved) return;
 
+    // ★施設プロファイル切替（変更時のみ保存→全画面再読込でタブ/モーダル反映）
+    const facilitySelect = document.getElementById('settingFacilityProfileSelect');
+    const selectedFacilityId = facilitySelect?.value || 'HOSPITAL_A';
+    const prevFacilityId = getCurrentFacilityId();
+    const facilityChanged = selectedFacilityId !== prevFacilityId;
+    if (facilityChanged) {
+      const ok = setFacilityProfile(selectedFacilityId);
+      if (!ok) {
+        showToast('施設プロファイルの保存に失敗しました', 'error');
+        return;
+      }
+    }
+
     closeModal();
+    if (facilityChanged) {
+      showToast('施設プロファイルを切り替えました。画面を再読込します…', 'success');
+      window.location.reload();
+      return;
+    }
+
     showToast(
       `保存しました（時間割: 計${reloaded.total}コマ／外来: 計${aptReloaded.total}コマ）`,
       'success'

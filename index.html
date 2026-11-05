@@ -914,6 +914,20 @@
           </div>
         </div>
 
+        <!-- 施設プロファイル設定エリア -->
+        <div class="staff-setting-section" style="margin-bottom: 16px; padding: 12px; background: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 6px;">
+          <label style="display: block; font-size: 0.88rem; font-weight: 800; color: #0f172a; margin-bottom: 6px;">
+            🏥 施設プロファイル切替（病院機能設定）
+          </label>
+          <select id="settingFacilityProfileSelect" style="width: 100%; padding: 6px 10px; font-size: 0.85rem; font-weight: 700; border: 1px solid #94a3b8; border-radius: 4px; background: #fff; color: #1e293b;">
+            <option value="HOSPITAL_A">🏥 病院A（自院：外来予約あり・物品貸出あり・消炎鎮痛あり）</option>
+            <option value="HOSPITAL_B">🏥 病院B（他院：透析時運動加算あり・装具採型あり・消炎鎮痛あり）</option>
+          </select>
+          <div style="margin-top: 5px; font-size: 0.72rem; color: #64748b; line-height: 1.3;">
+            ※変更して保存すると、選択した病院の専用機能（タブ・帳票・入力項目）に自動連動して再読込されます。
+          </div>
+        </div>
+
         <!-- ★施設リハビリ提供時間設定（本日の時間割専用） -->
         <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:6px; padding:10px; margin-top:4px;">
           <div style="font-size:0.8rem; font-weight:800; color:#0c4a6e; margin-bottom:6px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
