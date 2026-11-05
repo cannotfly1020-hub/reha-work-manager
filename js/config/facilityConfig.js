@@ -7,12 +7,13 @@ const DEFAULT_FACILITY_ID = 'HOSPITAL_A';
 
 /**
  * 施設プロファイルマスター
- * @type {Record<string, { id: string, name: string, features: Record<string, boolean> }>}
+ * @type {Record<string, { id: string, name: string, shortName: string, features: Record<string, boolean> }>}
  */
 export const FACILITY_PROFILES = {
   HOSPITAL_A: {
     id: 'HOSPITAL_A',
-    name: '病院A（外来予約・物品あり）',
+    name: '伊藤内科（外来予約・物品あり）',
+    shortName: '伊藤内科',
     features: {
       hasOutpatientReservation: true,   // 外来予約あり
       hasInventoryManagement: true,     // 物品管理あり
@@ -23,7 +24,8 @@ export const FACILITY_PROFILES = {
   },
   HOSPITAL_B: {
     id: 'HOSPITAL_B',
-    name: '病院B（透析運動加算・装具採型あり）',
+    name: 'いとう腎クリニック（透析運動加算・装具採型あり）',
+    shortName: 'いとう腎クリニック',
     features: {
       hasOutpatientReservation: false,  // 外来予約なし
       hasInventoryManagement: false,    // 物品管理なし
@@ -50,7 +52,7 @@ export function getCurrentFacilityId() {
 
 /**
  * 現在の施設プロファイルオブジェクトを返す。
- * @returns {{ id: string, name: string, features: Record<string, boolean> }}
+ * @returns {{ id: string, name: string, shortName: string, features: Record<string, boolean> }}
  */
 export function getCurrentFacilityProfile() {
   const id = getCurrentFacilityId();
