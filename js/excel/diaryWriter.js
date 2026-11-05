@@ -1,13 +1,25 @@
 // js/excel/diaryWriter.js
 // 業務日誌Excel生成層（原本R8.6準拠 / 検印欄 / 動的スタッフ名・リハ助手名完全反映 / 当日までの累積シート生成 / 外来0名・公休スマート自動記録 / 右側テーブル本日収益金額¥完全連携 / A4横用紙完全均整・堂々美麗レイアウト版）
 
-import { REHA_RULES, TIME_SLOTS } from '../config/rules.js';
+import { REHA_RULES, TIME_SLOTS, ORTHOTICS_RULES } from '../config/rules.js';
+import { isFeatureEnabled } from '../config/facilityConfig.js';
 import { isAfternoonSlot } from '../core/timeSlotGenerator.js';
 import { evaluateEarlyBonusPhase, getDailyBasePoints } from '../core/deadlineCalc.js';
 import { getDailySchedule } from '../store/scheduleStore.js';
 import { getPatientById } from '../store/patientStore.js';
 import { getAllTherapists, THERAPIST_STATUS } from '../store/therapistStore.js';
 import { getAssistantSettings } from '../store/assistantStore.js';
+
+/**
+ * 装具種別コード → 表示ラベル・点数
+ * @param {string} typeCode
+ * @returns {{ label: string, points: number }}
+ */
+function resolveOrthoticsType(typeCode) {
+  const found = (ORTHOTICS_RULES.TYPES || []).find((t) => t.code === typeCode);
+  if (found) return { label: found.label, points: Number(found.points) || 0 };
+  return { label: String(typeCode || '装具'), points: 0 };
+}
 
 const STYLES = {
   headerNavy: {
@@ -175,6 +187,10 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
     let planCount = 0;
     let planYen = 0;
 
+    /** @type {Array<{ patientName: string, typeLabel: string, points: number, doctorName: string, therapistName: string }>} */
+    const orthoticsRecords = [];
+    let dialysisRehaCount = 0;
+
     activeStaffList.forEach((t) => {
       const slots = schedule[t.id] || {};
       Object.values(slots).forEach((item) => {
@@ -185,6 +201,21 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
           if (ptStats[t.id]) {
             ptStats[t.id].units += u;
             ptStats[t.id].pSet.add(item.patientId);
+          }
+
+          // いとう腎クリニック専用: 透析時運動指導等加算・装具採型採寸の実績抽出
+          if (item.isDialysisReha === true) {
+            dialysisRehaCount += 1;
+          }
+          if (item.orthoticsBilling && typeof item.orthoticsBilling === 'object') {
+            const orthoMeta = resolveOrthoticsType(item.orthoticsBilling.typeCode);
+            orthoticsRecords.push({
+              patientName: p?.name || item.patientId || '不明',
+              typeLabel: orthoMeta.label,
+              points: orthoMeta.points,
+              doctorName: String(item.orthoticsBilling.doctorName || '').trim() || '—',
+              therapistName: t.name || t.id
+            });
           }
 
           const isInput = p?.category === 'INPATIENT';
@@ -317,7 +348,17 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
     const aOutCount = aPatients.length - aInCount;
     const aTotalYen = aPatients.length * 35 * 10;
 
-    const grandTotalYen = inTotalYen + outTotalYen + aTotalYen + planYen;
+    // いとう腎クリニック専用加算（伊藤内科はフラグ false のため 0 のまま）
+    const showDialysis = isFeatureEnabled('hasDialysisReha');
+    const showOrthotics = isFeatureEnabled('hasOrthoticsBilling');
+    const dialysisPts = Number(ORTHOTICS_RULES.DIALYSIS_REHA_POINTS) || 75;
+    const dialysisRehaYen = showDialysis ? dialysisRehaCount * dialysisPts * 10 : 0;
+    const orthoticsPointsSum = orthoticsRecords.reduce((sum, r) => sum + (Number(r.points) || 0), 0);
+    const orthoticsTotalYen = showOrthotics ? orthoticsPointsSum * 10 : 0;
+    const orthoticsCount = showOrthotics ? orthoticsRecords.length : 0;
+
+    const grandTotalYen = inTotalYen + outTotalYen + aTotalYen + planYen
+      + dialysisRehaYen + orthoticsTotalYen;
     const fmtYen = (val) => (val > 0 ? `¥${val.toLocaleString()}` : '¥0');
 
     const summaryGrid = [
@@ -330,9 +371,30 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
       ['【外来】廃用症候群(Ⅲ)', `${breakdown.OUT.DISUSE.u} 単位`, `${breakdown.OUT.DISUSE.p.size} 名`, fmtYen(breakdown.OUT.DISUSE.yen)],
       ['【外来】小計', `${outUnits} 単位`, `${outPatients} 名`, fmtYen(outTotalYen)],
       ['消炎鎮痛処置 (物療)', `${aPatients.length} 件`, `${aPatients.length} 名`, fmtYen(aTotalYen)],
-      ['総合計画書策定件数', `${planCount} 件`, '-', fmtYen(planYen)],
-      ['個別リハ 合計実績', `${inUnits + outUnits} 単位`, `${inPatients + outPatients} 名`, fmtYen(grandTotalYen)]
+      ['総合計画書策定件数', `${planCount} 件`, '-', fmtYen(planYen)]
     ];
+    if (showDialysis) {
+      summaryGrid.push([
+        '透析時運動指導等加算',
+        `${dialysisRehaCount} 件`,
+        '-',
+        fmtYen(dialysisRehaYen)
+      ]);
+    }
+    if (showOrthotics) {
+      summaryGrid.push([
+        '装具採型採寸料',
+        `${orthoticsCount} 件`,
+        '-',
+        fmtYen(orthoticsTotalYen)
+      ]);
+    }
+    summaryGrid.push([
+      '個別リハ 合計実績',
+      `${inUnits + outUnits} 単位`,
+      `${inPatients + outPatients} 名`,
+      fmtYen(grandTotalYen)
+    ]);
 
     summaryGrid.forEach((row, idx) => {
       const r = 4 + idx;
@@ -374,21 +436,36 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
       autoNoteText = '※ 本日は外来患者来院なし（配置・待機・院内リハ業務実施）';
     }
 
-    for (let rOffset = 1; rOffset <= 4; rOffset++) {
+    // いとう腎クリニック: 装具採型採寸の実績を記事欄へ自動印字（伊藤内科は空行維持）
+    const orthoticsNoteLines = (showOrthotics && orthoticsRecords.length > 0)
+      ? orthoticsRecords.map((r) => (
+        `※ 【装具採型採寸】${r.patientName} 様（${r.typeLabel} ${r.points}点 / 立会: ${r.doctorName} / 担当: ${r.therapistName}）`
+      ))
+      : [];
+    const noteBodyRowCount = Math.max(4, 1 + orthoticsNoteLines.length);
+
+    for (let rOffset = 1; rOffset <= noteBodyRowCount; rOffset++) {
       const nr = noteStartRow + rOffset;
-      const rowText = (rOffset === 1 && autoNoteText) ? autoNoteText : '';
+      let rowText = '';
+      let bold = false;
+      if (rOffset === 1 && autoNoteText) {
+        rowText = autoNoteText;
+        bold = true;
+      } else if (orthoticsNoteLines.length > 0 && rOffset >= 2) {
+        rowText = orthoticsNoteLines[rOffset - 2] || '';
+      }
       setStyledCell(ws, nr, 0, rowText, {
         border: thinBorder('CBD5E1'),
         fill: { fgColor: { rgb: 'FFFFFF' } },
-        font: { name: 'Meiryo UI', sz: 9.5, color: { rgb: '334155' }, bold: Boolean(autoNoteText && rOffset === 1) },
-        alignment: { vertical: 'center' }
+        font: { name: 'Meiryo UI', sz: 9.5, color: { rgb: '334155' }, bold },
+        alignment: { vertical: 'center', wrapText: true }
       });
       for (let c = 1; c <= 7; c++) {
         setStyledCell(ws, nr, c, '', { border: thinBorder('CBD5E1'), fill: { fgColor: { rgb: 'FFFFFF' } } });
       }
     }
 
-    const maxRowIndex = noteStartRow + 4;
+    const maxRowIndex = noteStartRow + noteBodyRowCount;
 
     // 各行の高さを一括最適化（A4横520ptを満たすバランス設計）
     const finalRowHeights = [];
