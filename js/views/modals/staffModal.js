@@ -320,6 +320,25 @@ export function setupStaffSettingsModalListeners(onUpdate) {
   btnClose?.addEventListener('click', closeModal);
   btnCloseX?.addEventListener('click', closeModal);
 
+  // ★施設プロファイル: セレクト変更で即保存・再読込（他バリデーションに依存しない）
+  const facilitySelectEl = document.getElementById('settingFacilityProfileSelect');
+  facilitySelectEl?.addEventListener('change', (e) => {
+    const newFacilityId = e.target?.value;
+    const currentId = getCurrentFacilityId();
+    if (newFacilityId && newFacilityId !== currentId) {
+      const ok = setFacilityProfile(newFacilityId);
+      if (!ok) {
+        showToast('施設プロファイルの保存に失敗しました', 'error');
+        e.target.value = currentId || 'HOSPITAL_A';
+        return;
+      }
+      showToast('施設プロファイルを切り替えました。画面を再読込します…', 'info');
+      setTimeout(() => {
+        window.location.reload();
+      }, 200);
+    }
+  });
+
   searchInput?.addEventListener('input', () => {
     renderStaffSettingsFields();
   });
@@ -398,6 +417,26 @@ export function setupStaffSettingsModalListeners(onUpdate) {
 
   form?.addEventListener('submit', (e) => {
     e.preventDefault();
+
+    // ★施設プロファイル切替を最優先で処理（他の入力エラーに巻き込まれないようガード）
+    const facilitySelect = document.getElementById('settingFacilityProfileSelect');
+    if (facilitySelect) {
+      const selectedFacilityId = facilitySelect.value;
+      const prevFacilityId = getCurrentFacilityId();
+      if (selectedFacilityId && selectedFacilityId !== prevFacilityId) {
+        const ok = setFacilityProfile(selectedFacilityId);
+        if (!ok) {
+          showToast('施設プロファイルの保存に失敗しました', 'error');
+          return;
+        }
+        showToast('施設プロファイルを切り替えました。画面を再読込します…', 'info');
+        setTimeout(() => {
+          window.location.reload();
+        }, 200);
+        return;
+      }
+    }
+
     const updateMap = {};
 
     form.querySelectorAll('.staff-item-row').forEach((row) => {
@@ -466,26 +505,7 @@ export function setupStaffSettingsModalListeners(onUpdate) {
     const assistantSaved = saveAssistantSettings(a1Val, a2Val);
     if (!staffSaved || !assistantSaved) return;
 
-    // ★施設プロファイル切替（変更時のみ保存→全画面再読込でタブ/モーダル反映）
-    const facilitySelect = document.getElementById('settingFacilityProfileSelect');
-    const selectedFacilityId = facilitySelect?.value || 'HOSPITAL_A';
-    const prevFacilityId = getCurrentFacilityId();
-    const facilityChanged = selectedFacilityId !== prevFacilityId;
-    if (facilityChanged) {
-      const ok = setFacilityProfile(selectedFacilityId);
-      if (!ok) {
-        showToast('施設プロファイルの保存に失敗しました', 'error');
-        return;
-      }
-    }
-
     closeModal();
-    if (facilityChanged) {
-      showToast('施設プロファイルを切り替えました。画面を再読込します…', 'success');
-      window.location.reload();
-      return;
-    }
-
     showToast(
       `保存しました（時間割: 計${reloaded.total}コマ／外来: 計${aptReloaded.total}コマ）`,
       'success'
