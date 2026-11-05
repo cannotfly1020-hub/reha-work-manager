@@ -3,7 +3,8 @@
 // （入院日・算定期限・早期加算期限・介護認定なし表記・評価料種別・PT/OT日別分離）
 
 import { sanitizeHtml } from '../core/dataNormalizer.js';
-import { REHA_RULES } from '../config/rules.js';
+import { REHA_RULES, ORTHOTICS_RULES } from '../config/rules.js';
+import { isFeatureEnabled } from '../config/facilityConfig.js';
 import {
   calculatePatientDeadlines,
   checkMonth13UnitsViolation,
@@ -12,10 +13,75 @@ import {
 import { buildDailyUnitsByRole, getTherapistRole } from '../core/therapistRoleUtil.js';
 import { getPatientById } from '../store/patientStore.js';
 import { getAllTherapists, getTherapistById } from '../store/therapistStore.js';
-import { aggregateFromAppSchedule } from '../store/scheduleStore.js';
+import { aggregateFromAppSchedule, getDailySchedule } from '../store/scheduleStore.js';
 import { loadMonthOnDemand } from '../store/archiveManager.js';
 import { showToast } from '../ui/toast.js';
 import { formatOperatorLabel } from '../store/operatorStore.js';
+
+/**
+ * 装具種別コード → 表示ラベル・点数
+ * @param {string} typeCode
+ * @returns {{ label: string, points: number }}
+ */
+function resolveOrthoticsMeta(typeCode) {
+  const found = (ORTHOTICS_RULES.TYPES || []).find((t) => t.code === typeCode);
+  if (found) return { label: found.label, points: Number(found.points) || 0 };
+  return { label: String(typeCode || '装具'), points: 0 };
+}
+
+/**
+ * 当月スケジュールから患者の透析加算・装具採型実績を収集
+ * （aggregate slots に含まれない施設専用フィールドを日別 store から直接読む）
+ * @param {string} patientId
+ * @param {number} year
+ * @param {number} month
+ * @param {number} daysInMonth
+ * @returns {{ dailyDialysis: Record<number, boolean>, totalDialysisCount: number, orthoticsByKey: Map<string, object> }}
+ */
+function collectFacilityBillingFromMonthSchedule(patientId, year, month, daysInMonth) {
+  /** @type {Record<number, boolean>} */
+  const dailyDialysis = {};
+  let totalDialysisCount = 0;
+  /** @type {Map<string, { date: string, typeCode: string, doctorName: string, points: number, label: string }>} */
+  const orthoticsByKey = new Map();
+  const y = Number(year);
+  const m = Number(month);
+  const pId = String(patientId || '');
+
+  for (let d = 1; d <= daysInMonth; d += 1) {
+    const dayStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const schedule = getDailySchedule(dayStr);
+    Object.values(schedule || {}).forEach((slotsMap) => {
+      if (!slotsMap || typeof slotsMap !== 'object') return;
+      // analgesia 配列などはスキップ
+      if (Array.isArray(slotsMap)) return;
+      Object.values(slotsMap).forEach((item) => {
+        if (!item || item.patientId !== pId) return;
+        if (item.isDialysisReha === true) {
+          if (!dailyDialysis[d]) {
+            dailyDialysis[d] = true;
+          }
+          totalDialysisCount += 1;
+        }
+        if (item.orthoticsBilling && typeof item.orthoticsBilling === 'object') {
+          const meta = resolveOrthoticsMeta(item.orthoticsBilling.typeCode);
+          const key = `${dayStr}|${item.orthoticsBilling.typeCode || ''}|${item.orthoticsBilling.doctorName || ''}`;
+          if (!orthoticsByKey.has(key)) {
+            orthoticsByKey.set(key, {
+              date: dayStr,
+              typeCode: String(item.orthoticsBilling.typeCode || ''),
+              doctorName: String(item.orthoticsBilling.doctorName || '').trim(),
+              points: meta.points,
+              label: meta.label
+            });
+          }
+        }
+      });
+    });
+  }
+
+  return { dailyDialysis, totalDialysisCount, orthoticsByKey };
+}
 
 /**
  * YYYY-MM-DD → YYYY/MM/DD（空は —）
@@ -137,6 +203,14 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
   const earlyTotal = entry?.totalEarlyUnits || 0;
   const analgesiaDays = entry?.totalAnalgesiaDays || 0;
 
+  const hasDialysis = isFeatureEnabled('hasDialysisReha');
+  const hasOrthotics = isFeatureEnabled('hasOrthoticsBilling');
+  const facilityBilling = (hasDialysis || hasOrthotics)
+    ? collectFacilityBillingFromMonthSchedule(pId, y, m, daysInMonth)
+    : { dailyDialysis: {}, totalDialysisCount: 0, orthoticsByKey: new Map() };
+  const dailyDialysis = facilityBilling.dailyDialysis;
+  const totalDialysisCount = facilityBilling.totalDialysisCount;
+
   const isAnalgesia = patient.diseaseType === 'ANALGESIA';
   const isOut = patient.category === 'OUTPATIENT';
   const catLabel = isAnalgesia ? '消炎鎮痛' : (isOut ? '外来' : '入院');
@@ -232,6 +306,7 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
   let totalCells = '';
   let earlyCells = '';
   let analgesiaCells = '';
+  let dialysisCells = '';
   for (let d = 1; d <= 31; d += 1) {
     if (d > daysInMonth) {
       ptCells += '<td class="empty-day">-</td>';
@@ -240,6 +315,7 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
       totalCells += '<td class="empty-day">-</td>';
       earlyCells += '<td class="empty-day">-</td>';
       analgesiaCells += '<td class="empty-day">-</td>';
+      dialysisCells += '<td class="empty-day">-</td>';
       continue;
     }
     const ptU = dailyPt[d] || 0;
@@ -248,6 +324,7 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
     const totU = (dailyUnits[d] || 0) || (ptU + otU + stU);
     const eu = dailyEarly[d] || 0;
     const au = dailyAnalgesia[d] || 0;
+    const hasDialysisDay = Boolean(dailyDialysis[d]);
     const exitDay = exitDate ? Number(String(exitDate).slice(8, 10)) : 0;
     const exitMonthMatch = exitDate && exitDate.startsWith(`${y}-${String(m).padStart(2, '0')}`);
     const afterExit = exitMonthMatch && exitDay > 0 && d > exitDay;
@@ -259,7 +336,20 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
     totalCells += `<td class="${cellCls}">${totU > 0 ? `<strong>${totU}</strong>` : '<span class="dash">-</span>'}</td>`;
     earlyCells += `<td class="${cellCls}">${eu > 0 ? `<strong class="early">${eu}</strong>` : '<span class="dash">-</span>'}</td>`;
     analgesiaCells += `<td class="${cellCls}">${au > 0 ? '<strong class="analg">●</strong>' : '<span class="dash">-</span>'}</td>`;
+    dialysisCells += `<td class="${cellCls}">${hasDialysisDay ? '<strong class="dialysis" style="color:#2563eb;">⚡</strong>' : '<span class="dash">-</span>'}</td>`;
   }
+
+  const dialysisMatrixRow = hasDialysis ? `
+        <tr>
+          <td class="row-label">透析加算</td>
+          ${dialysisCells}
+        </tr>` : '';
+
+  const dialysisKpiHtml = hasDialysis ? `
+      <div class="kpi">
+        <div class="k-label">透析加算</div>
+        <div class="k-value">${totalDialysisCount}</div>
+      </div>` : '';
 
   const stMatrixRow = showStRow ? `
         <tr>
@@ -276,6 +366,47 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
   const shownSlots = detailSlots.slice(0, maxDetailRows);
   const omitted = Math.max(0, detailSlots.length - shownSlots.length);
 
+  /** 明細の評価料欄: 計画書 +（いとう腎クリニック時）装具・透析 */
+  function buildDetailEvalLabel(s) {
+    if (s.isAnalgesia) return '—';
+    const parts = [];
+    const plan = resolveBillingPlanShort(s.billingPlan);
+    if (plan && plan !== '—') parts.push(plan);
+    if (hasDialysis && s.isDialysisReha === true) {
+      const pts = Number(ORTHOTICS_RULES.DIALYSIS_REHA_POINTS) || 75;
+      parts.push(`透析加算(${pts}点)`);
+    }
+    if (hasOrthotics && s.orthoticsBilling && typeof s.orthoticsBilling === 'object') {
+      const meta = resolveOrthoticsMeta(s.orthoticsBilling.typeCode);
+      const doctor = String(s.orthoticsBilling.doctorName || '').trim();
+      const shortLabel = String(meta.label || '装具').replace(/\s*採型採寸料?$/, '') || '装具';
+      parts.push(doctor
+        ? `${shortLabel}(${meta.points}点)/立会:${doctor}`
+        : `${shortLabel}(${meta.points}点)`);
+    }
+    return parts.length ? parts.join(' / ') : '—';
+  }
+
+  // 明細用に日別ストアの施設専用フィールドをスロットへマージ
+  const facilitySlotExtras = new Map();
+  if (hasDialysis || hasOrthotics) {
+    for (let d = 1; d <= daysInMonth; d += 1) {
+      const dayStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const schedule = getDailySchedule(dayStr);
+      Object.entries(schedule || {}).forEach(([tId, slotsMap]) => {
+        if (!slotsMap || typeof slotsMap !== 'object' || Array.isArray(slotsMap)) return;
+        Object.entries(slotsMap).forEach(([slotId, item]) => {
+          if (!item || item.patientId !== pId) return;
+          if (!item.isDialysisReha && !item.orthoticsBilling) return;
+          facilitySlotExtras.set(`${dayStr}|${tId}|${slotId}`, {
+            isDialysisReha: item.isDialysisReha === true,
+            orthoticsBilling: item.orthoticsBilling || null
+          });
+        });
+      });
+    }
+  }
+
   let detailRows = '';
   shownSlots.forEach((s) => {
     const therapist = s.therapist ? getTherapistById(s.therapist) : null;
@@ -283,7 +414,9 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
     const roleSuffix = s.isAnalgesia
       ? ''
       : ` [${getTherapistRole(s.therapist || '', therapist?.name || '', therapistsMaster)}]`;
-    const plan = s.isAnalgesia ? '—' : resolveBillingPlanShort(s.billingPlan);
+    const extra = facilitySlotExtras.get(`${s.date}|${s.therapist}|${s.slotId}`) || {};
+    const enriched = { ...s, ...extra };
+    const plan = buildDetailEvalLabel(enriched);
     detailRows += `
       <tr>
         <td>${sanitizeHtml(String(s.date || '').replace(/-/g, '/'))}</td>
@@ -292,6 +425,7 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
         <td>${sanitizeHtml(plan)}</td>
       </tr>`;
   });
+
   if (shownSlots.length === 0) {
     detailRows = '<tr><td colspan="4" class="empty-msg">当月の実施明細はありません</td></tr>';
   } else if (omitted > 0) {
@@ -493,6 +627,7 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
     .matrix .dash { color: #cbd5e1; font-weight: 400; }
     .matrix .early { color: #7c3aed; }
     .matrix .analg { color: #16a34a; }
+    .matrix .dialysis { color: #2563eb; font-size: 9pt; }
     .matrix .pt { color: #1d4ed8; }
     .matrix .ot { color: #047857; }
     .matrix .st { color: #6d28d9; }
@@ -671,6 +806,7 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
         <div class="k-label">消炎来院日</div>
         <div class="k-value">${analgesiaDays}</div>
       </div>
+      ${dialysisKpiHtml}
     </div>
 
     <div class="section-title">日別実施単位マトリクス（PT / OT 分離・1〜${daysInMonth}日）</div>
@@ -707,6 +843,7 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
           <td class="row-label">消炎</td>
           ${analgesiaCells}
         </tr>
+        ${dialysisMatrixRow}
       </tbody>
     </table>
 

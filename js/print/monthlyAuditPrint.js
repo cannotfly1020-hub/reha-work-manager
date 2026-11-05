@@ -3,13 +3,36 @@
 // （正式提出用Excelとは別／カルテ・レセプト・計画書突き合わせ用）
 
 import { sanitizeHtml } from '../core/dataNormalizer.js';
-import { REHA_RULES } from '../config/rules.js';
+import { REHA_RULES, ORTHOTICS_RULES } from '../config/rules.js';
+import { isFeatureEnabled } from '../config/facilityConfig.js';
 import { calculatePatientDeadlines, evaluateEarlyBonusPhase } from '../core/deadlineCalc.js';
 import { getTherapistRole } from '../core/therapistRoleUtil.js';
 import { getEarlyBaseDate } from '../excel/sheetUtils.js';
 import { getAllTherapists, getTherapistById } from '../store/therapistStore.js';
 import { formatOperatorLabel } from '../store/operatorStore.js';
 import { showToast } from '../ui/toast.js';
+
+/** 装具種別コード → 点検表用略称 */
+const ORTHO_SHORT_LABELS = {
+  ORTHO_LONG_LIMB: '長肢',
+  ORTHO_SHORT_LIMB: '短肢',
+  ORTHO_TRUNK: '体幹',
+  ORTHO_SHOE: '靴型'
+};
+
+/**
+ * @param {string} typeCode
+ * @returns {string}
+ */
+function resolveOrthoShortLabel(typeCode) {
+  const code = String(typeCode || '');
+  if (ORTHO_SHORT_LABELS[code]) return ORTHO_SHORT_LABELS[code];
+  const found = (ORTHOTICS_RULES.TYPES || []).find((t) => t.code === code);
+  if (found?.label) {
+    return String(found.label).replace(/装具.*$/, '').replace(/採型採寸料?/, '').trim() || '装具';
+  }
+  return '装具';
+}
 
 /**
  * 患者の主担当セラピストID（マスター優先 → 当月スロット最多）
@@ -118,9 +141,13 @@ function collectEarlyAndPlanDatesFromSlots(item, opts = {}) {
   const early1Dates = [];
   const early2Dates = [];
   const planDates = [];
+  const dialysisDates = [];
+  /** @type {string[]} */
+  const orthoticsList = [];
   const seen1 = new Set();
   const seen2 = new Set();
   const seenPlan = new Set();
+  const seenDialysis = new Set();
 
   const p = item?.patient || {};
   const isIn = p.category === 'INPATIENT';
@@ -142,6 +169,24 @@ function collectEarlyAndPlanDatesFromSlots(item, opts = {}) {
         seenPlan.add(d);
         planDates.push(d);
       }
+    }
+
+    // いとう腎クリニック: 透析時運動指導等加算
+    if (s.isDialysisReha === true) {
+      const d = String(s.date);
+      if (!seenDialysis.has(d)) {
+        seenDialysis.add(d);
+        dialysisDates.push(d);
+      }
+    }
+
+    // いとう腎クリニック: 装具採型採寸
+    if (s.orthoticsBilling && typeof s.orthoticsBilling === 'object') {
+      const md = fmtMd(s.date);
+      const short = resolveOrthoShortLabel(s.orthoticsBilling.typeCode);
+      const ptsMeta = (ORTHOTICS_RULES.TYPES || []).find((t) => t.code === s.orthoticsBilling.typeCode);
+      const pts = Number(ptsMeta?.points) || 0;
+      orthoticsList.push(pts > 0 ? `${md} ${short}${pts}` : `${md} ${short}`);
     }
 
     // 早期加算算定日: 入院かつ起算日あり、単位>0 の実施日を PHASE で分類
@@ -167,7 +212,8 @@ function collectEarlyAndPlanDatesFromSlots(item, opts = {}) {
   early1Dates.sort();
   early2Dates.sort();
   planDates.sort();
-  return { early1Dates, early2Dates, planDates };
+  dialysisDates.sort();
+  return { early1Dates, early2Dates, planDates, dialysisDates, orthoticsList };
 }
 
 /**
@@ -319,6 +365,34 @@ function resolvePlanCalcLabel(planDates) {
 }
 
 /**
+ * 透析加算列ラベル（算定日 M/D 一覧、なければ -）
+ * @param {string[]} dialysisDates
+ * @returns {{ label: string, hasAny: boolean }}
+ */
+function resolveDialysisColumnLabel(dialysisDates) {
+  const list = Array.isArray(dialysisDates) ? dialysisDates : [];
+  if (!list.length) return { label: '-', hasAny: false };
+  const text = fmtMdList(list);
+  if (!text) return { label: '-', hasAny: false };
+  // 日付が多い場合は回数表記にフォールバック
+  if (list.length >= 4) {
+    return { label: `${list.length}回`, hasAny: true };
+  }
+  return { label: text, hasAny: true };
+}
+
+/**
+ * 装具採寸列ラベル（例: 5/14 短肢）
+ * @param {string[]} orthoticsList
+ * @returns {{ label: string, hasAny: boolean }}
+ */
+function resolveOrthoticsColumnLabel(orthoticsList) {
+  const list = Array.isArray(orthoticsList) ? orthoticsList : [];
+  if (!list.length) return { label: '-', hasAny: false };
+  return { label: list.join(' / '), hasAny: true };
+}
+
+/**
  * 月間点検チェックシートを印刷する
  * @param {object} options
  * @param {number} options.year
@@ -380,6 +454,9 @@ export function printMonthlyAuditSheet({
     dowHeaderCells += `<th class="d dow ${cls}">${dowLabels[dow]}</th>`;
   }
 
+  const hasDialysis = isFeatureEnabled('hasDialysisReha');
+  const hasOrthotics = isFeatureEnabled('hasOrthoticsBilling');
+
   let bodyRows = '';
   rows.forEach((item, idx) => {
     const p = item?.patient || {};
@@ -393,6 +470,12 @@ export function printMonthlyAuditSheet({
     const early1Col = resolveEarlyPhaseColumnLabel(p, auditDates.early1Dates);
     const early2Col = resolveEarlyPhaseColumnLabel(p, auditDates.early2Dates);
     const planCalc = resolvePlanCalcLabel(auditDates.planDates);
+    const dialysisCol = hasDialysis
+      ? resolveDialysisColumnLabel(auditDates.dialysisDates)
+      : null;
+    const orthoticsCol = hasOrthotics
+      ? resolveOrthoticsColumnLabel(auditDates.orthoticsList)
+      : null;
     const cat = resolveCategoryLabel(p);
     const diseaseInfo = resolveDiseaseLabel(p);
     const therapistLabel = resolveTherapistLabel(item, tid || null, therapistsMaster);
@@ -429,6 +512,13 @@ export function printMonthlyAuditSheet({
       : `<strong>${totalOwn}</strong>`;
     const diseaseCls = diseaseInfo.isDisuse ? 'meta disease disuse' : 'meta disease';
 
+    const dialysisTd = hasDialysis
+      ? `<td class="meta dialysis ${dialysisCol.hasAny ? 'ok' : 'empty'}" title="透析時運動指導等加算">${sanitizeHtml(dialysisCol.label)}</td>`
+      : '';
+    const orthoticsTd = hasOrthotics
+      ? `<td class="meta ortho ${orthoticsCol.hasAny ? 'ok' : 'empty'}" title="装具採型採寸料">${sanitizeHtml(orthoticsCol.label)}</td>`
+      : '';
+
     bodyRows += `
       <tr>
         <td class="chk"><span class="box">□</span><span class="chk-l">点検</span></td>
@@ -446,9 +536,22 @@ export function printMonthlyAuditSheet({
         ${dayCells}
         <td class="tot">${totalCell}</td>
         <td class="plan ${planCalc.hasAny ? 'ok' : 'ng'}" title="計画書算定日（billingPlan 付きスロット）">${sanitizeHtml(planCalc.label)}</td>
+        ${dialysisTd}
+        ${orthoticsTd}
         <td class="no">${idx + 1}</td>
       </tr>`;
   });
+
+  const dialysisTh = hasDialysis
+    ? '<th class="meta dialysis" rowspan="2" title="透析時運動指導等加算(75点)">透析加算</th>'
+    : '';
+  const orthoticsTh = hasOrthotics
+    ? '<th class="meta ortho" rowspan="2" title="装具採型採寸料">装具採寸</th>'
+    : '';
+  const facilityHintExtra = [
+    hasDialysis ? '「透析加算」は isDialysisReha 算定日' : '',
+    hasOrthotics ? '「装具採寸」は装具採型採寸の実施日・種別' : ''
+  ].filter(Boolean).join('／');
 
   const printedAt = new Date();
   const printedStr = `${printedAt.getFullYear()}/${String(printedAt.getMonth() + 1).padStart(2, '0')}/${String(printedAt.getDate()).padStart(2, '0')} ${String(printedAt.getHours()).padStart(2, '0')}:${String(printedAt.getMinutes()).padStart(2, '0')}`;
@@ -625,6 +728,30 @@ export function printMonthlyAuditSheet({
     }
     .plan.ok { background: #e0f2fe; color: #0369a1; }
     .plan.ng { background: #fef2f2; color: #b91c1c; }
+    .meta.dialysis {
+      width: 32px;
+      font-size: 4.5pt;
+      line-height: 1.12;
+      white-space: normal;
+      word-break: break-all;
+      text-align: center !important;
+      padding-left: 1px !important;
+      padding-right: 1px !important;
+    }
+    .meta.dialysis.ok { font-weight: 700; background: #eff6ff; color: #1e40af; }
+    .meta.dialysis.empty { color: #94a3b8; font-weight: 600; }
+    .meta.ortho {
+      width: 36px;
+      font-size: 4.5pt;
+      line-height: 1.12;
+      white-space: normal;
+      word-break: break-all;
+      text-align: center !important;
+      padding-left: 1px !important;
+      padding-right: 1px !important;
+    }
+    .meta.ortho.ok { font-weight: 700; background: #fdf4ff; color: #86198f; }
+    .meta.ortho.empty { color: #94a3b8; font-weight: 600; }
     .no { width: 14px; color: #94a3b8; font-size: 5pt; }
     .footer {
       margin-top: 4px;
@@ -664,7 +791,7 @@ export function printMonthlyAuditSheet({
     </div>
   </div>
   <div class="hint">
-    ※ 左端の「□ 点検」「□ 計画」に赤ペンでチェック。「早期加算Ⅰ／Ⅱ」は当月スロットを PHASE_1 / PHASE_2 で分類した算定日（なしは -）。「計画算定日」は billingPlan 付きスロットの実施日。日別は${therapistFocus ? '選択セラピストの当人実施単位' : '患者の個別リハ単位'}を表示。
+    ※ 左端の「□ 点検」「□ 計画」に赤ペンでチェック。「早期加算Ⅰ／Ⅱ」は当月スロットを PHASE_1 / PHASE_2 で分類した算定日（なしは -）。「計画算定日」は billingPlan 付きスロットの実施日。${facilityHintExtra ? `${facilityHintExtra}。` : ''}日別は${therapistFocus ? '選択セラピストの当人実施単位' : '患者の個別リハ単位'}を表示。
   </div>
   <table class="audit">
     <thead>
@@ -684,6 +811,8 @@ export function printMonthlyAuditSheet({
         ${dayHeaderCells}
         <th class="tot" rowspan="2">計${therapistFocus ? '<br>当/全' : ''}</th>
         <th class="plan" rowspan="2" title="billingPlan 付きスロットの実施日">計画算定日</th>
+        ${dialysisTh}
+        ${orthoticsTh}
         <th class="no" rowspan="2">#</th>
       </tr>
       <tr>
