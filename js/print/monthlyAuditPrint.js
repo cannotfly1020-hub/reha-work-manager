@@ -9,6 +9,7 @@ import { calculatePatientDeadlines, evaluateEarlyBonusPhase } from '../core/dead
 import { getTherapistRole } from '../core/therapistRoleUtil.js';
 import { getEarlyBaseDate } from '../excel/sheetUtils.js';
 import { getAllTherapists, getTherapistById } from '../store/therapistStore.js';
+import { getDailySchedule } from '../store/scheduleStore.js';
 import { formatOperatorLabel } from '../store/operatorStore.js';
 import { showToast } from '../ui/toast.js';
 
@@ -129,13 +130,14 @@ function fmtMdList(dates) {
 }
 
 /**
- * 日別スロットから早期加算Ⅰ・Ⅱ算定日および計画書算定日を収集
+ * 日別スロットから早期加算Ⅰ・Ⅱ算定日・計画書算定日・透析/装具実績を収集
  * ※個別リハExcel（individualRehaSheet.analyzePatientItem）と同じ判定:
  *   - 早期: getEarlyBaseDate + evaluateEarlyBonusPhase(…, slot.date, 'INPATIENT')
  *   - 計画: slot.billingPlan がある日の slot.date
+ * ※透析は並行レーン schedule.dialysis も直接走査（担当セラピスト絞り込みの影響を受けない）
  * @param {object} item aggregate patientMap entry
- * @param {{ therapistId?: string|null }} [opts]
- * @returns {{ early1Dates: string[], early2Dates: string[], planDates: string[] }}
+ * @param {{ therapistId?: string|null, year?: number, month?: number, daysInMonth?: number }} [opts]
+ * @returns {{ early1Dates: string[], early2Dates: string[], planDates: string[], dialysisDates: string[], orthoticsList: string[] }}
  */
 function collectEarlyAndPlanDatesFromSlots(item, opts = {}) {
   const early1Dates = [];
@@ -148,15 +150,42 @@ function collectEarlyAndPlanDatesFromSlots(item, opts = {}) {
   const seen2 = new Set();
   const seenPlan = new Set();
   const seenDialysis = new Set();
+  const seenOrtho = new Set();
 
   const p = item?.patient || {};
+  const patientId = String(p.id || '').trim();
   const isIn = p.category === 'INPATIENT';
   const baseEarlyDate = getEarlyBaseDate(p);
   const tidFilter = String(opts?.therapistId || '').trim();
   const filterTherapist = Boolean(tidFilter && tidFilter !== 'ALL');
+  const y = Number(opts?.year) || 0;
+  const m = Number(opts?.month) || 0;
+  const daysInMonth = Number(opts?.daysInMonth)
+    || (y && m ? new Date(y, m, 0).getDate() : 0);
 
   (item?.slots || []).forEach((s) => {
     if (!s || s.isAnalgesia || !s.date) return;
+
+    // 施設専用加算: 担当セラピスト絞り込みの対象外（並行レーン含む）
+    if (s.isDialysisReha === true || s.therapist === 'DIALYSIS') {
+      const d = String(s.date);
+      if (!seenDialysis.has(d)) {
+        seenDialysis.add(d);
+        dialysisDates.push(d);
+      }
+    }
+    if (s.orthoticsBilling && typeof s.orthoticsBilling === 'object') {
+      const md = fmtMd(s.date);
+      const short = resolveOrthoShortLabel(s.orthoticsBilling.typeCode);
+      const ptsMeta = (ORTHOTICS_RULES.TYPES || []).find((t) => t.code === s.orthoticsBilling.typeCode);
+      const pts = Number(ptsMeta?.points) || 0;
+      const orthoKey = `${s.date}|${s.orthoticsBilling.typeCode || ''}|${pts}`;
+      if (!seenOrtho.has(orthoKey)) {
+        seenOrtho.add(orthoKey);
+        orthoticsList.push(pts > 0 ? `${md} ${short}${pts}` : `${md} ${short}`);
+      }
+    }
+
     if (filterTherapist) {
       const sid = String(s.therapist || s.therapistId || '').trim();
       if (sid !== tidFilter) return;
@@ -169,24 +198,6 @@ function collectEarlyAndPlanDatesFromSlots(item, opts = {}) {
         seenPlan.add(d);
         planDates.push(d);
       }
-    }
-
-    // いとう腎クリニック: 透析時運動指導等加算（並行レーン集計スロット含む）
-    if (s.isDialysisReha === true || s.therapist === 'DIALYSIS') {
-      const d = String(s.date);
-      if (!seenDialysis.has(d)) {
-        seenDialysis.add(d);
-        dialysisDates.push(d);
-      }
-    }
-
-    // いとう腎クリニック: 装具採型採寸
-    if (s.orthoticsBilling && typeof s.orthoticsBilling === 'object') {
-      const md = fmtMd(s.date);
-      const short = resolveOrthoShortLabel(s.orthoticsBilling.typeCode);
-      const ptsMeta = (ORTHOTICS_RULES.TYPES || []).find((t) => t.code === s.orthoticsBilling.typeCode);
-      const pts = Number(ptsMeta?.points) || 0;
-      orthoticsList.push(pts > 0 ? `${md} ${short}${pts}` : `${md} ${short}`);
     }
 
     // 早期加算算定日: 入院かつ起算日あり、単位>0 の実施日を PHASE で分類
@@ -208,6 +219,21 @@ function collectEarlyAndPlanDatesFromSlots(item, opts = {}) {
       }
     }
   });
+
+  // 並行レーン schedule.dialysis を当月全日走査（集計スロット欠落時の保険）
+  if (patientId && y && m && daysInMonth > 0) {
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const dayStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const schedule = getDailySchedule(dayStr);
+      Object.values(schedule.dialysis || {}).forEach((ids) => {
+        if (!Array.isArray(ids) || !ids.includes(patientId)) return;
+        if (!seenDialysis.has(dayStr)) {
+          seenDialysis.add(dayStr);
+          dialysisDates.push(dayStr);
+        }
+      });
+    }
+  }
 
   early1Dates.sort();
   early2Dates.sort();
@@ -465,7 +491,10 @@ export function printMonthlyAuditSheet({
     const totalOwn = specific ? specific.totalUnits : (item.rehaTotalUnits || item.totalUnits || 0);
     const totalAll = item.rehaTotalUnits || item.totalUnits || 0;
     const auditDates = collectEarlyAndPlanDatesFromSlots(item, {
-      therapistId: therapistFocus ? tid : null
+      therapistId: therapistFocus ? tid : null,
+      year: y,
+      month: m,
+      daysInMonth
     });
     const early1Col = resolveEarlyPhaseColumnLabel(p, auditDates.early1Dates);
     const early2Col = resolveEarlyPhaseColumnLabel(p, auditDates.early2Dates);
@@ -549,7 +578,7 @@ export function printMonthlyAuditSheet({
     ? '<th class="meta ortho" rowspan="2" title="装具採型採寸料">装具採寸</th>'
     : '';
   const facilityHintExtra = [
-    hasDialysis ? '「透析加算」は isDialysisReha 算定日' : '',
+    hasDialysis ? '「透析加算」は透析並行レーン／isDialysisReha 算定日' : '',
     hasOrthotics ? '「装具採寸」は装具採型採寸の実施日・種別' : ''
   ].filter(Boolean).join('／');
 

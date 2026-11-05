@@ -1,11 +1,15 @@
 // js/excel/uketsukeWriter.js
 // 受付提出用Excelのシート組み立て
 // ★個別リハ: 物理タブ分割 ＋ 当月切替患者の通常/減算日割りマトリクス
+// ★いとう腎クリニック: 透析時運動加算・装具採型採寸の専用シートを末尾追加
 
+import { isFeatureEnabled } from '../config/facilityConfig.js';
 import { writeExecutiveSummarySheet } from './sheets/summarySheet.js';
 import { writeYearlyTrendSheet } from './sheets/yearlyTrendSheet.js';
 import { writeIndividualRehaSheets } from './sheets/individualRehaSheet.js';
 import { writeAnalgesiaDedicatedSheet } from './sheets/analgesiaSheet.js';
+import { writeDialysisRehaSheet } from './sheets/dialysisRehaSheet.js';
+import { writeOrthoticsSheet } from './sheets/orthoticsSheet.js';
 import { buildPatientMonthlyListSheet } from './sheets/patientMonthlyListSheet.js';
 
 export function generateUketsukeWorkbook(aggregated) {
@@ -26,6 +30,20 @@ export function generateUketsukeWorkbook(aggregated) {
   const analgesiaTabs = writeAnalgesiaDedicatedSheet(wb, aggregated);
   if (typeof console !== 'undefined' && console.info) {
     console.info('[uketsuke] 消炎鎮痛物理タブ:', analgesiaTabs.length ? analgesiaTabs.join(' / ') : '(該当なし)');
+  }
+
+  // いとう腎クリニック専用シート（伊藤内科ではフラグ false のためスキップ）
+  if (isFeatureEnabled('hasDialysisReha')) {
+    const dialysisTab = writeDialysisRehaSheet(wb, aggregated);
+    if (typeof console !== 'undefined' && console.info) {
+      console.info('[uketsuke] 透析時運動加算タブ:', dialysisTab || '(該当なし)');
+    }
+  }
+  if (isFeatureEnabled('hasOrthoticsBilling')) {
+    const orthoticsTab = writeOrthoticsSheet(wb, aggregated);
+    if (typeof console !== 'undefined' && console.info) {
+      console.info('[uketsuke] 装具採型採寸タブ:', orthoticsTab || '(該当なし)');
+    }
   }
 
   buildPatientMonthlyListSheet(wb, aggregated);
