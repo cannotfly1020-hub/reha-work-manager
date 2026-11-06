@@ -6,7 +6,7 @@
 "scripts": {
 "start": "electron .",
 "build:win": "electron-builder --win nsis --publish never",
-"test": "node --experimental-detect-module --test tests/deadlineCalc.test.js"
+"test": "node --experimental-detect-module --test tests/*.test.js"
 },
 "keywords": [
 "rehabilitation",
