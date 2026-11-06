@@ -21,6 +21,114 @@ let dbInstance = null;
 let initPromise = null;
 let isReady = false;
 
+/** 端末識別子（localStorage 直・共有 dump 対象外） */
+export const DEVICE_CLIENT_ID_KEY = 'reha_device_client_id';
+
+/**
+ * 自PCがローカルで変更したキー（共有差分プッシュ用）
+ * @type {Set<string>}
+ */
+const dirtyKeySet = new Set();
+
+/** pull / 内部一括適用中は dirty 追跡を抑制 */
+let suppressDirtyTrackingDepth = 0;
+
+/**
+ * dirty 追跡から除外するキー（同期メタ・端末固有・バックアップ系）
+ * @param {string} key
+ * @returns {boolean}
+ */
+function isDirtyTrackingExcludedKey(key) {
+  if (!key || typeof key !== 'string') return true;
+  if (key === META_MIGRATED) return true;
+  if (key === DEVICE_CLIENT_ID_KEY) return true;
+  if (key.startsWith('reha_autobackup_')) return true;
+  if (key.startsWith('reha_backup_folder_')) return true;
+  if (key.startsWith('reha_facility_profile')) return true;
+  if (key === 'reha_local_operator') return true;
+  if (key === 'reha_last_shared_sync_timestamp') return true;
+  if (key === 'reha_shared_key_meta_snapshot') return true;
+  return false;
+}
+
+/**
+ * @param {string} key
+ */
+function noteDirtyKey(key) {
+  if (suppressDirtyTrackingDepth > 0) return;
+  if (!key || !key.startsWith(KEY_PREFIX)) return;
+  if (isDirtyTrackingExcludedKey(key)) return;
+  dirtyKeySet.add(key);
+}
+
+/**
+ * 端末クライアントIDを取得（未設定なら PC-xxxxxxxx を生成して永続化）
+ * @returns {string}
+ */
+export function getDeviceClientId() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const existing = localStorage.getItem(DEVICE_CLIENT_ID_KEY);
+      if (existing && String(existing).trim()) {
+        return String(existing).trim();
+      }
+      const id = `PC-${Math.random().toString(36).slice(2, 10)}`;
+      localStorage.setItem(DEVICE_CLIENT_ID_KEY, id);
+      return id;
+    }
+  } catch (_) { /* ignore */ }
+  return `PC-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * dirty 追跡を一時停止して fn を実行（共有 pull 適用時など）
+ * @template T
+ * @param {() => T} fn
+ * @returns {T}
+ */
+export function runWithoutDirtyTracking(fn) {
+  suppressDirtyTrackingDepth += 1;
+  try {
+    return fn();
+  } finally {
+    suppressDirtyTrackingDepth = Math.max(0, suppressDirtyTrackingDepth - 1);
+  }
+}
+
+/**
+ * @returns {string[]}
+ */
+export function getDirtyStorageKeys() {
+  return Array.from(dirtyKeySet).sort();
+}
+
+/**
+ * @returns {Set<string>}
+ */
+export function getDirtyStorageKeySet() {
+  return dirtyKeySet;
+}
+
+export function clearDirtyStorageKeys() {
+  dirtyKeySet.clear();
+}
+
+/**
+ * @param {string} key
+ * @returns {boolean}
+ */
+export function isStorageKeyDirty(key) {
+  return dirtyKeySet.has(key);
+}
+
+/**
+ * 明示的に dirty 登録（通常は storageSet / storageRemove で自動）
+ * @param {string} key
+ */
+export function markStorageKeyDirty(key) {
+  noteDirtyKey(key);
+}
+
 /**
  * スケジュールキーをメモリに載せるかの判定関数（archiveManager が設定）
  * @type {((key: string) => boolean)|null}
@@ -293,6 +401,7 @@ export function storageSet(key, value) {
   }
 
   tryMirrorLocalStorage(key, str);
+  noteDirtyKey(key);
   return true;
 }
 
@@ -313,6 +422,7 @@ export function storageRemove(key) {
   }
 
   tryRemoveLocalStorage(key);
+  noteDirtyKey(key);
   return true;
 }
 

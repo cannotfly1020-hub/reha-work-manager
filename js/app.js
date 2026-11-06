@@ -2,9 +2,19 @@
 // 全体初期化・タブ切替自動再同期・ヘッダー＆時間割更新ボタン連動・全体再描画司令塔
 // ★起動: IndexedDB → 共有マスター(reha_shared_master.json)同期 → アーカイブ → 各画面
 // ★データ変更時: 日次バックアップ＋共有マスター自動保存
-// ★共有同期: 全消去なしのインプレース適用 ＋ 先祖返り上書きインターロック
+// ★共有同期: インプレース適用 ＋ キー単位世代(_keyMeta)差分マージ＆同時編集競合遮断
 
-import { initStorage, storageSet, storageKeys, storageRemove } from './core/storageAdapter.js';
+import {
+  initStorage,
+  storageSet,
+  storageGet,
+  storageKeys,
+  storageRemove,
+  getDeviceClientId,
+  getDirtyStorageKeys,
+  clearDirtyStorageKeys,
+  runWithoutDirtyTracking
+} from './core/storageAdapter.js';
 import {
   registerArchiveHydrationFilter,
   initArchiveManager
@@ -38,9 +48,16 @@ let sharedMasterSaveTimer = null;
 
 /** localStorage 直書き（storageAdapter 外・共有 dump 対象外） */
 const LAST_SHARED_SYNC_LS_KEY = 'reha_last_shared_sync_timestamp';
+const SHARED_KEY_META_LS_KEY = 'reha_shared_key_meta_snapshot';
 
 /** @type {number} 自PCが最後に共有マスターと同期した時刻（ms）。メモリ＋LS */
 let lastSharedSyncTimestampMs = 0;
+
+/**
+ * pull 時点のサーバー `_keyMeta` スナップショット（競合判定・rev 基準）
+ * @type {Record<string, { deviceId?: string, updatedAt?: number, rev?: number }>}
+ */
+let lastKnownSharedKeyMeta = {};
 
 try {
   if (typeof localStorage !== 'undefined') {
@@ -49,7 +66,19 @@ try {
     if (Number.isFinite(parsed) && parsed > 0) {
       lastSharedSyncTimestampMs = parsed;
     }
+    const metaRaw = localStorage.getItem(SHARED_KEY_META_LS_KEY);
+    if (metaRaw) {
+      const metaParsed = JSON.parse(metaRaw);
+      if (metaParsed && typeof metaParsed === 'object') {
+        lastKnownSharedKeyMeta = metaParsed;
+      }
+    }
   }
+} catch (_) { /* ignore */ }
+
+// 起動時に端末IDを確定（未設定なら生成）
+try {
+  getDeviceClientId();
 } catch (_) { /* ignore */ }
 
 /**
@@ -104,8 +133,21 @@ function recordLastSharedSyncTimestamp(value) {
 }
 
 /**
+ * サーバー `_keyMeta` をローカルスナップショットとして保持
+ * @param {Object|null|undefined} dump
+ */
+function adoptSharedKeyMetaFromDump(dump) {
+  const src = dump && dump._keyMeta && typeof dump._keyMeta === 'object' ? dump._keyMeta : {};
+  lastKnownSharedKeyMeta = { ...src };
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(SHARED_KEY_META_LS_KEY, JSON.stringify(lastKnownSharedKeyMeta));
+    }
+  } catch (_) { /* ignore */ }
+}
+
+/**
  * 共有適用時にローカル孤立削除から除外するキーか
- * （施設プロファイル・操作者・監査・バックアップ系・同期メタ）
  * @param {string} key
  * @returns {boolean}
  */
@@ -117,12 +159,62 @@ function isSharedSyncProtectedLocalKey(key) {
   if (key === 'reha_local_operator') return true;
   if (key === 'reha_audit_logs') return true;
   if (key === LAST_SHARED_SYNC_LS_KEY) return true;
+  if (key === SHARED_KEY_META_LS_KEY) return true;
   return false;
 }
 
 /**
- * 共有マスター dump.storage をローカルへアトミックに近いインプレース適用
- * （一括全消去は行わない。書込完了後に孤立キーのみ個別削除）
+ * 競合トースト用のキー表示名
+ * @param {string} key
+ * @returns {string}
+ */
+function formatSharedKeyLabel(key) {
+  const sched = /^reha_schedule_(\d{4}-\d{2}-\d{2})$/.exec(key);
+  if (sched) return `${sched[1]}時間割`;
+  if (key === 'reha_patients_master') return '患者台帳';
+  if (key === 'reha_therapists_master') return 'スタッフ設定';
+  if (key === 'reha_assistant_settings') return '助手設定';
+  if (key === 'reha_outpatient_appointments') return '外来予約';
+  if (key === 'reha_loans_master') return '物品貸出';
+  if (key === 'reha_audit_logs') return '監査ログ';
+  return key;
+}
+
+/**
+ * 監査ログ JSON 文字列を配列マージ（id があれば重複排除）
+ * @param {string|null|undefined} remoteRaw
+ * @param {string|null|undefined} localRaw
+ * @returns {string}
+ */
+function mergeAuditLogStorageStrings(remoteRaw, localRaw) {
+  /** @type {object[]} */
+  let remote = [];
+  /** @type {object[]} */
+  let local = [];
+  try {
+    if (typeof remoteRaw === 'string' && remoteRaw) {
+      const p = JSON.parse(remoteRaw);
+      if (Array.isArray(p)) remote = p;
+    }
+  } catch (_) { /* ignore */ }
+  try {
+    if (typeof localRaw === 'string' && localRaw) {
+      const p = JSON.parse(localRaw);
+      if (Array.isArray(p)) local = p;
+    }
+  } catch (_) { /* ignore */ }
+
+  const byId = new Map();
+  [...remote, ...local].forEach((entry, idx) => {
+    if (!entry || typeof entry !== 'object') return;
+    const id = entry.id != null ? String(entry.id) : `__idx_${idx}_${entry.ts || entry.createdAt || ''}`;
+    byId.set(id, entry);
+  });
+  return JSON.stringify(Array.from(byId.values()));
+}
+
+/**
+ * 共有マスター dump.storage をローカルへインプレース適用（dirty 非汚染）
  * @param {Object} dump
  * @returns {{ applied: number, removed: number }}
  */
@@ -131,57 +223,58 @@ function applySharedMasterDump(dump) {
     return { applied: 0, removed: 0 };
   }
 
-  // 監査ログは他端末分をマージ（上書きせず後段で merge）
-  let remoteAuditLogs = [];
-  try {
-    const rawAudit = dump.storage.reha_audit_logs;
-    if (typeof rawAudit === 'string') {
-      const parsed = JSON.parse(rawAudit);
-      if (Array.isArray(parsed)) remoteAuditLogs = parsed;
-    }
-  } catch (_) { /* ignore */ }
-
-  // ① 共有マスターの各キーをローカルへ順次上書き・追加
-  const masterKeySet = new Set();
-  let applied = 0;
-  for (const [k, v] of Object.entries(dump.storage)) {
-    if (typeof v !== 'string') continue;
-    if (k.startsWith('reha_autobackup_')) continue;
-    if (k.startsWith('reha_backup_folder_')) continue;
-    if (k === 'reha_audit_logs') continue; // 後でマージ
-    masterKeySet.add(k);
-    if (!writeStorageItem(k, v)) {
-      storageSet(k, v);
-    }
-    applied += 1;
-  }
-
-  // 監査も「マスターに含まれるキー」として扱い、孤立削除しない
-  if (Object.prototype.hasOwnProperty.call(dump.storage, 'reha_audit_logs')) {
-    masterKeySet.add('reha_audit_logs');
-  }
-
-  // ③ 書込完了後: マスターに無く保護対象でもない孤立 reha_ キーのみ個別削除
-  let removed = 0;
-  const localKeys = storageKeys('reha_');
-  for (const key of localKeys) {
-    if (masterKeySet.has(key)) continue;
-    if (isSharedSyncProtectedLocalKey(key)) continue;
+  return runWithoutDirtyTracking(() => {
+    let remoteAuditLogs = [];
     try {
-      storageRemove(key);
-      removed += 1;
-    } catch (e) {
-      console.warn('[app] orphan key remove soft-fail:', key, e);
+      const rawAudit = dump.storage.reha_audit_logs;
+      if (typeof rawAudit === 'string') {
+        const parsed = JSON.parse(rawAudit);
+        if (Array.isArray(parsed)) remoteAuditLogs = parsed;
+      }
+    } catch (_) { /* ignore */ }
+
+    const masterKeySet = new Set();
+    let applied = 0;
+    for (const [k, v] of Object.entries(dump.storage)) {
+      if (typeof v !== 'string') continue;
+      if (k.startsWith('reha_autobackup_')) continue;
+      if (k.startsWith('reha_backup_folder_')) continue;
+      if (k === 'reha_audit_logs') continue;
+      masterKeySet.add(k);
+      if (!writeStorageItem(k, v)) {
+        storageSet(k, v);
+      }
+      applied += 1;
     }
-  }
 
-  // ④ 監査ログは既存どおり安全マージ
-  if (remoteAuditLogs.length > 0) {
-    mergeAuditLogs(remoteAuditLogs);
-    applied += 1;
-  }
+    if (Object.prototype.hasOwnProperty.call(dump.storage, 'reha_audit_logs')) {
+      masterKeySet.add('reha_audit_logs');
+    }
 
-  return { applied, removed };
+    let removed = 0;
+    const localKeys = storageKeys('reha_');
+    for (const key of localKeys) {
+      if (masterKeySet.has(key)) continue;
+      if (isSharedSyncProtectedLocalKey(key)) continue;
+      try {
+        storageRemove(key);
+        removed += 1;
+      } catch (e) {
+        console.warn('[app] orphan key remove soft-fail:', key, e);
+      }
+    }
+
+    if (remoteAuditLogs.length > 0) {
+      mergeAuditLogs(remoteAuditLogs);
+      applied += 1;
+    }
+
+    // 世代メタをローカルに保持し、dirty をリセット（pull 後はクリーン）
+    adoptSharedKeyMetaFromDump(dump);
+    clearDirtyStorageKeys();
+
+    return { applied, removed };
+  });
 }
 
 /**
@@ -213,11 +306,10 @@ async function pullSharedMasterToLocal(opts = {}) {
     }
 
     const { applied, removed } = applySharedMasterDump(res.data);
-    // 適用成功時に最終同期日時を記録（push インターロック用）
     const dumpTs = parseDumpTimestampMs(res.data);
     recordLastSharedSyncTimestamp(dumpTs > 0 ? dumpTs : Date.now());
     console.log(
-      `[app] 共有マスター同期完了: applied=${applied} removed=${removed} from ${res.filePath || ''}`
+      `[app] 共有マスター同期完了: applied=${applied} removed=${removed} device=${getDeviceClientId()} from ${res.filePath || ''}`
     );
     return { applied: applied > 0 || removed > 0, keyCount: applied, message: res.filePath || '' };
   } catch (err) {
@@ -227,10 +319,25 @@ async function pullSharedMasterToLocal(opts = {}) {
 }
 
 /**
- * ローカル全ダンプを共有マスターへ書き出し
- * ★サーバー側が自PC最終同期より新しい場合は先祖返り防止のためブロック
- * @param {{ force?: boolean }} [opts] force=true でインターロック回避（明示手動同期用）
- * @returns {Promise<{ success: boolean, blocked?: boolean, message?: string }>}
+ * キー単位メタを1段進める
+ * @param {object|null|undefined} prev
+ * @param {string} deviceId
+ * @param {number} nowMs
+ * @returns {{ deviceId: string, updatedAt: number, rev: number }}
+ */
+function bumpKeyMeta(prev, deviceId, nowMs) {
+  const prevRev = prev && Number.isFinite(Number(prev.rev)) ? Number(prev.rev) : 0;
+  return {
+    deviceId,
+    updatedAt: nowMs,
+    rev: prevRev + 1
+  };
+}
+
+/**
+ * 差分マージ＆競合遮断付きで共有マスターへ保存
+ * @param {{ force?: boolean }} [opts]
+ * @returns {Promise<{ success: boolean, blocked?: boolean, conflict?: boolean, message?: string }>}
  */
 async function pushLocalDumpToSharedMaster(opts = {}) {
   const force = Boolean(opts.force);
@@ -239,53 +346,155 @@ async function pushLocalDumpToSharedMaster(opts = {}) {
     return { success: false, message: 'Electron共有APIなし' };
   }
 
+  const deviceId = getDeviceClientId();
+  const dirtyKeys = getDirtyStorageKeys();
+
   try {
-    // 先祖返りインターロック: 保存前にサーバー側メタデータを確認
-    if (!force && typeof bridge.loadSharedMaster === 'function') {
+    let remoteDump = null;
+    let remoteExists = false;
+    if (typeof bridge.loadSharedMaster === 'function') {
       try {
         const remote = await bridge.loadSharedMaster();
         if (remote?.success !== false && remote?.exists && remote?.data) {
-          const serverTs = parseDumpTimestampMs(remote.data);
-          if (serverTs > 0 && serverTs > lastSharedSyncTimestampMs) {
-            console.warn(
-              '[app] 共有マスター上書きを安全に中断: serverTs=',
-              serverTs,
-              'lastSync=',
-              lastSharedSyncTimestampMs,
-              new Date(serverTs).toISOString(),
-              '>',
-              lastSharedSyncTimestampMs > 0
-                ? new Date(lastSharedSyncTimestampMs).toISOString()
-                : '(未同期)'
-            );
-            showToast(
-              '共有マスターに新しいデータが存在するため、上書きを安全に中断しました。ヘッダーの最新化を行ってください。',
-              'warn'
-            );
-            return {
-              success: false,
-              blocked: true,
-              message: '共有マスターが新しいため上書きを中断'
-            };
-          }
+          remoteExists = true;
+          remoteDump = remote.data;
         }
       } catch (probeErr) {
-        // プローブ失敗時は保存自体は試行（オフライン等）。破壊的上書き判定はできないため警告のみ
-        console.warn('[app] shared master freshness probe soft-fail:', probeErr);
+        console.warn('[app] shared master load for merge soft-fail:', probeErr);
       }
     }
 
-    const nowIso = new Date().toISOString();
-    const dump = await createSystemDump({
+    // 変更なし＋リモート既存 → 丸ごと上書きしない
+    if (remoteExists && dirtyKeys.length === 0 && !force) {
+      console.log('[app] 共有マスター push スキップ（dirtyKeys なし）');
+      return { success: true, message: '変更なしのためスキップ' };
+    }
+
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const remoteStorage = (remoteDump?.storage && typeof remoteDump.storage === 'object')
+      ? { ...remoteDump.storage }
+      : {};
+    const remoteKeyMeta = (remoteDump?._keyMeta && typeof remoteDump._keyMeta === 'object')
+      ? { ...remoteDump._keyMeta }
+      : {};
+
+    // 初回作成 or force 全量: ローカル全ダンプをベースに _keyMeta 付与
+    if (!remoteExists || (force && dirtyKeys.length === 0)) {
+      const dump = await createSystemDump({
+        backupType: 'SHARED_MASTER',
+        sharedMaster: true,
+        updatedAt: nowIso,
+        createdAt: remoteDump?.createdAt || nowIso
+      });
+      const keyMeta = { ...remoteKeyMeta };
+      Object.keys(dump.storage || {}).forEach((key) => {
+        keyMeta[key] = bumpKeyMeta(keyMeta[key] || lastKnownSharedKeyMeta[key], deviceId, nowMs);
+      });
+      dump._keyMeta = keyMeta;
+      const res = await bridge.saveSharedMaster(dump);
+      if (res?.success) {
+        adoptSharedKeyMetaFromDump(dump);
+        clearDirtyStorageKeys();
+        recordLastSharedSyncTimestamp(nowIso);
+        console.log(`[app] 共有マスター初回/全量保存成功: ${res.filePath || ''}`);
+        return { success: true, message: res.filePath || '' };
+      }
+      return { success: false, message: res?.message || '保存失敗' };
+    }
+
+    // ── 差分マージ ──
+    /** @type {Array<{ key: string, remoteDeviceId: string, remoteUpdatedAt: number }>} */
+    const conflicts = [];
+
+    for (const key of dirtyKeys) {
+      if (key === 'reha_audit_logs') continue; // 監査はマージ専用・競合遮断しない
+
+      const remoteMeta = remoteKeyMeta[key];
+      if (!remoteMeta || typeof remoteMeta !== 'object') continue;
+      const remoteDevice = String(remoteMeta.deviceId || '');
+      const remoteUpdated = Number(remoteMeta.updatedAt) || 0;
+      if (!remoteDevice || remoteDevice === deviceId) continue;
+      // 最終 pull 以降に他端末が同キーを更新していれば衝突
+      if (remoteUpdated > lastSharedSyncTimestampMs) {
+        conflicts.push({
+          key,
+          remoteDeviceId: remoteDevice,
+          remoteUpdatedAt: remoteUpdated
+        });
+      }
+    }
+
+    if (conflicts.length > 0 && !force) {
+      const labels = conflicts.map((c) => formatSharedKeyLabel(c.key));
+      const uniqueLabels = [...new Set(labels)];
+      const targetText = uniqueLabels.slice(0, 3).join('、')
+        + (uniqueLabels.length > 3 ? ` 他${uniqueLabels.length - 3}件` : '');
+      console.warn(
+        '[app] 同時編集競合を検知 — push 中断:',
+        conflicts.map((c) => ({
+          key: c.key,
+          remoteDeviceId: c.remoteDeviceId,
+          remoteUpdatedAt: new Date(c.remoteUpdatedAt).toISOString()
+        }))
+      );
+      showToast(
+        `⚠️ 同時編集の競合を検知しました（対象: ${targetText}）。他端末の最新入力を保護するため保存を中断しました。ヘッダーの「最新化」を押して確認してください。`,
+        'warn'
+      );
+      return {
+        success: false,
+        blocked: true,
+        conflict: true,
+        message: `競合: ${conflicts.map((c) => c.key).join(',')}`
+      };
+    }
+
+    // サーバー値をベースに、dirty キーのみローカルで上書き
+    const mergedStorage = { ...remoteStorage };
+    const mergedKeyMeta = { ...remoteKeyMeta };
+
+    for (const key of dirtyKeys) {
+      if (key.startsWith('reha_autobackup_') || key.startsWith('reha_backup_folder_')) continue;
+
+      if (key === 'reha_audit_logs') {
+        const localRaw = storageGet(key, null);
+        mergedStorage[key] = mergeAuditLogStorageStrings(remoteStorage[key], localRaw);
+        mergedKeyMeta[key] = bumpKeyMeta(mergedKeyMeta[key], deviceId, nowMs);
+        continue;
+      }
+
+      const localVal = storageGet(key, null);
+      if (localVal === null) {
+        // ローカル削除: サーバーからも外す
+        delete mergedStorage[key];
+        delete mergedKeyMeta[key];
+        continue;
+      }
+      mergedStorage[key] = localVal;
+      mergedKeyMeta[key] = bumpKeyMeta(mergedKeyMeta[key], deviceId, nowMs);
+    }
+
+    const dump = {
+      app: 'reha-work-manager',
+      version: '1.0.0',
       backupType: 'SHARED_MASTER',
       sharedMaster: true,
+      exportedAt: nowIso,
       updatedAt: nowIso,
-      createdAt: nowIso
-    });
+      createdAt: remoteDump?.createdAt || nowIso,
+      storage: mergedStorage,
+      _keyMeta: mergedKeyMeta
+    };
+
     const res = await bridge.saveSharedMaster(dump);
     if (res?.success) {
+      adoptSharedKeyMetaFromDump(dump);
+      clearDirtyStorageKeys();
       recordLastSharedSyncTimestamp(nowIso);
-      console.log(`[app] 共有マスター保存成功: ${res.filePath || ''}`);
+      console.log(
+        `[app] 共有マスター差分マージ保存成功: dirty=${dirtyKeys.length} device=${deviceId} path=${res.filePath || ''}`
+      );
       return { success: true, message: res.filePath || '' };
     }
     console.warn('[app] saveSharedMaster soft-fail:', res);
