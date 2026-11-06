@@ -32,7 +32,11 @@ import {
   TOTAL_SLOT_COUNT
 } from '../../config/rules.js';
 import { renderAppointmentCalendarView } from '../appointmentCalendarView.js';
-import { getCurrentFacilityId, setFacilityProfile } from '../../config/facilityConfig.js';
+import {
+  getCurrentFacilityId,
+  setFacilityProfile,
+  reloadForFacilityProfileChange
+} from '../../config/facilityConfig.js';
 
 let onStaffUpdatedCallback = null;
 
@@ -472,20 +476,54 @@ export function setupStaffSettingsModalListeners(onUpdate) {
     const prevFacilityId = getCurrentFacilityId();
     const facilityChanged = selectedFacilityId !== prevFacilityId;
 
-    if (facilityChanged) {
-      setFacilityProfile(selectedFacilityId);
-    }
+    console.info('[staffModal] facility profile check:', {
+      prevFacilityId,
+      selectedFacilityId,
+      facilityChanged,
+      isDesktop: Boolean(window.desktopApp?.isDesktop || window.electronBackup?.isDesktop),
+      platform: window.desktopApp?.platform || window.electronBackup?.platform || navigator.platform
+    });
 
-    closeModal();
-
     if (facilityChanged) {
-      showToast('設定を保存し、施設プロファイルを切り替えました。画面を再読込します…', 'success');
-      setTimeout(() => {
-        window.location.reload();
-      }, 300);
+      // 診断: 判定が true であること・変更前後IDを画面上に明示
+      showToast(
+        `診断: 施設切替 ${prevFacilityId} → ${selectedFacilityId}`,
+        'info'
+      );
+
+      const saveOk = setFacilityProfile(selectedFacilityId);
+      console.info('[staffModal] setFacilityProfile result:', {
+        saveOk,
+        selectedFacilityId,
+        readBackNow: getCurrentFacilityId()
+      });
+
+      if (!saveOk) {
+        showToast(
+          `施設プロファイルの保存に失敗しました（${prevFacilityId} → ${selectedFacilityId}）。DevToolsログを確認してください。`,
+          'error'
+        );
+        // スタッフ等は既に保存済みのためモーダルは閉じるが、リロードはしない
+        closeModal();
+        showToast(
+          `スタッフ・時間設定は保存済みです（時間割: 計${reloaded.total}コマ／外来: 計${aptReloaded.total}コマ）`,
+          'warn'
+        );
+        refreshViewsAfterFacilityHoursChange();
+        return;
+      }
+
+      showToast(
+        `施設保存OK（検証済）: ${prevFacilityId} → ${selectedFacilityId}。再読込します…`,
+        'success'
+      );
+      closeModal();
+      // Windows/Electron: 書込フラッシュ待ち＋キャッシュ回避URLで確実に再読込
+      reloadForFacilityProfileChange({ delayMs: 700, expectedId: selectedFacilityId });
       return;
     }
 
+    closeModal();
     showToast(
       `保存しました（時間割: 計${reloaded.total}コマ／外来: 計${aptReloaded.total}コマ）`,
       'success'
