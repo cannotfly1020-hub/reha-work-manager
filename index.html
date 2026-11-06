@@ -897,7 +897,7 @@
         <button type="button" id="btnCloseStaffModalX" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:#64748b;">✕</button>
       </div>
       <p style="font-size:0.75rem; color:#64748b; margin-bottom:12px;">
-        時間割には「稼働中」のセラピストのみが表示されます。リハビリ助手の氏名は業務日誌の出勤確認欄に自動反映されます。「本日の時間割」用の施設時間と、「外来予約カレンダー」専用時間はそれぞれ独立して設定できます。
+        時間割には「稼働中」のセラピストのみが表示されます。各行の<strong>職種（PT/OT/ST）</strong>はExcel個別リハ・患者月間実績の縦結合／分離集計に使われます（氏名に(OT)等を書かなくても可）。リハビリ助手の氏名は業務日誌の出勤確認欄に自動反映されます。「本日の時間割」用の施設時間と、「外来予約カレンダー」専用時間はそれぞれ独立して設定できます。
       </p>
 
       <!-- リアルタイム検索 & 新規セラピスト追加バー -->
@@ -913,8 +913,9 @@
 
       <form id="staffSettingsForm" style="display:flex; flex-direction:column; gap:10px; overflow-y:auto; flex:1; padding-right:4px;">
         <!-- 現役（稼働中・休職中）セラピストリスト -->
-        <div id="staffSettingsListContainer" style="display:flex; flex-direction:column; gap:8px;">
-          <!-- JSで動的にセラピストIDごとの入力欄およびステータス切替を展開 -->
+        <div id="staffSettingsListContainer" style="display:flex; flex-direction:column; gap:8px;"
+             data-staff-row-template="name+role(PT|OT|ST)+status+lunch">
+          <!-- JSで動的展開: 氏名 / therapist-role-select(PT|OT|ST) / ステータス / 昼休み -->
         </div>
 
         <!-- ★リハビリ助手設定（業務日誌の出勤欄へ自動反映） -->

@@ -404,6 +404,14 @@ export function updateTherapistSettings(updateMap) {
             changed = true;
           }
         }
+        if (entry.role !== undefined) {
+          const roleRaw = String(entry.role || '').toUpperCase();
+          const nextRole = (roleRaw === 'OT' || roleRaw === 'ST' || roleRaw === 'PT') ? roleRaw : 'PT';
+          if (t.role !== nextRole) {
+            t.role = nextRole;
+            changed = true;
+          }
+        }
         if (entry.lunchStart !== undefined || entry.lunchEnd !== undefined
           || entry.breakStartTime !== undefined || entry.breakEndTime !== undefined) {
           const lunch = resolveTherapistLunchBreak({

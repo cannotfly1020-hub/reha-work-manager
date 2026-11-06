@@ -3,6 +3,7 @@
 // （スタッフ・助手・施設時間＝本日時間割 ＋ 外来カレンダー専用提供時間・独立保存）
 
 import { sanitizeHtml } from '../../core/dataNormalizer.js';
+import { getTherapistRole } from '../../core/therapistRoleUtil.js';
 import {
   getAllTherapists, addTherapist, updateTherapistSettings,
   saveAllTherapists, THERAPIST_STATUS,
@@ -408,6 +409,7 @@ export function setupStaffSettingsModalListeners(onUpdate) {
       const tId = row.dataset.therapistId;
       const nameInput = row.querySelector('.staff-name-input');
       const statusSelect = row.querySelector('.staff-status-select');
+      const roleSelect = row.querySelector('.therapist-role-select');
       const lunchStartSelect = row.querySelector('.staff-lunch-start');
       const lunchEndSelect = row.querySelector('.staff-lunch-end');
       if (tId && nameInput && statusSelect) {
@@ -415,9 +417,12 @@ export function setupStaffSettingsModalListeners(onUpdate) {
           lunchStart: lunchStartSelect?.value,
           lunchEnd: lunchEndSelect?.value
         });
+        const roleRaw = String(roleSelect?.value || 'PT').toUpperCase();
+        const role = (roleRaw === 'OT' || roleRaw === 'ST' || roleRaw === 'PT') ? roleRaw : 'PT';
         updateMap[tId] = {
           name: nameInput.value.trim(),
           status: statusSelect.value,
+          role,
           lunchStart: lunch.start,
           lunchEnd: lunch.end
         };
@@ -564,19 +569,29 @@ export function renderStaffSettingsFields() {
     const statusBg = isRetired ? '#f1f5f9' : (isLeave ? '#fffbeb' : '#f0fdf4');
     const statusCol = isRetired ? '#64748b' : (isLeave ? '#b45309' : '#15803d');
     const lunch = resolveTherapistLunchBreak(t);
+    // role 未設定時は氏名推測フォールバック（therapistRoleUtil）で初期選択
+    const resolvedRole = getTherapistRole(t.id, t.name, [t]);
 
     return `
       <div class="staff-item-row" data-therapist-id="${t.id}"
            style="display:flex; flex-direction:column; gap:6px; background:#fff; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px;">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
           <div style="display:flex; align-items:center; gap:6px; min-width:56px;">
             <span style="width:10px; height:10px; border-radius:50%; background:${t.color || '#0284c7'}; display:inline-block;"></span>
             <strong style="font-size:0.82rem; color:#0f172a;">枠 ${t.id}</strong>
           </div>
-          <div style="flex:1;">
+          <div style="flex:1; min-width:120px;">
             <input type="text" class="staff-name-input" value="${sanitizeHtml(t.name)}"
                    placeholder="セラピスト氏名"
                    style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; font-weight:600;">
+          </div>
+          <div style="width:118px;">
+            <select class="therapist-role-select" data-therapist-id="${sanitizeHtml(t.id)}" title="職種（Excel・印刷のPT/OT分離に使用）"
+                    style="width:100%; padding:5px 4px; border:1px solid #93c5fd; border-radius:4px; font-size:0.78rem; font-weight:700; background:#eff6ff; color:#1d4ed8; cursor:pointer;">
+              <option value="PT" ${resolvedRole === 'PT' ? 'selected' : ''}>PT（理学）</option>
+              <option value="OT" ${resolvedRole === 'OT' ? 'selected' : ''}>OT（作業）</option>
+              <option value="ST" ${resolvedRole === 'ST' ? 'selected' : ''}>ST（言語）</option>
+            </select>
           </div>
           <div style="width:105px;">
             <select class="staff-status-select"
