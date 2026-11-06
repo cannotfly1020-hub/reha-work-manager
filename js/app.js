@@ -2,8 +2,9 @@
 // 全体初期化・タブ切替自動再同期・ヘッダー＆時間割更新ボタン連動・全体再描画司令塔
 // ★起動: IndexedDB → 共有マスター(reha_shared_master.json)同期 → アーカイブ → 各画面
 // ★データ変更時: 日次バックアップ＋共有マスター自動保存
+// ★共有同期: 全消去なしのインプレース適用 ＋ 先祖返り上書きインターロック
 
-import { initStorage, storageSet, storageRemoveByPrefix } from './core/storageAdapter.js';
+import { initStorage, storageSet, storageKeys, storageRemove } from './core/storageAdapter.js';
 import {
   registerArchiveHydrationFilter,
   initArchiveManager
@@ -35,6 +36,22 @@ import { isFeatureEnabled } from './config/facilityConfig.js';
 /** @type {ReturnType<typeof setTimeout>|null} */
 let sharedMasterSaveTimer = null;
 
+/** localStorage 直書き（storageAdapter 外・共有 dump 対象外） */
+const LAST_SHARED_SYNC_LS_KEY = 'reha_last_shared_sync_timestamp';
+
+/** @type {number} 自PCが最後に共有マスターと同期した時刻（ms）。メモリ＋LS */
+let lastSharedSyncTimestampMs = 0;
+
+try {
+  if (typeof localStorage !== 'undefined') {
+    const raw = localStorage.getItem(LAST_SHARED_SYNC_LS_KEY);
+    const parsed = raw ? Date.parse(raw) : NaN;
+    if (Number.isFinite(parsed) && parsed > 0) {
+      lastSharedSyncTimestampMs = parsed;
+    }
+  }
+} catch (_) { /* ignore */ }
+
 /**
  * Electron 共有マスター API（electronBackup / desktopApp 両対応）
  * @returns {object|null}
@@ -51,16 +68,70 @@ function getBackupBridge() {
 }
 
 /**
- * 共有マスター dump.storage をローカルストアへ一括適用
+ * dump メタデータから更新時刻（ms）を取得
+ * @param {Object|null|undefined} dump
+ * @returns {number}
+ */
+function parseDumpTimestampMs(dump) {
+  if (!dump || typeof dump !== 'object') return 0;
+  const raw = dump.updatedAt || dump.createdAt || dump.exportedAt;
+  if (!raw || typeof raw !== 'string') return 0;
+  const t = Date.parse(raw);
+  return Number.isFinite(t) && t > 0 ? t : 0;
+}
+
+/**
+ * 自PCの最終共有同期日時を記録（apply 成功時 / push 成功時）
+ * @param {number|string|Date} value
+ */
+function recordLastSharedSyncTimestamp(value) {
+  let ms = 0;
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    ms = value;
+  } else if (value instanceof Date) {
+    ms = value.getTime();
+  } else if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed) && parsed > 0) ms = parsed;
+  }
+  if (ms <= 0) ms = Date.now();
+  lastSharedSyncTimestampMs = ms;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(LAST_SHARED_SYNC_LS_KEY, new Date(ms).toISOString());
+    }
+  } catch (_) { /* ignore */ }
+}
+
+/**
+ * 共有適用時にローカル孤立削除から除外するキーか
+ * （施設プロファイル・操作者・監査・バックアップ系・同期メタ）
+ * @param {string} key
+ * @returns {boolean}
+ */
+function isSharedSyncProtectedLocalKey(key) {
+  if (!key || typeof key !== 'string') return true;
+  if (key.startsWith('reha_autobackup_')) return true;
+  if (key.startsWith('reha_backup_folder_')) return true;
+  if (key.startsWith('reha_facility_profile')) return true;
+  if (key === 'reha_local_operator') return true;
+  if (key === 'reha_audit_logs') return true;
+  if (key === LAST_SHARED_SYNC_LS_KEY) return true;
+  return false;
+}
+
+/**
+ * 共有マスター dump.storage をローカルへアトミックに近いインプレース適用
+ * （一括全消去は行わない。書込完了後に孤立キーのみ個別削除）
  * @param {Object} dump
- * @returns {{ applied: number }}
+ * @returns {{ applied: number, removed: number }}
  */
 function applySharedMasterDump(dump) {
   if (!dump || !dump.storage || typeof dump.storage !== 'object') {
-    return { applied: 0 };
+    return { applied: 0, removed: 0 };
   }
 
-  // 監査ログは他端末分をマージ（クリア前にリモート分を退避）
+  // 監査ログは他端末分をマージ（上書きせず後段で merge）
   let remoteAuditLogs = [];
   try {
     const rawAudit = dump.storage.reha_audit_logs;
@@ -70,28 +141,47 @@ function applySharedMasterDump(dump) {
     }
   } catch (_) { /* ignore */ }
 
-  // 共有正本でローカルを上書き（reha_ 系を一旦クリアしてから投入）
-  // ※操作者 (reha_local_operator) は localStorage 直書きのため影響なし
-  storageRemoveByPrefix('reha_');
-
+  // ① 共有マスターの各キーをローカルへ順次上書き・追加
+  const masterKeySet = new Set();
   let applied = 0;
   for (const [k, v] of Object.entries(dump.storage)) {
     if (typeof v !== 'string') continue;
     if (k.startsWith('reha_autobackup_')) continue;
     if (k.startsWith('reha_backup_folder_')) continue;
     if (k === 'reha_audit_logs') continue; // 後でマージ
+    masterKeySet.add(k);
     if (!writeStorageItem(k, v)) {
       storageSet(k, v);
     }
     applied += 1;
   }
 
+  // 監査も「マスターに含まれるキー」として扱い、孤立削除しない
+  if (Object.prototype.hasOwnProperty.call(dump.storage, 'reha_audit_logs')) {
+    masterKeySet.add('reha_audit_logs');
+  }
+
+  // ③ 書込完了後: マスターに無く保護対象でもない孤立 reha_ キーのみ個別削除
+  let removed = 0;
+  const localKeys = storageKeys('reha_');
+  for (const key of localKeys) {
+    if (masterKeySet.has(key)) continue;
+    if (isSharedSyncProtectedLocalKey(key)) continue;
+    try {
+      storageRemove(key);
+      removed += 1;
+    } catch (e) {
+      console.warn('[app] orphan key remove soft-fail:', key, e);
+    }
+  }
+
+  // ④ 監査ログは既存どおり安全マージ
   if (remoteAuditLogs.length > 0) {
     mergeAuditLogs(remoteAuditLogs);
     applied += 1;
   }
 
-  return { applied };
+  return { applied, removed };
 }
 
 /**
@@ -122,9 +212,14 @@ async function pullSharedMasterToLocal(opts = {}) {
       return { applied: false, keyCount: 0, message: '共有マスターに storage がありません' };
     }
 
-    const { applied } = applySharedMasterDump(res.data);
-    console.log(`[app] 共有マスター同期完了: ${applied} keys from ${res.filePath || ''}`);
-    return { applied: applied > 0, keyCount: applied, message: res.filePath || '' };
+    const { applied, removed } = applySharedMasterDump(res.data);
+    // 適用成功時に最終同期日時を記録（push インターロック用）
+    const dumpTs = parseDumpTimestampMs(res.data);
+    recordLastSharedSyncTimestamp(dumpTs > 0 ? dumpTs : Date.now());
+    console.log(
+      `[app] 共有マスター同期完了: applied=${applied} removed=${removed} from ${res.filePath || ''}`
+    );
+    return { applied: applied > 0 || removed > 0, keyCount: applied, message: res.filePath || '' };
   } catch (err) {
     console.warn('[app] pullSharedMasterToLocal soft-fail:', err);
     return { applied: false, keyCount: 0, message: err?.message || '同期エラー' };
@@ -133,21 +228,63 @@ async function pullSharedMasterToLocal(opts = {}) {
 
 /**
  * ローカル全ダンプを共有マスターへ書き出し
- * @returns {Promise<{ success: boolean, message?: string }>}
+ * ★サーバー側が自PC最終同期より新しい場合は先祖返り防止のためブロック
+ * @param {{ force?: boolean }} [opts] force=true でインターロック回避（明示手動同期用）
+ * @returns {Promise<{ success: boolean, blocked?: boolean, message?: string }>}
  */
-async function pushLocalDumpToSharedMaster() {
+async function pushLocalDumpToSharedMaster(opts = {}) {
+  const force = Boolean(opts.force);
   const bridge = getBackupBridge();
   if (!bridge || typeof bridge.saveSharedMaster !== 'function') {
     return { success: false, message: 'Electron共有APIなし' };
   }
 
   try {
+    // 先祖返りインターロック: 保存前にサーバー側メタデータを確認
+    if (!force && typeof bridge.loadSharedMaster === 'function') {
+      try {
+        const remote = await bridge.loadSharedMaster();
+        if (remote?.success !== false && remote?.exists && remote?.data) {
+          const serverTs = parseDumpTimestampMs(remote.data);
+          if (serverTs > 0 && serverTs > lastSharedSyncTimestampMs) {
+            console.warn(
+              '[app] 共有マスター上書きを安全に中断: serverTs=',
+              serverTs,
+              'lastSync=',
+              lastSharedSyncTimestampMs,
+              new Date(serverTs).toISOString(),
+              '>',
+              lastSharedSyncTimestampMs > 0
+                ? new Date(lastSharedSyncTimestampMs).toISOString()
+                : '(未同期)'
+            );
+            showToast(
+              '共有マスターに新しいデータが存在するため、上書きを安全に中断しました。ヘッダーの最新化を行ってください。',
+              'warn'
+            );
+            return {
+              success: false,
+              blocked: true,
+              message: '共有マスターが新しいため上書きを中断'
+            };
+          }
+        }
+      } catch (probeErr) {
+        // プローブ失敗時は保存自体は試行（オフライン等）。破壊的上書き判定はできないため警告のみ
+        console.warn('[app] shared master freshness probe soft-fail:', probeErr);
+      }
+    }
+
+    const nowIso = new Date().toISOString();
     const dump = await createSystemDump({
       backupType: 'SHARED_MASTER',
-      sharedMaster: true
+      sharedMaster: true,
+      updatedAt: nowIso,
+      createdAt: nowIso
     });
     const res = await bridge.saveSharedMaster(dump);
     if (res?.success) {
+      recordLastSharedSyncTimestamp(nowIso);
       console.log(`[app] 共有マスター保存成功: ${res.filePath || ''}`);
       return { success: true, message: res.filePath || '' };
     }
