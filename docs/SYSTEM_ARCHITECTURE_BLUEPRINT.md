@@ -8,14 +8,14 @@
 | **対象** | `reha-work-manager`（`package.json` version `1.0.0`） |
 | **読者** | 保守エンジニア／第三者AI／多施設展開担当 |
 | **原則** | **コード実装が正本**。本ドキュメントはリポジトリ走査時点の実装を記述する（推測で法令を書き換えない）。 |
-| **関連文書** | `docs/COMPLETE_SYSTEM_ARCHITECTURE_SPEC.md`（2026-10-23・旧版網羅）、`docs/説明書.md`、`docs/CURRENT_STATUS.md` |
+| **関連文書** | **運用の正本:** [`docs/説明書.md`](./説明書.md)（2026-11-06 完璧運用説明書）／旧技術網羅: `COMPLETE_SYSTEM_ARCHITECTURE_SPEC.md`／`CURRENT_STATUS.md` |
 
 ---
 
 ## 目次
 
 1. [システム全体概要・基本設計思想](#1-システム全体概要基本設計思想)
-2. [ディレクトリ構造と全モジュール責務一覧](#2-ディレクトリ構造と全モジュール責務一覧)
+2. [ディレクトリ構造と全モジュール責務一覧](#2-ディレクトリ構造と全モジュール責務一覧)（**全ソース1ファイル1行**）
 3. [多施設プロファイル完全仕様表](#3-多施設プロファイル完全仕様表)
 4. [データストア設計・キー定義・永続化＆共有同期](#4-データストア設計キー定義永続化共有同期)
 5. [診療報酬計算・期限判定・計画書4区分ライフサイクル](#5-診療報酬計算期限判定計画書4区分ライフサイクル)
@@ -100,108 +100,212 @@ sequenceDiagram
 
 ## 2. ディレクトリ構造と全モジュール責務一覧
 
-### 2.1 物理ツリー（責務付き・要約）
+> **網羅方針**: 下記は `node_modules` / ビルド成果物を除く **アプリ本体の全ソース・CSS・設定を1ファイル1行**で列挙した正本である。  
+> 初版では層ごとの要約に留まっていた箇所（`views/*/`, `css/`, `backup/`, 一部 Excel・Print・履歴データ）を本節で完全化した。
+
+### 2.1 物理ツリー（全ファイル）
 
 ```
 reha-work-manager/
-├── main.js                 # Electron BrowserWindow・プロトコル・メニュー
-├── preload.js              # contextBridge: desktopApp / electronBackup
-├── main/backupIpc.js       # 日次バックアップIPC・共有マスターIPC
-├── package.json            # electron / electron-builder
-├── index.html              # 全画面DOM・モーダル骨格・ナビタブ
-├── css/                    # base, style, tables, schedule, appointment, modals, toast
-├── docs/                   # 本設計書ほか
+├── main.js
+├── preload.js
+├── package.json
+├── index.html
+├── main/
+│   └── backupIpc.js
+├── css/
+│   ├── base.css
+│   ├── style.css
+│   ├── tables.css
+│   ├── schedule.css
+│   ├── appointment.css
+│   ├── modals.css
+│   └── toast.css
+├── docs/                          # 設計・説明書（実行時非ロード）
 └── js/
-    ├── app.js              # 初期化・タブ・共有同期・施設ナビ制御
-    ├── config/             # rules, facilityConfig, appointmentSlots
-    ├── core/               # storage, 期限計算, 時間生成, validator
-    ├── store/              # 患者・時間割・予約・物品・監査 等
-    ├── views/              # 画面・モーダル・schedule/appointment/monthly 分割
-    ├── excel/              # 受付Excel・日誌・sheetUtils
-    ├── print/              # A4 HTML印刷群
-    ├── backup/             # ダンプ生成・Electron日次保存ヘルパー
-    ├── ui/                 # toast, sharedFolderUi
+    ├── app.js
+    ├── annualScoreHistorical2026.js
+    ├── fy2026_annual_historical_score_data.js
+    ├── config/   (3)
+    ├── core/     (10)
+    ├── store/    (11)
+    ├── views/    (+ schedule/ appointment/ monthly/ modals/)
+    ├── excel/    (+ sheets/)
+    ├── print/    (10)
+    ├── backup/   (2)
+    ├── ui/       (2)
     └── vendor/xlsx.bundle.js
 ```
 
-### 2.2 エントリ・シェル
+### 2.2 エントリ・シェル・設定
 
-| パス | 責務 | 主要シンボル |
-|------|------|----------------|
-| `main.js` | Electron ウィンドウ生成、`app://` 等 | BrowserWindow |
-| `preload.js` | 安全な IPC 公開 | `desktopApp`, `electronBackup` |
-| `main/backupIpc.js` | ドキュメント日次保存、共有フォルダ設定/R/W | `save-daily-backup-file`, `load/save-shared-master` |
-| `index.html` | UI骨格、モーダルID、ナビ `data-target` | `#viewSchedule` 他 |
-| `js/app.js` | 起動・同期・`applyFacilityNavigationFeatures` | `pullSharedMasterToLocal`, `pushLocalDumpToSharedMaster` |
+| パス | 単一責任（役割） | 主要シンボル / 備考 |
+|------|------------------|---------------------|
+| `main.js` | Electron メインプロセス。ウィンドウ生成・プロトコル・メニュー | `BrowserWindow` |
+| `preload.js` | Renderer へ安全に IPC API を公開 | `desktopApp`, `electronBackup` |
+| `main/backupIpc.js` | 日次バックアップファイル書込、共有フォルダ選択/読込/書込 IPC | `save-daily-backup-file`, `load/save-shared-master` |
+| `package.json` | npm 名・version・scripts・electron-builder 設定 | `com.reha.workmanager` |
+| `index.html` | 全画面 DOM・ナビタブ・全モーダル骨格・CSS/JS 読込 | `#viewSchedule` 等 |
+| `js/app.js` | アプリ司令塔。起動・タブ・共有同期・施設ナビ表示制御 | `pullSharedMasterToLocal`, `pushLocalDumpToSharedMaster`, `applyFacilityNavigationFeatures` |
 
-### 2.3 config /
+### 2.3 css/（スタイルシート）
 
-| パス | 責務 | 主要 export | 依存 |
-|------|------|-------------|------|
-| `js/config/rules.js` | 報酬定数・`TIME_SLOTS` live binding | `REHA_RULES`, `ORTHOTICS_RULES`, `reloadFacilityTimeSlots` | `timeSlotGenerator` |
-| `js/config/facilityConfig.js` | 多施設フラグ・永続化・診断リロード | `FACILITY_PROFILES`, `isFeatureEnabled`, `setFacilityProfile`, `reloadForFacilityProfileChange` | localStorage/sessionStorage |
-| `js/config/appointmentSlots.js` | 外来時刻配列の再エクスポート | `APPOINTMENT_TIME_STRINGS` | `rules` |
+| パス | 役割 |
+|------|------|
+| `css/base.css` | リセット・共通トークン・基本タイポ・レイアウト土台 |
+| `css/style.css` | アプリシェル（ヘッダー・ナビ・パネル切替・全体トーン） |
+| `css/tables.css` | 患者台帳・月間単位表など汎用テーブル見た目 |
+| `css/schedule.css` | 本日時間割グリッド・カード・消炎/透析列・DnD視覚 |
+| `css/appointment.css` | 外来予約カレンダー（週間/月間）専用スタイル |
+| `css/modals.css` | 各種モーダル共通・フォーム |
+| `css/toast.css` | トースト通知アニメ・配置 |
 
-### 2.4 core /
+### 2.4 config/
 
-| パス | 責務 | 主要 export |
+| パス | 役割 | 主要 export |
 |------|------|-------------|
-| `storageAdapter.js` | メモリ/IDB/LS 多層ストレージ | `initStorage`, `storageGet/Set/Remove`, `SCHEDULE_PREFIX` |
-| `timeSlotGenerator.js` | 施設/外来時間生成・永続化 | `generateTimeSlots`, `saveFacilityHours`, `saveOutpatientHours` |
-| `deadlineCalc.js` | 期限・早期加算・計画推奨・13単位 | `calculatePatientDeadlines`, `evaluateRecommendedPlan`, `getDailyBasePoints` |
-| `validator.js` | 衝突・日上限・月計画・週負荷 | `validateTimeConflict`, `validateDailyLimit` 等 |
-| `therapistWeeklyUnits.js` | 週単位メータ | `getTherapistWeeklyUnitsMeter` |
-| `therapistRoleUtil.js` | PT/OT/ST 判定 | `getTherapistRole`, `buildDailyUnitsByRole` |
-| `dataNormalizer.js` / `dateUtils.js` / `holidayCalc.js` / `timeSlotUtil.js` | 正規化・日付・祝日・吸着 | — |
+| `js/config/rules.js` | 診療報酬定数・装具/透析定数・`TIME_SLOTS` live binding | `REHA_RULES`, `ORTHOTICS_RULES`, `reloadFacilityTimeSlots` |
+| `js/config/facilityConfig.js` | 多施設プロファイル・機能フラグ・永続化・診断リロード | `FACILITY_PROFILES`, `isFeatureEnabled`, `setFacilityProfile`, `reloadForFacilityProfileChange` |
+| `js/config/appointmentSlots.js` | 外来時刻配列の再エクスポート窓口 | `APPOINTMENT_TIME_STRINGS` |
 
-### 2.5 store /
+### 2.5 core/
 
-| パス | キー | 責務 |
-|------|------|------|
-| `patientStore.js` | `reha_patients_master` | 患者CRUD・`planStatus`・退院判定 |
-| `scheduleStore.js` | `reha_schedule_YYYY-MM-DD` | コマ・analgesia・dialysis・月次集計 |
-| `therapistStore.js` | `reha_therapists_master` | スタッフ・昼休み |
-| `assistantStore.js` | `reha_assistant_settings` | 助手氏名 |
-| `appointmentStore.js` | `reha_outpatient_appointments` | 外来予約 |
-| `loanStore.js` | `reha_loans_master` | 物品貸出 |
-| `auditLogStore.js` | `reha_audit_logs` | 監査ログ（共有同期時マージ） |
-| `operatorStore.js` | `reha_local_operator`（**LS直**） | 操作者（共有クリア対象外） |
-| `archiveManager.js` | （スケジュール窓） | 冷データメモリ退避・月オンデマンド |
-| `storageWrite.js` | — | `writeStorageItem` + 失敗通知 |
-| `appointmentSync.js` | — | 予約→時間割吸着補助 |
+| パス | 役割 | 主要 export |
+|------|------|-------------|
+| `js/core/storageAdapter.js` | メモリ↔IndexedDB↔localStorage 多層永続化 | `initStorage`, `storageGet/Set/Remove`, `SCHEDULE_PREFIX` |
+| `js/core/timeSlotGenerator.js` | 施設/外来時間設定からコマ配列生成・LS保存 | `generateTimeSlots`, `saveFacilityHours`, `saveOutpatientHours` |
+| `js/core/deadlineCalc.js` | 算定期限・早期加算・計画推奨・13単位・日別点数 | `calculatePatientDeadlines`, `evaluateRecommendedPlan`, `getDailyBasePoints` |
+| `js/core/validator.js` | 配置衝突・日上限・月計画・セラピスト負荷検証 | `validateTimeConflict`, `validateDailyLimit` 等 |
+| `js/core/therapistWeeklyUnits.js` | セラピスト週単位メータ算出 | `getTherapistWeeklyUnitsMeter` |
+| `js/core/therapistRoleUtil.js` | PT/OT/ST 役割判定・日別役割単位 | `getTherapistRole`, `buildDailyUnitsByRole` |
+| `js/core/dataNormalizer.js` | 取込・復元時のデータ正規化 | 正規化関数群 |
+| `js/core/dateUtils.js` | 日付演算・文字列化ユーティリティ | `addDays` 等 |
+| `js/core/holidayCalc.js` | 祝日判定 | 祝日関連 |
+| `js/core/timeSlotUtil.js` | スロット吸着・時刻ヘルパ | 吸着・比較 |
 
-### 2.6 views /（主要）
+### 2.6 store/
 
-| パス | 責務 |
+| パス | 永続キー | 役割 |
+|------|----------|------|
+| `js/store/patientStore.js` | `reha_patients_master` | 患者CRUD・`planStatus`・退院/終了判定 |
+| `js/store/scheduleStore.js` | `reha_schedule_YYYY-MM-DD` | コマ・`analgesia`・`dialysis`・月次集計 |
+| `js/store/therapistStore.js` | `reha_therapists_master` | スタッフ・稼働・昼休み |
+| `js/store/assistantStore.js` | `reha_assistant_settings` | 助手氏名 |
+| `js/store/appointmentStore.js` | `reha_outpatient_appointments` | 外来予約 CRUD |
+| `js/store/loanStore.js` | `reha_loans_master` | 物品貸出 |
+| `js/store/auditLogStore.js` | `reha_audit_logs` | 監査ログ（共有pull時マージ） |
+| `js/store/operatorStore.js` | `reha_local_operator`（LS直） | 操作者名（共有クリア対象外） |
+| `js/store/archiveManager.js` | （スケジュール窓） | 冷データメモリ退避・月オンデマンド復元 |
+| `js/store/storageWrite.js` | — | `writeStorageItem` ＋ 失敗トースト |
+| `js/store/appointmentSync.js` | — | 予約↔時間割吸着・同期補助 |
+
+### 2.7 views/（画面・分割モジュール・モーダル）
+
+#### 画面エントリ
+
+| パス | 役割 |
 |------|------|
-| `scheduleView.js` + `schedule/timetable.js` | 本日時間割グリッド・DnD・消炎/透析レーン |
-| `appointmentCalendarView.js` + `appointment/*` | 外来週間/月間 |
-| `monthlyView.js` + `monthly/*` | 月間単位表・収益・日誌プレビュー |
-| `patientView.js` | 患者台帳・計画フェーズ表示・モーダル |
-| `loanView.js` | 物品 |
-| `exportView.js` | Excel出力・バックアップUI |
-| `auditLogView.js` | 監査タイムライン |
-| `modals/slotModal.js` | 個別リハコマ（計画書・装具。透析チェックは非表示） |
-| `modals/staffModal.js` | スタッフ・時間・**施設プロファイル切替** |
-| `modals/analgesiaModal.js` / `dialysisModal.js` | 並行レーン登録 |
-| `modals/appointmentModal.js` | 予約編集 |
+| `js/views/scheduleView.js` | 本日時間割画面の初期化・配線（子モジュール呼び出し） |
+| `js/views/appointmentCalendarView.js` | 外来予約カレンダー画面の初期化・配線 |
+| `js/views/monthlyView.js` | 月間単位・収益画面の初期化・配線 |
+| `js/views/patientView.js` | 患者台帳 CRUD・計画フェーズ表示・患者モーダル |
+| `js/views/loanView.js` | 物品貸出画面 |
+| `js/views/exportView.js` | Excel出力・バックアップ／復元・共有フォルダ操作 UI |
+| `js/views/auditLogView.js` | 監査ログタイムライン表示 |
 
-### 2.7 excel / print /
+#### `views/schedule/`
 
-| パス | 責務 |
+| パス | 役割 |
 |------|------|
-| `uketsukeWriter.js` | 受付Workbook組み立て＋施設Bシート分岐 |
-| `diaryWriter.js` | 業務日誌（日別シート） |
-| `sheets/individualRehaSheet.js` | 個別リハ物理タブ・SPLIT・計画記号 |
-| `sheets/analgesiaSheet.js` | 消炎 入院/外来 2タブ |
-| `sheets/dialysisRehaSheet.js` / `orthoticsSheet.js` | 施設B専用 |
-| `sheetUtils.js` | STYLES・A4横注入 |
-| `print/monthlyAuditPrint.js` | 月間点検（透析/装具列フラグ連動） |
-| `print/patientMonthlyReportPrint.js` | 個人月間実績 |
-| `print/printWeeklyReceptionBook.js` / `printNextWeekBookingSheet.js` | 外来週間印刷 |
-| `print/outpatientWeeklyPrints.js` | 上記の統合/再エクスポート |
+| `js/views/schedule/scheduleState.js` | 表示日・パレット絞り込みの画面状態 |
+| `js/views/schedule/timetable.js` | グリッド描画・DnD・即配置・クイック単位・消炎/透析列 |
+| `js/views/schedule/palette.js` | 患者パレット検索・ドラッグ開始 |
+| `js/views/schedule/kpiStrip.js` | 当日件数 KPI ストリップ描画 |
 
-### 2.8 モジュール依存の俯瞰
+#### `views/appointment/`
+
+| パス | 役割 |
+|------|------|
+| `js/views/appointment/calendarState.js` | 表示日・表示モード・DnD中データの状態 |
+| `js/views/appointment/weeklyTimetable.js` | 外来週間タイムテーブル描画 |
+| `js/views/appointment/monthlyCalendar.js` | 外来月間カレンダー描画 |
+| `js/views/appointment/palette.js` | 外来用患者パレット |
+
+#### `views/monthly/`
+
+| パス | 役割 |
+|------|------|
+| `js/views/monthly/monthlyState.js` | 対象年月・並び・クイックフィルタ・直近集計保持 |
+| `js/views/monthly/unitsTable.js` | 月間単位表（退院グレーアウト・担当ソート） |
+| `js/views/monthly/revenueDashboard.js` | 月間収益数値・本日内訳モーダル |
+| `js/views/monthly/diaryPreview.js` | 業務日誌プレビュー描画 |
+
+#### `views/modals/`
+
+| パス | 役割 |
+|------|------|
+| `js/views/modals/slotModal.js` | 個別リハコマ編集（計画書・装具。透析チェックは非表示） |
+| `js/views/modals/staffModal.js` | スタッフ・施設/外来時間・助手・**施設プロファイル切替** |
+| `js/views/modals/analgesiaModal.js` | 消炎鎮痛並行レーン登録 |
+| `js/views/modals/dialysisModal.js` | 透析運動並行レーン登録（施設B） |
+| `js/views/modals/appointmentModal.js` | 外来予約の作成・編集 |
+
+### 2.8 excel/（帳票生成）
+
+| パス | 役割 |
+|------|------|
+| `js/excel/uketsukeWriter.js` | 受付提出用 Workbook 組み立て・施設Bシート分岐 |
+| `js/excel/diaryWriter.js` | 業務日誌 Excel（日別シート・収益・記事） |
+| `js/excel/sheetUtils.js` | 共通 STYLES・A4横印刷 OpenXML 注入 |
+| `js/excel/yearlyTrendChart.js` | 年間推移シート用 Canvas→PNG チャート生成 |
+| `js/excel/sheets/summarySheet.js` | レセプト収益サマリーシート |
+| `js/excel/sheets/yearlyTrendSheet.js` | 年間推移表＋グラフ貼付（履歴＋ライブ合算） |
+| `js/excel/sheets/individualRehaSheet.js` | 個別リハ物理タブ（PT/OT結合・SPLIT・計画記号）※現行正本 |
+| `js/excel/sheets/rehaPatientSheet.js` | 旧・疾患別実施リスト（削除せず残置・互換） |
+| `js/excel/sheets/analgesiaSheet.js` | 消炎鎮痛 入院/外来 物理2タブ |
+| `js/excel/sheets/dialysisRehaSheet.js` | 透析加算○印マトリクス（施設B） |
+| `js/excel/sheets/orthoticsSheet.js` | 装具採型採寸一覧（施設B） |
+| `js/excel/sheets/patientMonthlyListSheet.js` | 実施患者一覧（単位なし・医事課向け属性表） |
+
+### 2.9 print/（HTML印刷）
+
+| パス | 役割 |
+|------|------|
+| `js/print/monthlyAuditPrint.js` | 月間点検チェックシート（赤ペン照合・透析/装具列） |
+| `js/print/patientMonthlyReportPrint.js` | 患者個人月間実績表（医事課・A4横1枚） |
+| `js/print/printWeeklyReceptionBook.js` | 週間予約受付簿（AM/PM 2枚・固定版） |
+| `js/print/printNextWeekBookingSheet.js` | 翌週予約受付表（週ピッカー・1枚/週） |
+| `js/print/outpatientWeeklyPrints.js` | 上記2帳票への互換再エクスポート |
+| `js/print/handwritingWeeklyPrint.js` | → `printWeeklyReceptionBook` への互換再エクスポート |
+| `js/print/weeklyPaperBookingPrint.js` | → `printNextWeekBookingSheet` への互換再エクスポート |
+| `js/print/weeklyTablePrint.js` | 外来週間予約表印刷（空き行スキップで最大化） |
+| `js/print/dailyChecklistPrint.js` | 本日デイリー予約チェック表（A4縦） |
+| `js/print/appointmentTicketPrint.js` | 次回予約票（A5）即時印刷 |
+
+### 2.10 backup / ui / vendor / 履歴データ
+
+| パス | 役割 |
+|------|------|
+| `js/backup/backupService.js` | 手動バックアップ・年度確定・JSON復元・`createSystemDump` 統括 |
+| `js/backup/localFileBackup.js` | Electron 日次自動バックアップ UI ヘルパ（フォルダ開く等） |
+| `js/ui/toast.js` | 画面共通トースト `showToast` |
+| `js/ui/sharedFolderUi.js` | 共有フォルダ状態ランプ／Excel画面の選択・変更 UI |
+| `js/vendor/xlsx.bundle.js` | SheetJS バンドル（Excel生成ランタイム） |
+| `js/fy2026_annual_historical_score_data.js` | 2026年1〜9月点数票確定値データ本体 |
+| `js/annualScoreHistorical2026.js` | 上記データのエイリアス re-export |
+
+### 2.11 docs/（非実行・参照文書）
+
+| パス | 役割 |
+|------|------|
+| `docs/SYSTEM_ARCHITECTURE_BLUEPRINT.md` | **本設計書**（システム全容解体書・技術正本） |
+| `docs/説明書.md` | **完璧運用説明書**（画面操作・帳票・禁止・トラブル・施設切替の運用正本） |
+| `docs/COMPLETE_SYSTEM_ARCHITECTURE_SPEC.md` | 2026-10-23 版の詳細仕様（旧・網羅） |
+| `docs/PROJECT_FULL_SNAPSHOT.md` | プロジェクトスナップショット |
+| `docs/CURRENT_STATUS.md` | 進捗・現状メモ（古い記述混在の可能性） |
+| `docs/PROMPT_FOR_INSTANT_DROP_AND_SMART_UNITS.md` | 即配置・スマート単位向けプロンプト記録 |
+
+### 2.12 モジュール依存の俯瞰
 
 ```mermaid
 flowchart TB
@@ -729,6 +833,7 @@ flowchart LR
 | 日付 | 内容 |
 |------|------|
 | 2026-11-06 | 初版。多施設・透析レーン・装具・共有同期・報酬ライフサイクルをコード走査に基づき統合 |
+| 2026-11-06 | §2を全ファイル個別責務表に拡張（css / views分割 / excel全sheet / print全件 / backup・ui・履歴データ） |
 
 ---
 
