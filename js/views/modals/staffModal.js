@@ -236,6 +236,196 @@ function refreshViewsAfterFacilityHoursChange() {
   }
 }
 
+/**
+ * 設定モーダルのタブ切替（施設・時間帯 / スタッフ人事）
+ * 保存ボタンもタブに合わせて物理表示切替する
+ */
+function switchSettingsTab(tabName) {
+  const isFacility = tabName !== 'staff';
+  const panelFacility = document.getElementById('panelFacilitySettings');
+  const panelStaff = document.getElementById('panelStaffSettings');
+  const tabFacility = document.getElementById('tabBtnFacility');
+  const tabStaff = document.getElementById('tabBtnStaff');
+  const btnSaveFacility = document.getElementById('btnSaveFacilitySettings');
+  const btnSaveStaff = document.getElementById('btnSaveStaffSettings');
+
+  if (panelFacility) {
+    panelFacility.style.display = isFacility ? 'flex' : 'none';
+  }
+  if (panelStaff) {
+    panelStaff.style.display = isFacility ? 'none' : 'flex';
+  }
+
+  const activeStyle = {
+    borderBottom: '3px solid #0284c7',
+    background: '#e0f2fe',
+    color: '#0c4a6e',
+    fontWeight: '800'
+  };
+  const inactiveStyle = {
+    borderBottom: '3px solid transparent',
+    background: 'transparent',
+    color: '#64748b',
+    fontWeight: '700'
+  };
+
+  if (tabFacility) {
+    tabFacility.classList.toggle('active', isFacility);
+    Object.assign(tabFacility.style, isFacility ? activeStyle : inactiveStyle);
+  }
+  if (tabStaff) {
+    tabStaff.classList.toggle('active', !isFacility);
+    Object.assign(tabStaff.style, isFacility ? inactiveStyle : activeStyle);
+  }
+
+  if (btnSaveFacility) btnSaveFacility.style.display = isFacility ? '' : 'none';
+  if (btnSaveStaff) btnSaveStaff.style.display = isFacility ? 'none' : '';
+}
+
+/**
+ * Phase 1: 施設・時間帯のみ保存（セラピスト／助手は読まない・書かない）
+ */
+function saveFacilitySettings(closeModal) {
+  const facilityHours = readFacilityHoursFromForm();
+  const hoursCheck = validateFacilityHours(facilityHours);
+  if (!hoursCheck.ok) {
+    showToast(`【本日時間割】${hoursCheck.message}`, 'error');
+    updateFacilityHoursSlotSummaryBadge();
+    return false;
+  }
+  const hoursSave = saveFacilityHours(hoursCheck.hours);
+  if (!hoursSave.success) {
+    showToast(hoursSave.message || '施設時間の保存に失敗しました', 'error');
+    return false;
+  }
+  const reloaded = reloadFacilityTimeSlots(hoursSave.hours);
+  if (!reloaded.success) {
+    showToast(reloaded.message || '施設時間の反映に失敗しました', 'error');
+    return false;
+  }
+  syncLeavePresetDurations(hoursSave.hours);
+
+  const aptHours = readOutpatientHoursFromForm();
+  const aptCheck = validateOutpatientHours(aptHours);
+  if (!aptCheck.ok) {
+    showToast(`【外来カレンダー】${aptCheck.message}`, 'error');
+    updateOutpatientHoursSlotSummaryBadge();
+    return false;
+  }
+  const aptSave = saveOutpatientHours(aptCheck.hours);
+  if (!aptSave.success) {
+    showToast(aptSave.message || '外来専用時間の保存に失敗しました', 'error');
+    return false;
+  }
+  const aptReloaded = reloadOutpatientTimeSlots(aptSave.hours);
+  if (!aptReloaded.success) {
+    showToast(aptReloaded.message || '外来専用時間の反映に失敗しました', 'error');
+    return false;
+  }
+
+  const facilitySelect = document.getElementById('settingFacilityProfileSelect');
+  const selectedFacilityId = facilitySelect?.value || 'HOSPITAL_A';
+  const prevFacilityId = getCurrentFacilityId();
+  const facilityChanged = selectedFacilityId !== prevFacilityId;
+
+  console.info('[staffModal] facility profile check:', {
+    prevFacilityId,
+    selectedFacilityId,
+    facilityChanged,
+    isDesktop: Boolean(window.desktopApp?.isDesktop || window.electronBackup?.isDesktop),
+    platform: window.desktopApp?.platform || window.electronBackup?.platform || navigator.platform
+  });
+
+  if (facilityChanged) {
+    showToast(
+      `診断: 施設切替 ${prevFacilityId} → ${selectedFacilityId}`,
+      'info'
+    );
+
+    const saveOk = setFacilityProfile(selectedFacilityId);
+    console.info('[staffModal] setFacilityProfile result:', {
+      saveOk,
+      selectedFacilityId,
+      readBackNow: getCurrentFacilityId()
+    });
+
+    if (!saveOk) {
+      showToast(
+        `施設プロファイルの保存に失敗しました（${prevFacilityId} → ${selectedFacilityId}）。DevToolsログを確認してください。`,
+        'error'
+      );
+      if (typeof closeModal === 'function') closeModal();
+      showToast(
+        `施設時間・外来時間は保存済みです（時間割: 計${reloaded.total}コマ／外来: 計${aptReloaded.total}コマ）`,
+        'warn'
+      );
+      refreshViewsAfterFacilityHoursChange();
+      return false;
+    }
+
+    showToast(
+      `施設保存OK（検証済）: ${prevFacilityId} → ${selectedFacilityId}。再読込します…`,
+      'success'
+    );
+    if (typeof closeModal === 'function') closeModal();
+    reloadForFacilityProfileChange({ delayMs: 700, expectedId: selectedFacilityId });
+    return true;
+  }
+
+  if (typeof closeModal === 'function') closeModal();
+  showToast(
+    `施設設定を保存しました（時間割: 計${reloaded.total}コマ／外来: 計${aptReloaded.total}コマ）`,
+    'success'
+  );
+  refreshViewsAfterFacilityHoursChange();
+  return true;
+}
+
+/**
+ * Phase 1: スタッフ人事のみ保存（施設時間・外来時間・施設プロファイルは読まない・書かない）
+ */
+function saveStaffSettings(closeModal) {
+  const panel = document.getElementById('panelStaffSettings') || document;
+  const updateMap = {};
+
+  panel.querySelectorAll('.staff-item-row').forEach((row) => {
+    const tId = row.dataset.therapistId;
+    const nameInput = row.querySelector('.staff-name-input');
+    const statusSelect = row.querySelector('.staff-status-select');
+    const roleSelect = row.querySelector('.therapist-role-select');
+    const lunchStartSelect = row.querySelector('.staff-lunch-start');
+    const lunchEndSelect = row.querySelector('.staff-lunch-end');
+    if (tId && nameInput && statusSelect) {
+      const lunch = resolveTherapistLunchBreak({
+        lunchStart: lunchStartSelect?.value,
+        lunchEnd: lunchEndSelect?.value
+      });
+      const roleRaw = String(roleSelect?.value || 'PT').toUpperCase();
+      const role = (roleRaw === 'OT' || roleRaw === 'ST' || roleRaw === 'PT') ? roleRaw : 'PT';
+      updateMap[tId] = {
+        name: nameInput.value.trim(),
+        status: statusSelect.value,
+        role,
+        lunchStart: lunch.start,
+        lunchEnd: lunch.end
+      };
+    }
+  });
+
+  const staffSaved = updateTherapistSettings(updateMap);
+  const assistant1Input = document.getElementById('assistant1NameInput');
+  const assistant2Input = document.getElementById('assistant2NameInput');
+  const a1Val = assistant1Input ? assistant1Input.value.trim() : '';
+  const a2Val = assistant2Input ? assistant2Input.value.trim() : '';
+  const assistantSaved = saveAssistantSettings(a1Val, a2Val);
+  if (!staffSaved || !assistantSaved) return false;
+
+  if (typeof closeModal === 'function') closeModal();
+  showToast('スタッフ設定を保存しました', 'success');
+  if (typeof onStaffUpdatedCallback === 'function') onStaffUpdatedCallback();
+  return true;
+}
+
 export function setupStaffSettingsModalListeners(onUpdate) {
   onStaffUpdatedCallback = onUpdate;
 
@@ -244,7 +434,8 @@ export function setupStaffSettingsModalListeners(onUpdate) {
   const btnClose = document.getElementById('btnCloseStaffModal');
   const btnCloseX = document.getElementById('btnCloseStaffModalX');
   const btnReset = document.getElementById('btnResetStaffDefault');
-  const form = document.getElementById('staffSettingsForm');
+  const btnSaveFacility = document.getElementById('btnSaveFacilitySettings');
+  const btnSaveStaff = document.getElementById('btnSaveStaffSettings');
   const searchInput = document.getElementById('staffSearchInput');
   const btnAdd = document.getElementById('btnAddNewStaff');
   const newNameInput = document.getElementById('newStaffNameInput');
@@ -299,6 +490,13 @@ export function setupStaffSettingsModalListeners(onUpdate) {
   // 起動時にも休暇プリセットを現行コマ数へ同期
   syncLeavePresetDurations(getSavedFacilityHours());
 
+  document.getElementById('tabBtnFacility')?.addEventListener('click', () => {
+    switchSettingsTab('facility');
+  });
+  document.getElementById('tabBtnStaff')?.addEventListener('click', () => {
+    switchSettingsTab('staff');
+  });
+
   btnOpen?.addEventListener('click', () => {
     if (searchInput) searchInput.value = '';
     renderStaffSettingsFields();
@@ -318,12 +516,20 @@ export function setupStaffSettingsModalListeners(onUpdate) {
       facilitySelect.value = getCurrentFacilityId() || 'HOSPITAL_A';
     }
 
+    switchSettingsTab('facility');
     modal?.classList.add('active');
   });
 
   const closeModal = () => modal?.classList.remove('active');
   btnClose?.addEventListener('click', closeModal);
   btnCloseX?.addEventListener('click', closeModal);
+
+  btnSaveFacility?.addEventListener('click', () => {
+    saveFacilitySettings(closeModal);
+  });
+  btnSaveStaff?.addEventListener('click', () => {
+    saveStaffSettings(closeModal);
+  });
 
   searchInput?.addEventListener('input', () => {
     renderStaffSettingsFields();
@@ -357,6 +563,11 @@ export function setupStaffSettingsModalListeners(onUpdate) {
   });
 
   btnReset?.addEventListener('click', () => {
+    const ok = window.confirm(
+      '施設時間・外来時間・セラピスト・助手をすべて初期デフォルトに戻します。よろしいですか？'
+    );
+    if (!ok) return;
+
     const resetLunch = {
       lunchStart: DEFAULT_FACILITY_HOURS.defaultLunchStart || DEFAULT_LUNCH_BREAK.start,
       lunchEnd: DEFAULT_FACILITY_HOURS.defaultLunchEnd || DEFAULT_LUNCH_BREAK.end
@@ -398,141 +609,6 @@ export function setupStaffSettingsModalListeners(onUpdate) {
 
     renderStaffSettingsFields();
     showToast('セラピスト・助手・施設時間・外来専用時間を初期デフォルトに戻しました', 'info');
-    refreshViewsAfterFacilityHoursChange();
-  });
-
-  form?.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const updateMap = {};
-
-    form.querySelectorAll('.staff-item-row').forEach((row) => {
-      const tId = row.dataset.therapistId;
-      const nameInput = row.querySelector('.staff-name-input');
-      const statusSelect = row.querySelector('.staff-status-select');
-      const roleSelect = row.querySelector('.therapist-role-select');
-      const lunchStartSelect = row.querySelector('.staff-lunch-start');
-      const lunchEndSelect = row.querySelector('.staff-lunch-end');
-      if (tId && nameInput && statusSelect) {
-        const lunch = resolveTherapistLunchBreak({
-          lunchStart: lunchStartSelect?.value,
-          lunchEnd: lunchEndSelect?.value
-        });
-        const roleRaw = String(roleSelect?.value || 'PT').toUpperCase();
-        const role = (roleRaw === 'OT' || roleRaw === 'ST' || roleRaw === 'PT') ? roleRaw : 'PT';
-        updateMap[tId] = {
-          name: nameInput.value.trim(),
-          status: statusSelect.value,
-          role,
-          lunchStart: lunch.start,
-          lunchEnd: lunch.end
-        };
-      }
-    });
-
-    // ★施設時間（本日時間割）: バリデーション → 保存 → メモリ即時更新
-    const facilityHours = readFacilityHoursFromForm();
-    const hoursCheck = validateFacilityHours(facilityHours);
-    if (!hoursCheck.ok) {
-      showToast(`【本日時間割】${hoursCheck.message}`, 'error');
-      updateFacilityHoursSlotSummaryBadge();
-      return;
-    }
-    const hoursSave = saveFacilityHours(hoursCheck.hours);
-    if (!hoursSave.success) {
-      showToast(hoursSave.message || '施設時間の保存に失敗しました', 'error');
-      return;
-    }
-    const reloaded = reloadFacilityTimeSlots(hoursSave.hours);
-    if (!reloaded.success) {
-      showToast(reloaded.message || '施設時間の反映に失敗しました', 'error');
-      return;
-    }
-    syncLeavePresetDurations(hoursSave.hours);
-
-    // ★外来専用時間: 施設とは独立に検証・保存・反映
-    const aptHours = readOutpatientHoursFromForm();
-    const aptCheck = validateOutpatientHours(aptHours);
-    if (!aptCheck.ok) {
-      showToast(`【外来カレンダー】${aptCheck.message}`, 'error');
-      updateOutpatientHoursSlotSummaryBadge();
-      return;
-    }
-    const aptSave = saveOutpatientHours(aptCheck.hours);
-    if (!aptSave.success) {
-      showToast(aptSave.message || '外来専用時間の保存に失敗しました', 'error');
-      return;
-    }
-    const aptReloaded = reloadOutpatientTimeSlots(aptSave.hours);
-    if (!aptReloaded.success) {
-      showToast(aptReloaded.message || '外来専用時間の反映に失敗しました', 'error');
-      return;
-    }
-
-    const staffSaved = updateTherapistSettings(updateMap);
-
-    const a1Val = assistant1Input ? assistant1Input.value.trim() : '';
-    const a2Val = assistant2Input ? assistant2Input.value.trim() : '';
-    const assistantSaved = saveAssistantSettings(a1Val, a2Val);
-    if (!staffSaved || !assistantSaved) return;
-
-    // ★全設定（スタッフ・助手・時間割）が正常に保存された後に、施設プロファイルを保存
-    const facilitySelect = document.getElementById('settingFacilityProfileSelect');
-    const selectedFacilityId = facilitySelect?.value || 'HOSPITAL_A';
-    const prevFacilityId = getCurrentFacilityId();
-    const facilityChanged = selectedFacilityId !== prevFacilityId;
-
-    console.info('[staffModal] facility profile check:', {
-      prevFacilityId,
-      selectedFacilityId,
-      facilityChanged,
-      isDesktop: Boolean(window.desktopApp?.isDesktop || window.electronBackup?.isDesktop),
-      platform: window.desktopApp?.platform || window.electronBackup?.platform || navigator.platform
-    });
-
-    if (facilityChanged) {
-      // 診断: 判定が true であること・変更前後IDを画面上に明示
-      showToast(
-        `診断: 施設切替 ${prevFacilityId} → ${selectedFacilityId}`,
-        'info'
-      );
-
-      const saveOk = setFacilityProfile(selectedFacilityId);
-      console.info('[staffModal] setFacilityProfile result:', {
-        saveOk,
-        selectedFacilityId,
-        readBackNow: getCurrentFacilityId()
-      });
-
-      if (!saveOk) {
-        showToast(
-          `施設プロファイルの保存に失敗しました（${prevFacilityId} → ${selectedFacilityId}）。DevToolsログを確認してください。`,
-          'error'
-        );
-        // スタッフ等は既に保存済みのためモーダルは閉じるが、リロードはしない
-        closeModal();
-        showToast(
-          `スタッフ・時間設定は保存済みです（時間割: 計${reloaded.total}コマ／外来: 計${aptReloaded.total}コマ）`,
-          'warn'
-        );
-        refreshViewsAfterFacilityHoursChange();
-        return;
-      }
-
-      showToast(
-        `施設保存OK（検証済）: ${prevFacilityId} → ${selectedFacilityId}。再読込します…`,
-        'success'
-      );
-      closeModal();
-      // Windows/Electron: 書込フラッシュ待ち＋キャッシュ回避URLで確実に再読込
-      reloadForFacilityProfileChange({ delayMs: 700, expectedId: selectedFacilityId });
-      return;
-    }
-
-    closeModal();
-    showToast(
-      `保存しました（時間割: 計${reloaded.total}コマ／外来: 計${aptReloaded.total}コマ）`,
-      'success'
-    );
     refreshViewsAfterFacilityHoursChange();
   });
 }

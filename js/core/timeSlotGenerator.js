@@ -3,6 +3,9 @@
 // デフォルト: 午前 09:00〜13:00（12コマ）／午後 13:00〜18:00（15コマ）＝計27コマ（昼休憩なし・完全連続）
 // 画面設定の永続化キー: localStorage 'reha_facility_hours'
 // 旧既定（pmStart=14:00）は読込時に 13:00 へ自動マイグレーションし、13:00〜14:00 の3コマを復活させる
+// ★施設／外来時間は localStorage 正本 + storageAdapter ミラー（共有 pull の孤立削除耐性）
+
+import { storageGet, storageSet } from './storageAdapter.js';
 
 /**
  * 施設の診療時間設定（スタッフ設定モーダル／定数初期値で同じ形）
@@ -21,6 +24,47 @@ export const FACILITY_HOURS_STORAGE_KEY = 'reha_facility_hours';
 
 /** localStorage キー（外来予約カレンダー専用 提供時間・昼休み） */
 export const OUTPATIENT_HOURS_STORAGE_KEY = 'reha_outpatient_calendar_hours';
+
+/**
+ * 時間設定 JSON を読む（adapter → localStorage）
+ * @param {string} key
+ * @returns {string|null}
+ */
+function readHoursRaw(key) {
+  try {
+    const fromAdapter = storageGet(key, null);
+    if (typeof fromAdapter === 'string' && fromAdapter) return fromAdapter;
+  } catch (_) { /* ignore */ }
+  try {
+    if (typeof localStorage !== 'undefined') {
+      return localStorage.getItem(key);
+    }
+  } catch (_) { /* ignore */ }
+  return null;
+}
+
+/**
+ * 時間設定 JSON を localStorage 正本 + adapter ミラーへ書く
+ * @param {string} key
+ * @param {string} json
+ * @returns {boolean}
+ */
+function writeHoursRaw(key, json) {
+  let ok = false;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(key, json);
+      ok = true;
+    }
+  } catch (_) {
+    ok = false;
+  }
+  try {
+    storageSet(key, json);
+    ok = true;
+  } catch (_) { /* adapter 未初期化時は LS のみでも可 */ }
+  return ok;
+}
 
 /**
  * 旧既定（昼休憩で 13:00〜14:00 が欠落していた構成）
@@ -247,10 +291,7 @@ export function formatFacilityHoursSummary(hours) {
  */
 export function getSavedFacilityHours() {
   try {
-    if (typeof localStorage === 'undefined') {
-      return { ...DEFAULT_FACILITY_HOURS };
-    }
-    const raw = localStorage.getItem(FACILITY_HOURS_STORAGE_KEY);
+    const raw = readHoursRaw(FACILITY_HOURS_STORAGE_KEY);
     if (!raw) return { ...DEFAULT_FACILITY_HOURS };
 
     const parsed = JSON.parse(raw);
@@ -260,7 +301,7 @@ export function getSavedFacilityHours() {
 
     if (migrated) {
       try {
-        localStorage.setItem(FACILITY_HOURS_STORAGE_KEY, JSON.stringify(check.hours));
+        writeHoursRaw(FACILITY_HOURS_STORAGE_KEY, JSON.stringify(check.hours));
         markFacilityLegacyGapMigrated();
       } catch (_) {
         // 読込側マイグレーション結果は返しつつ、書き込み失敗は握りつぶす
@@ -284,10 +325,12 @@ export function saveFacilityHours(hours) {
     return { success: false, message: check.message, hours: check.hours };
   }
   try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(FACILITY_HOURS_STORAGE_KEY, JSON.stringify(check.hours));
-      // 保存成功時点で移行フラグを立て、以降の強制巻き戻しを止める（意図的な昼休みを許容）
-      markFacilityLegacyGapMigrated();
+    const json = JSON.stringify(check.hours);
+    const ok = writeHoursRaw(FACILITY_HOURS_STORAGE_KEY, json);
+    // 保存成功時点で移行フラグを立て、以降の強制巻き戻しを止める（意図的な昼休みを許容）
+    markFacilityLegacyGapMigrated();
+    if (!ok) {
+      return { success: false, message: '施設時間の保存に失敗しました（ストレージ書き込み不可）', hours: check.hours };
     }
     return { success: true, message: '施設リハビリ提供時間を保存しました', hours: check.hours };
   } catch (_) {
@@ -301,17 +344,22 @@ export function saveFacilityHours(hours) {
  * @returns {FacilityHours}
  */
 export function normalizeOutpatientHours(hours) {
-  const base = normalizeFacilityHours({
-    ...DEFAULT_OUTPATIENT_HOURS,
-    ...(hours || {})
-  });
+  // ★外来は連続枠（昼休みゼロ＝lunchStart===lunchEnd）を許容する。
+  //   normalizeFacilityHours の「終了≦開始ならデフォルトへ戻す」を通すと巻き戻るため独自正規化。
+  const defaultLunchStart = normalizeTimeString(hours?.defaultLunchStart)
+    || DEFAULT_OUTPATIENT_HOURS.defaultLunchStart;
+  let defaultLunchEnd = normalizeTimeString(hours?.defaultLunchEnd)
+    || DEFAULT_OUTPATIENT_HOURS.defaultLunchEnd;
+  if (defaultLunchEnd < defaultLunchStart) {
+    defaultLunchEnd = defaultLunchStart;
+  }
   return {
     amStart: normalizeTimeString(hours?.amStart) || DEFAULT_OUTPATIENT_HOURS.amStart,
     amEnd: normalizeTimeString(hours?.amEnd) || DEFAULT_OUTPATIENT_HOURS.amEnd,
     pmStart: normalizeTimeString(hours?.pmStart) || DEFAULT_OUTPATIENT_HOURS.pmStart,
     pmEnd: normalizeTimeString(hours?.pmEnd) || DEFAULT_OUTPATIENT_HOURS.pmEnd,
-    defaultLunchStart: base.defaultLunchStart || DEFAULT_OUTPATIENT_HOURS.defaultLunchStart,
-    defaultLunchEnd: base.defaultLunchEnd || DEFAULT_OUTPATIENT_HOURS.defaultLunchEnd
+    defaultLunchStart,
+    defaultLunchEnd
   };
 }
 
@@ -333,15 +381,12 @@ export function validateOutpatientHours(hours) {
  */
 export function getSavedOutpatientHours() {
   try {
-    if (typeof localStorage === 'undefined') {
-      return { ...DEFAULT_OUTPATIENT_HOURS };
-    }
-    const raw = localStorage.getItem(OUTPATIENT_HOURS_STORAGE_KEY);
+    const raw = readHoursRaw(OUTPATIENT_HOURS_STORAGE_KEY);
     if (!raw) {
       // 初回シード: 施設キーの生JSONを優先（施設側マイグレーションの巻き戻しを持ち込まない）
       let seedSource = { ...DEFAULT_OUTPATIENT_HOURS };
       try {
-        const facilityRaw = localStorage.getItem(FACILITY_HOURS_STORAGE_KEY);
+        const facilityRaw = readHoursRaw(FACILITY_HOURS_STORAGE_KEY);
         if (facilityRaw) {
           seedSource = normalizeOutpatientHours(JSON.parse(facilityRaw));
         }
@@ -349,7 +394,7 @@ export function getSavedOutpatientHours() {
       const check = validateOutpatientHours(seedSource);
       const hours = check.ok ? check.hours : { ...DEFAULT_OUTPATIENT_HOURS };
       try {
-        localStorage.setItem(OUTPATIENT_HOURS_STORAGE_KEY, JSON.stringify(hours));
+        writeHoursRaw(OUTPATIENT_HOURS_STORAGE_KEY, JSON.stringify(hours));
       } catch (_) { /* ignore */ }
       return hours;
     }
@@ -376,8 +421,14 @@ export function saveOutpatientHours(hours) {
     return { success: false, message: check.message, hours: check.hours };
   }
   try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(OUTPATIENT_HOURS_STORAGE_KEY, JSON.stringify(check.hours));
+    const json = JSON.stringify(check.hours);
+    const ok = writeHoursRaw(OUTPATIENT_HOURS_STORAGE_KEY, json);
+    if (!ok) {
+      return {
+        success: false,
+        message: '外来専用時間の保存に失敗しました（ストレージ書き込み不可）',
+        hours: check.hours
+      };
     }
     return { success: true, message: '外来予約カレンダー専用の提供時間を保存しました', hours: check.hours };
   } catch (_) {

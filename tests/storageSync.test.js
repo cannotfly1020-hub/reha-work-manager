@@ -148,6 +148,9 @@ function isSharedSyncProtectedLocalKey(key) {
   if (key === 'reha_audit_logs') return true;
   if (key === 'reha_last_shared_sync_timestamp') return true;
   if (key === 'reha_shared_key_meta_snapshot') return true;
+  if (key === 'reha_facility_hours') return true;
+  if (key === 'reha_outpatient_calendar_hours') return true;
+  if (key === 'reha_facility_hours_legacy_gap_migrated_v1') return true;
   return false;
 }
 

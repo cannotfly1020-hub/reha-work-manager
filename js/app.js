@@ -42,6 +42,14 @@ import { setupAppointmentModalListeners } from './views/modals/appointmentModal.
 import { initAuditLogView, renderAuditTimeline, refreshOperatorBadge } from './views/auditLogView.js';
 import { mergeAuditLogs } from './store/auditLogStore.js';
 import { isFeatureEnabled } from './config/facilityConfig.js';
+import {
+  getSavedFacilityHours,
+  getSavedOutpatientHours
+} from './core/timeSlotGenerator.js';
+import {
+  reloadFacilityTimeSlots,
+  reloadOutpatientTimeSlots
+} from './config/rules.js';
 
 /** @type {ReturnType<typeof setTimeout>|null} */
 let sharedMasterSaveTimer = null;
@@ -160,6 +168,10 @@ function isSharedSyncProtectedLocalKey(key) {
   if (key === 'reha_audit_logs') return true;
   if (key === LAST_SHARED_SYNC_LS_KEY) return true;
   if (key === SHARED_KEY_META_LS_KEY) return true;
+  // 施設／外来の提供時間は PC ローカル設定。共有 dump に無いと孤立削除され再起動で既定値に戻るため保護する
+  if (key === 'reha_facility_hours') return true;
+  if (key === 'reha_outpatient_calendar_hours') return true;
+  if (key === 'reha_facility_hours_legacy_gap_migrated_v1') return true;
   return false;
 }
 
@@ -308,6 +320,13 @@ async function pullSharedMasterToLocal(opts = {}) {
     const { applied, removed } = applySharedMasterDump(res.data);
     const dumpTs = parseDumpTimestampMs(res.data);
     recordLastSharedSyncTimestamp(dumpTs > 0 ? dumpTs : Date.now());
+    // pull 後も施設／外来時間をローカル保存値からメモリへ再反映（孤立削除・上書き後の巻き戻し防止）
+    try {
+      reloadFacilityTimeSlots(getSavedFacilityHours());
+      reloadOutpatientTimeSlots(getSavedOutpatientHours());
+    } catch (reloadErr) {
+      console.warn('[app] hours reload after shared pull soft-fail:', reloadErr);
+    }
     console.log(
       `[app] 共有マスター同期完了: applied=${applied} removed=${removed} device=${getDeviceClientId()} from ${res.filePath || ''}`
     );

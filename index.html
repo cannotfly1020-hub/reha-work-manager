@@ -55,9 +55,9 @@
         <span>最新に更新</span>
       </button>
       <!-- スタッフ設定ボタン -->
-      <button id="btnOpenStaffSettings" type="button" class="header-action-btn">
+      <button id="btnOpenStaffSettings" type="button" class="header-action-btn" title="施設環境・スタッフ設定">
         <span>⚙</span>
-        <span>スタッフ設定</span>
+        <span>施設環境設定</span>
       </button>
     </div>
   </header>
@@ -889,209 +889,225 @@
     </div>
   </div>
 
-  <!-- モーダル 6: セラピストマスター設定（名称変更・動的登録・ステータス管理・リアルタイム検索・退職者折りたたみ ＋ ★リハビリ助手設定） -->
+  <!-- モーダル 6: 施設環境・スタッフ設定（タブ分離＋保存二分） -->
   <div id="modalStaffSettings" class="modal-overlay">
-    <div class="modal-card" style="max-width:600px; max-height:85vh; display:flex; flex-direction:column;">
+    <div class="modal-card" style="max-width:640px; max-height:85vh; display:flex; flex-direction:column;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-        <h3 style="font-size:1.05rem; font-weight:800; color:#0f172a; margin:0;">⚙ スタッフ設定</h3>
+        <h3 style="font-size:1.05rem; font-weight:800; color:#0f172a; margin:0;">⚙ 施設環境・スタッフ設定</h3>
         <button type="button" id="btnCloseStaffModalX" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:#64748b;">✕</button>
       </div>
-      <p style="font-size:0.75rem; color:#64748b; margin-bottom:12px;">
-        時間割には「稼働中」のセラピストのみが表示されます。各行の<strong>職種（PT/OT/ST）</strong>はExcel個別リハ・患者月間実績の縦結合／分離集計に使われます（氏名に(OT)等を書かなくても可）。リハビリ助手の氏名は業務日誌の出勤確認欄に自動反映されます。「本日の時間割」用の施設時間と、「外来予約カレンダー」専用時間はそれぞれ独立して設定できます。
+      <p style="font-size:0.75rem; color:#64748b; margin-bottom:10px;">
+        「施設・時間帯」と「スタッフ人事」はタブで分かれ、保存ボタンも別です。セラピストを変更しても施設・外来時間は巻き込まれません。
       </p>
 
-      <!-- リアルタイム検索 & 新規セラピスト追加バー -->
-      <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px; background:#f8fafc; padding:10px; border-radius:6px; border:1px solid #e2e8f0;">
-        <div style="display:flex; gap:8px;">
-          <input type="text" id="staffSearchInput" placeholder="セラピスト名・枠IDで絞り込み..." style="flex:1; padding:6px 10px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff;">
+      <div class="settings-tab-bar" style="display:flex; gap:8px; border-bottom:2px solid #e2e8f0; margin-bottom:12px; padding-bottom:0;">
+        <button type="button" id="tabBtnFacility" class="settings-tab-btn active"
+                style="padding:8px 14px; font-size:0.82rem; font-weight:800; border:none; border-bottom:3px solid #0284c7; background:#e0f2fe; color:#0c4a6e; border-radius:4px 4px 0 0; cursor:pointer;">
+          🏥 施設・時間帯
+        </button>
+        <button type="button" id="tabBtnStaff" class="settings-tab-btn"
+                style="padding:8px 14px; font-size:0.82rem; font-weight:700; border:none; border-bottom:3px solid transparent; background:transparent; color:#64748b; border-radius:4px 4px 0 0; cursor:pointer;">
+          👤 スタッフ人事
+        </button>
+      </div>
+
+      <div id="settingsTabPanels" style="display:flex; flex-direction:column; gap:10px; overflow-y:auto; flex:1; padding-right:4px;">
+
+        <!-- ===== タブ: 施設・時間帯 ===== -->
+        <div id="panelFacilitySettings" class="settings-tab-panel" data-settings-tab="facility" style="display:flex; flex-direction:column; gap:10px;">
+
+          <div class="staff-setting-section" style="padding:12px; background:#f8fafc; border:1.5px solid #cbd5e1; border-radius:6px;">
+            <label style="display:block; font-size:0.88rem; font-weight:800; color:#0f172a; margin-bottom:6px;">
+              🏥 施設プロファイル切替（病院機能設定）
+            </label>
+            <select id="settingFacilityProfileSelect" style="width:100%; padding:6px 10px; font-size:0.85rem; font-weight:700; border:1px solid #94a3b8; border-radius:4px; background:#fff; color:#1e293b;">
+              <option value="HOSPITAL_A">🏥 伊藤内科（外来予約あり・物品貸出あり・消炎鎮痛あり）</option>
+              <option value="HOSPITAL_B">🏥 いとう腎クリニック（透析運動加算あり・装具採型あり・消炎鎮痛あり）</option>
+            </select>
+            <div style="margin-top:5px; font-size:0.72rem; color:#64748b; line-height:1.3;">
+              ※変更して「施設設定を保存」すると、選択病院の専用機能に連動して再読込されます。
+            </div>
+          </div>
+
+          <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:6px; padding:10px;">
+            <div style="font-size:0.8rem; font-weight:800; color:#0c4a6e; margin-bottom:6px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              <span>🏥 施設リハビリ提供時間設定</span>
+              <span style="font-size:0.68rem; color:#0369a1; font-weight:normal;">（本日の時間割専用・外来カレンダーには影響しません）</span>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+              <div>
+                <label for="settingAmStartInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午前開始</label>
+                <input type="time" id="settingAmStartInput" value="09:00" step="300"
+                       style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
+              </div>
+              <div>
+                <label for="settingAmEndInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午前終了</label>
+                <input type="time" id="settingAmEndInput" value="13:00" step="300"
+                       style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
+              </div>
+              <div>
+                <label for="settingPmStartInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午後開始（既定は午前終了と同時刻＝連続）</label>
+                <input type="time" id="settingPmStartInput" value="13:00" step="300"
+                       style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
+              </div>
+              <div>
+                <label for="settingPmEndInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">業務終了</label>
+                <input type="time" id="settingPmEndInput" value="18:00" step="300"
+                       style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
+              </div>
+            </div>
+            <div id="facilityHoursSlotSummaryBadge"
+                 style="margin-top:8px; display:inline-block; padding:4px 10px; border-radius:999px; border:1px solid #a7f3d0; background:#ecfdf5; color:#065f46; font-size:0.72rem; font-weight:700;">
+              午前 12コマ ／ 午後 15コマ ＝ 計 27コマ（昼休憩なし）
+            </div>
+            <p style="font-size:0.68rem; color:#64748b; margin:6px 0 0;">
+              条件: 午前開始 &lt; 午前終了 ≦ 午後開始 &lt; 業務終了。20分刻みで「本日の時間割」コマを自動生成します。
+            </p>
+
+            <div style="margin-top:10px; padding-top:10px; border-top:1px dashed #7dd3fc;">
+              <div style="font-size:0.78rem; font-weight:800; color:#9a3412; margin-bottom:6px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                <span>🍽️ 標準昼休み時間</span>
+                <span style="font-size:0.65rem; color:#c2410c; font-weight:600;">（新規スタッフ初期値／一括適用の基準・本日時間割ハイライト連動）</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                <label for="settingDefaultLunchStart" style="font-size:0.72rem; font-weight:700; color:#9a3412;">開始</label>
+                <select id="settingDefaultLunchStart" title="施設標準・昼休み開始"
+                        style="padding:5px 8px; border:1px solid #fdba74; border-radius:4px; font-size:0.78rem; font-weight:700; background:#fff7ed; color:#9a3412; cursor:pointer;">
+                  <option value="11:00">11:00</option>
+                  <option value="11:20">11:20</option>
+                  <option value="11:40">11:40</option>
+                  <option value="12:00" selected>12:00</option>
+                  <option value="12:20">12:20</option>
+                  <option value="12:40">12:40</option>
+                  <option value="13:00">13:00</option>
+                  <option value="13:20">13:20</option>
+                  <option value="13:40">13:40</option>
+                  <option value="14:00">14:00</option>
+                </select>
+                <span style="font-size:0.75rem; font-weight:700; color:#78716c;">〜</span>
+                <label for="settingDefaultLunchEnd" style="font-size:0.72rem; font-weight:700; color:#9a3412;">終了</label>
+                <select id="settingDefaultLunchEnd" title="施設標準・昼休み終了"
+                        style="padding:5px 8px; border:1px solid #fdba74; border-radius:4px; font-size:0.78rem; font-weight:700; background:#fff7ed; color:#9a3412; cursor:pointer;">
+                  <option value="11:40">11:40</option>
+                  <option value="12:00">12:00</option>
+                  <option value="12:20">12:20</option>
+                  <option value="12:40">12:40</option>
+                  <option value="13:00" selected>13:00</option>
+                  <option value="13:20">13:20</option>
+                  <option value="13:40">13:40</option>
+                  <option value="14:00">14:00</option>
+                  <option value="14:20">14:20</option>
+                  <option value="14:40">14:40</option>
+                  <option value="15:00">15:00</option>
+                </select>
+                <button type="button" id="btnApplyDefaultLunchToAllStaff"
+                        style="padding:5px 10px; border:1px solid #ea580c; background:#fff; color:#c2410c; border-radius:4px; font-size:0.75rem; font-weight:800; cursor:pointer; white-space:nowrap;">
+                  ⚡ 全スタッフに一括適用
+                </button>
+              </div>
+              <label style="display:flex; align-items:center; gap:6px; margin-top:6px; font-size:0.72rem; font-weight:600; color:#78716c; cursor:pointer; user-select:none;">
+                <input type="checkbox" id="chkOverwriteCustomLunch" style="accent-color:#ea580c;">
+                個別変更済みのスタッフも上書きする（未チェック時は施設標準と異なる設定者を保護）
+              </label>
+              <p style="font-size:0.65rem; color:#9a3412; margin:6px 0 0; line-height:1.35;">
+                ※一括適用は明示クリック時のみ。施設設定の保存とは別動作です（スタッフ個別昼休みへ即時反映）。
+              </p>
+            </div>
+          </div>
+
+          <div style="background:#ecfdf5; border:1px solid #6ee7b7; border-radius:6px; padding:10px;">
+            <div style="font-size:0.8rem; font-weight:800; color:#065f46; margin-bottom:6px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              <span>📅 外来予約カレンダー専用 提供時間・昼休み設定</span>
+              <span style="font-size:0.68rem; color:#047857; font-weight:normal;">（外来カレンダー・週間予約印刷のみ／本日の時間割は変更しません）</span>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+              <div>
+                <label for="settingAptAmStartInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午前開始</label>
+                <input type="time" id="settingAptAmStartInput" value="09:00" step="300"
+                       style="width:100%; padding:5px 8px; border:1px solid #a7f3d0; border-radius:4px; font-size:0.8rem; background:#fff;">
+              </div>
+              <div>
+                <label for="settingAptAmEndInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午前終了</label>
+                <input type="time" id="settingAptAmEndInput" value="13:00" step="300"
+                       style="width:100%; padding:5px 8px; border:1px solid #a7f3d0; border-radius:4px; font-size:0.8rem; background:#fff;">
+              </div>
+              <div>
+                <label for="settingAptPmStartInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午後開始（午前終了より後＝昼休みあり）</label>
+                <input type="time" id="settingAptPmStartInput" value="13:00" step="300"
+                       style="width:100%; padding:5px 8px; border:1px solid #a7f3d0; border-radius:4px; font-size:0.8rem; background:#fff;">
+              </div>
+              <div>
+                <label for="settingAptPmEndInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">業務終了</label>
+                <input type="time" id="settingAptPmEndInput" value="18:00" step="300"
+                       style="width:100%; padding:5px 8px; border:1px solid #a7f3d0; border-radius:4px; font-size:0.8rem; background:#fff;">
+              </div>
+            </div>
+            <div id="outpatientHoursSlotSummaryBadge"
+                 style="margin-top:8px; display:inline-block; padding:4px 10px; border-radius:999px; border:1px solid #a7f3d0; background:#fff; color:#065f46; font-size:0.72rem; font-weight:700;">
+              午前 12コマ ／ 午後 15コマ ＝ 計 27コマ（昼休憩なし）
+            </div>
+            <p style="font-size:0.68rem; color:#64748b; margin:6px 0 0;">
+              午前終了〜午後開始のあいだが外来カレンダー上の昼休み帯になります。既存の予約データはそのまま保持されます。
+            </p>
+          </div>
         </div>
-        <div style="display:flex; gap:8px pocket; align-items:center;">
-          <input type="text" id="newStaffNameInput" placeholder="新規セラピスト氏名（例: 山田 太郎）" style="flex:1; padding:6px 10px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff;">
-          <button type="button" id="btnAddNewStaff" style="padding:6px 14px; background:#0284c7; color:#fff; border:none; border-radius:4px; font-size:0.82rem; font-weight:700; cursor:pointer; white-space:nowrap;">＋ 追加</button>
+
+        <!-- ===== タブ: スタッフ人事 ===== -->
+        <div id="panelStaffSettings" class="settings-tab-panel" data-settings-tab="staff" style="display:none; flex-direction:column; gap:10px;">
+          <p style="font-size:0.75rem; color:#64748b; margin:0;">
+            時間割には「稼働中」のみ表示。職種（PT/OT/ST）はExcel・月間実績の分離集計に使われます。助手名は業務日誌へ反映されます。
+          </p>
+
+          <div style="display:flex; flex-direction:column; gap:8px; background:#f8fafc; padding:10px; border-radius:6px; border:1px solid #e2e8f0;">
+            <div style="display:flex; gap:8px;">
+              <input type="text" id="staffSearchInput" placeholder="セラピスト名・枠IDで絞り込み..." style="flex:1; padding:6px 10px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff;">
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <input type="text" id="newStaffNameInput" placeholder="新規セラピスト氏名（例: 山田 太郎）" style="flex:1; padding:6px 10px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.82rem; background:#fff;">
+              <button type="button" id="btnAddNewStaff" style="padding:6px 14px; background:#0284c7; color:#fff; border:none; border-radius:4px; font-size:0.82rem; font-weight:700; cursor:pointer; white-space:nowrap;">＋ 追加</button>
+            </div>
+          </div>
+
+          <div id="staffSettingsListContainer" style="display:flex; flex-direction:column; gap:8px;"
+               data-staff-row-template="name+role(PT|OT|ST)+status+lunch">
+          </div>
+
+          <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:10px;">
+            <div style="font-size:0.8rem; font-weight:800; color:#0f172a; margin-bottom:4px; display:flex; align-items:center; gap:6px;">
+              <span>🤝 リハビリ助手設定</span>
+              <span style="font-size:0.68rem; color:#64748b; font-weight:normal;">(業務日誌の出勤欄に氏名が自動反映されます)</span>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+              <div>
+                <label for="assistant1NameInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">助手 1 氏名</label>
+                <input type="text" id="assistant1NameInput" placeholder="例: 佐々木 花子 (空欄時: リハビリ助手 1)"
+                       style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
+              </div>
+              <div>
+                <label for="assistant2NameInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">助手 2 氏名</label>
+                <input type="text" id="assistant2NameInput" placeholder="例: 高橋 恵美 (空欄時: リハビリ助手 2)"
+                       style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
+              </div>
+            </div>
+          </div>
+
+          <details id="retiredStaffAccordion" style="background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; padding:8px 10px;">
+            <summary style="font-size:0.78rem; font-weight:700; color:#64748b; cursor:pointer; user-select:none;">
+              ▶ 過去・退職者（非表示スタッフ）を表示する
+            </summary>
+            <div id="retiredStaffListContainer" style="display:flex; flex-direction:column; gap:6px; margin-top:8px;"></div>
+          </details>
         </div>
       </div>
 
-      <form id="staffSettingsForm" style="display:flex; flex-direction:column; gap:10px; overflow-y:auto; flex:1; padding-right:4px;">
-        <!-- 現役（稼働中・休職中）セラピストリスト -->
-        <div id="staffSettingsListContainer" style="display:flex; flex-direction:column; gap:8px;"
-             data-staff-row-template="name+role(PT|OT|ST)+status+lunch">
-          <!-- JSで動的展開: 氏名 / therapist-role-select(PT|OT|ST) / ステータス / 昼休み -->
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px; padding-top:8px; border-top:1px solid #e2e8f0; gap:8px; flex-wrap:wrap;">
+        <button type="button" id="btnResetStaffDefault" style="padding:6px 12px; background:#fff; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; color:#64748b; cursor:pointer;" title="施設時間・外来時間・スタッフ・助手を初期化（確認あり）">デフォルトに戻す</button>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-left:auto;">
+          <button type="button" id="btnCloseStaffModal" style="padding:6px 14px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; cursor:pointer;">閉じる</button>
+          <button type="button" id="btnSaveFacilitySettings" style="padding:6px 16px; background:#0284c7; color:#fff; border:none; border-radius:4px; font-size:0.85rem; font-weight:700; cursor:pointer;">🏥 施設設定を保存</button>
+          <button type="button" id="btnSaveStaffSettings" style="display:none; padding:6px 16px; background:#0284c7; color:#fff; border:none; border-radius:4px; font-size:0.85rem; font-weight:700; cursor:pointer;">👤 スタッフ設定を保存</button>
         </div>
-
-        <!-- ★リハビリ助手設定（業務日誌の出勤欄へ自動反映） -->
-        <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:10px; margin-top:4px;">
-          <div style="font-size:0.8rem; font-weight:800; color:#0f172a; margin-bottom:4px; display:flex; align-items:center; gap:6px;">
-            <span>🤝 リハビリ助手設定</span>
-            <span style="font-size:0.68rem; color:#64748b; font-weight:normal;">(業務日誌の出勤欄に氏名が自動反映されます)</span>
-          </div>
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
-            <div>
-              <label for="assistant1NameInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">助手 1 氏名</label>
-              <input type="text" id="assistant1NameInput" placeholder="例: 佐々木 花子 (空欄時: リハビリ助手 1)"
-                     style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
-            </div>
-            <div>
-              <label for="assistant2NameInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">助手 2 氏名</label>
-              <input type="text" id="assistant2NameInput" placeholder="例: 高橋 恵美 (空欄時: リハビリ助手 2)"
-                     style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
-            </div>
-          </div>
-        </div>
-
-        <!-- 施設プロファイル設定エリア -->
-        <div class="staff-setting-section" style="margin-bottom: 16px; padding: 12px; background: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 6px;">
-          <label style="display: block; font-size: 0.88rem; font-weight: 800; color: #0f172a; margin-bottom: 6px;">
-            🏥 施設プロファイル切替（病院機能設定）
-          </label>
-          <select id="settingFacilityProfileSelect" style="width: 100%; padding: 6px 10px; font-size: 0.85rem; font-weight: 700; border: 1px solid #94a3b8; border-radius: 4px; background: #fff; color: #1e293b;">
-            <option value="HOSPITAL_A">🏥 伊藤内科（外来予約あり・物品貸出あり・消炎鎮痛あり）</option>
-            <option value="HOSPITAL_B">🏥 いとう腎クリニック（透析運動加算あり・装具採型あり・消炎鎮痛あり）</option>
-          </select>
-          <div style="margin-top: 5px; font-size: 0.72rem; color: #64748b; line-height: 1.3;">
-            ※変更して保存すると、選択した病院の専用機能（タブ・帳票・入力項目）に自動連動して再読込されます。
-          </div>
-        </div>
-
-        <!-- ★施設リハビリ提供時間設定（本日の時間割専用） -->
-        <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:6px; padding:10px; margin-top:4px;">
-          <div style="font-size:0.8rem; font-weight:800; color:#0c4a6e; margin-bottom:6px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-            <span>🏥 施設リハビリ提供時間設定</span>
-            <span style="font-size:0.68rem; color:#0369a1; font-weight:normal;">（本日の時間割専用・外来カレンダーには影響しません）</span>
-          </div>
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
-            <div>
-              <label for="settingAmStartInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午前開始</label>
-              <input type="time" id="settingAmStartInput" value="09:00" step="300"
-                     style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
-            </div>
-            <div>
-              <label for="settingAmEndInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午前終了</label>
-              <input type="time" id="settingAmEndInput" value="13:00" step="300"
-                     style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
-            </div>
-            <div>
-              <label for="settingPmStartInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午後開始（既定は午前終了と同時刻＝連続）</label>
-              <input type="time" id="settingPmStartInput" value="13:00" step="300"
-                     style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
-            </div>
-            <div>
-              <label for="settingPmEndInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">業務終了</label>
-              <input type="time" id="settingPmEndInput" value="18:00" step="300"
-                     style="width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; background:#fff;">
-            </div>
-          </div>
-          <div id="facilityHoursSlotSummaryBadge"
-               style="margin-top:8px; display:inline-block; padding:4px 10px; border-radius:999px; border:1px solid #a7f3d0; background:#ecfdf5; color:#065f46; font-size:0.72rem; font-weight:700;">
-            午前 12コマ ／ 午後 15コマ ＝ 計 27コマ（昼休憩なし）
-          </div>
-          <p style="font-size:0.68rem; color:#64748b; margin:6px 0 0;">
-            条件: 午前開始 &lt; 午前終了 ≦ 午後開始 &lt; 業務終了。20分刻みで「本日の時間割」コマを自動生成します。
-          </p>
-
-          <!-- 施設標準昼休み時間（交代制・誤配置防止ハイライトの基準） -->
-          <div style="margin-top:10px; padding-top:10px; border-top:1px dashed #7dd3fc;">
-            <div style="font-size:0.78rem; font-weight:800; color:#9a3412; margin-bottom:6px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-              <span>🍽️ 標準昼休み時間</span>
-              <span style="font-size:0.65rem; color:#c2410c; font-weight:600;">（新規スタッフ初期値／一括適用の基準・本日時間割ハイライト連動）</span>
-            </div>
-            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-              <label for="settingDefaultLunchStart" style="font-size:0.72rem; font-weight:700; color:#9a3412;">開始</label>
-              <select id="settingDefaultLunchStart" title="施設標準・昼休み開始"
-                      style="padding:5px 8px; border:1px solid #fdba74; border-radius:4px; font-size:0.78rem; font-weight:700; background:#fff7ed; color:#9a3412; cursor:pointer;">
-                <option value="11:00">11:00</option>
-                <option value="11:20">11:20</option>
-                <option value="11:40">11:40</option>
-                <option value="12:00" selected>12:00</option>
-                <option value="12:20">12:20</option>
-                <option value="12:40">12:40</option>
-                <option value="13:00">13:00</option>
-                <option value="13:20">13:20</option>
-                <option value="13:40">13:40</option>
-                <option value="14:00">14:00</option>
-              </select>
-              <span style="font-size:0.75rem; font-weight:700; color:#78716c;">〜</span>
-              <label for="settingDefaultLunchEnd" style="font-size:0.72rem; font-weight:700; color:#9a3412;">終了</label>
-              <select id="settingDefaultLunchEnd" title="施設標準・昼休み終了"
-                      style="padding:5px 8px; border:1px solid #fdba74; border-radius:4px; font-size:0.78rem; font-weight:700; background:#fff7ed; color:#9a3412; cursor:pointer;">
-                <option value="11:40">11:40</option>
-                <option value="12:00">12:00</option>
-                <option value="12:20">12:20</option>
-                <option value="12:40">12:40</option>
-                <option value="13:00" selected>13:00</option>
-                <option value="13:20">13:20</option>
-                <option value="13:40">13:40</option>
-                <option value="14:00">14:00</option>
-                <option value="14:20">14:20</option>
-                <option value="14:40">14:40</option>
-                <option value="15:00">15:00</option>
-              </select>
-              <button type="button" id="btnApplyDefaultLunchToAllStaff"
-                      style="padding:5px 10px; border:1px solid #ea580c; background:#fff; color:#c2410c; border-radius:4px; font-size:0.75rem; font-weight:800; cursor:pointer; white-space:nowrap;">
-                ⚡ 全スタッフに一括適用
-              </button>
-            </div>
-            <label style="display:flex; align-items:center; gap:6px; margin-top:6px; font-size:0.72rem; font-weight:600; color:#78716c; cursor:pointer; user-select:none;">
-              <input type="checkbox" id="chkOverwriteCustomLunch" style="accent-color:#ea580c;">
-              個別変更済みのスタッフも上書きする（未チェック時は施設標準と異なる設定者を保護）
-            </label>
-          </div>
-        </div>
-
-        <!-- ★外来予約カレンダー専用 提供時間・昼休み設定（本日時間割とは独立） -->
-        <div style="background:#ecfdf5; border:1px solid #6ee7b7; border-radius:6px; padding:10px; margin-top:8px;">
-          <div style="font-size:0.8rem; font-weight:800; color:#065f46; margin-bottom:6px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-            <span>📅 外来予約カレンダー専用 提供時間・昼休み設定</span>
-            <span style="font-size:0.68rem; color:#047857; font-weight:normal;">（外来カレンダー・週間予約印刷のみに適用／本日の時間割は変更しません）</span>
-          </div>
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
-            <div>
-              <label for="settingAptAmStartInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午前開始</label>
-              <input type="time" id="settingAptAmStartInput" value="09:00" step="300"
-                     style="width:100%; padding:5px 8px; border:1px solid #a7f3d0; border-radius:4px; font-size:0.8rem; background:#fff;">
-            </div>
-            <div>
-              <label for="settingAptAmEndInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午前終了</label>
-              <input type="time" id="settingAptAmEndInput" value="13:00" step="300"
-                     style="width:100%; padding:5px 8px; border:1px solid #a7f3d0; border-radius:4px; font-size:0.8rem; background:#fff;">
-            </div>
-            <div>
-              <label for="settingAptPmStartInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">午後開始（午前終了より後＝昼休みあり）</label>
-              <input type="time" id="settingAptPmStartInput" value="13:00" step="300"
-                     style="width:100%; padding:5px 8px; border:1px solid #a7f3d0; border-radius:4px; font-size:0.8rem; background:#fff;">
-            </div>
-            <div>
-              <label for="settingAptPmEndInput" style="font-size:0.72rem; font-weight:700; color:#475569; display:block; margin-bottom:2px;">業務終了</label>
-              <input type="time" id="settingAptPmEndInput" value="18:00" step="300"
-                     style="width:100%; padding:5px 8px; border:1px solid #a7f3d0; border-radius:4px; font-size:0.8rem; background:#fff;">
-            </div>
-          </div>
-          <div id="outpatientHoursSlotSummaryBadge"
-               style="margin-top:8px; display:inline-block; padding:4px 10px; border-radius:999px; border:1px solid #a7f3d0; background:#fff; color:#065f46; font-size:0.72rem; font-weight:700;">
-            午前 12コマ ／ 午後 15コマ ＝ 計 27コマ（昼休憩なし）
-          </div>
-          <p style="font-size:0.68rem; color:#64748b; margin:6px 0 0;">
-            午前終了〜午後開始のあいだが外来カレンダー上の昼休み帯になります。既存の予約データはそのまま保持されます。
-          </p>
-        </div>
-
-        <!-- 過去・退職者（非表示スタッフ）折りたたみアコーディオン（トップを汚さず一番下に配置） -->
-        <details id="retiredStaffAccordion" style="margin-top:6px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; padding:8px 10px;">
-          <summary style="font-size:0.78rem; font-weight:700; color:#64748b; cursor:pointer; user-select:none;">
-            ▶ 過去・退職者（非表示スタッフ）を表示する
-          </summary>
-          <div id="retiredStaffListContainer" style="display:flex; flex-direction:column; gap:6px; margin-top:8px;">
-            <!-- JSで動的に退職者枠を展開 -->
-          </div>
-        </details>
-
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px; padding-top:8px; border-top:1px solid #e2e8f0;">
-          <button type="button" id="btnResetStaffDefault" style="padding:6px 12px; background:#fff; border:1px solid #cbd5e1; border-radius:4px; font-size:0.8rem; color:#64748b; cursor:pointer;">デフォルトに戻す</button>
-          <div style="display:flex; gap:8px;">
-            <button type="button" id="btnCloseStaffModal" style="padding:6px 14px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; font-size:0.85rem; cursor:pointer;">閉じる</button>
-            <button type="submit" style="padding:6px 18px; background:#0284c7; color:#fff; border:none; border-radius:4px; font-size:0.85rem; font-weight:700; cursor:pointer;">保存する</button>
-          </div>
-        </div>
-      </form>
+      </div>
     </div>
   </div>
 
