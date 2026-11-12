@@ -2,7 +2,7 @@
 // 当日時間割グリッドとドラッグ＆ドロップ
 // ★パレットからのドロップ即配置・月13単位スマートブレーキ・カード内クイック単位ボタン
 
-import { TIME_SLOTS, REHA_RULES, AM_SLOT_COUNT, TOTAL_SLOT_COUNT } from '../../config/rules.js';
+import { TIME_SLOTS, REHA_RULES, TOTAL_SLOT_COUNT, HALF_DAY_LEAVE_SLOTS } from '../../config/rules.js';
 import { sanitizeHtml, safeParseInt } from '../../core/dataNormalizer.js';
 import {
   getActiveTherapists, getTherapistById,
@@ -80,7 +80,7 @@ function buildTaskCardHtml(cellData, tId, slotId, isLunch = false) {
     badgeClass = 'badge-holiday';
     badgeText = '公休';
   }
-  const halfSlots = AM_SLOT_COUNT || 12;
+  const halfSlots = HALF_DAY_LEAVE_SLOTS;
   const fullSlots = TOTAL_SLOT_COUNT || 27;
   const durationLabel = u >= fullSlots ? '終日' : (u >= halfSlots ? '半日' : `${u * 20}分`);
   const lunchCls = isLunch ? ' cell-lunch-break' : '';

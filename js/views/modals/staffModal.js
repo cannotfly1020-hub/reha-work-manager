@@ -21,7 +21,6 @@ import {
   saveOutpatientHours,
   validateOutpatientHours,
   formatOutpatientHoursSummary,
-  getAmSlotCount,
   getTotalSlotCount,
   DEFAULT_FACILITY_HOURS,
   DEFAULT_OUTPATIENT_HOURS
@@ -29,8 +28,8 @@ import {
 import {
   reloadFacilityTimeSlots,
   reloadOutpatientTimeSlots,
-  AM_SLOT_COUNT,
-  TOTAL_SLOT_COUNT
+  TOTAL_SLOT_COUNT,
+  HALF_DAY_LEAVE_SLOTS
 } from '../../config/rules.js';
 import { renderAppointmentCalendarView } from '../appointmentCalendarView.js';
 import {
@@ -189,13 +188,15 @@ function updateOutpatientHoursSlotSummaryBadge() {
 }
 
 /**
- * 半日／終日プリセットの data-duration と option を現行コマ数に同期
+ * 終日プリセットの data-duration／option を総コマ数に同期。
+ * 半日有休・半日公休は常に HALF_DAY_LEAVE_SLOTS（12）固定。
  * （施設時間変更後もワンタッチ休暇が破綻しないようにする）
  * @param {{ amStart?: string, amEnd?: string, pmStart?: string, pmEnd?: string }|null|undefined} [hours]
  */
 function syncLeavePresetDurations(hours) {
   const h = hours || getSavedFacilityHours();
-  const half = getAmSlotCount(h) || AM_SLOT_COUNT || 12;
+  // 半日有休・半日公休は施設午前コマ数に連動させず、常に固定12コマ（4時間）
+  const half = HALF_DAY_LEAVE_SLOTS;
   const full = getTotalSlotCount(h) || TOTAL_SLOT_COUNT || 27;
 
   document.querySelectorAll('.btn-task-preset').forEach((btn) => {
@@ -213,7 +214,7 @@ function syncLeavePresetDurations(hours) {
     const fullOpt = durationSelect.querySelector('option[data-role="full-day"]');
     if (halfOpt) {
       halfOpt.value = String(half);
-      halfOpt.textContent = `${half}コマ (半日ブロック・約${half * 20}分)`;
+      halfOpt.textContent = `${half}コマ (半日ブロック・4時間)`;
     }
     if (fullOpt) {
       fullOpt.value = String(full);

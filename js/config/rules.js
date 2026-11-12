@@ -160,10 +160,16 @@ export const TIME_SLOTS = [];
  */
 export const APPOINTMENT_TIME_STRINGS = [];
 
-/** 午前／午後／全日コマ数（半日・終日休暇プリセットと整合・本日時間割側 live binding） */
+/** 午前／午後／全日コマ数（終日休暇プリセット・表示用。本日時間割側 live binding） */
 export let AM_SLOT_COUNT = 0;
 export let PM_SLOT_COUNT = 0;
 export let TOTAL_SLOT_COUNT = 0;
+
+/**
+ * 半日有休・半日公休の固定占有コマ数（20分×12＝4時間）。
+ * 施設の午前コマ数とは独立。終日休暇は TOTAL_SLOT_COUNT 側を用いる。
+ */
+export const HALF_DAY_LEAVE_SLOTS = 12;
 
 /** 外来カレンダー側コマ数（表示・印刷サマリー用） */
 export let OUTPATIENT_AM_SLOT_COUNT = 0;

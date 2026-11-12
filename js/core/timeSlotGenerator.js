@@ -525,7 +525,7 @@ export function generateAppointmentTimeStrings(hours = DEFAULT_FACILITY_HOURS) {
 }
 
 /**
- * 午前コマ数（半日有休・公休の既定コマ数に使用）
+ * 午前コマ数（施設時間サマリー・表示用。半日有休/公休の固定12コマとは独立）
  * @param {Partial<FacilityHours>} [hours]
  * @returns {number}
  */
