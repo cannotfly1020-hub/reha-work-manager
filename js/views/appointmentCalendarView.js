@@ -1,9 +1,18 @@
 // js/views/appointmentCalendarView.js
 // 外来予約カレンダーの初期化・週/月の切り替え
 // ★印刷: ①受付簿（午前・午後2枚）②紙予約用週間表（A4縦1枚）③デイリー — 画面マス目描画には非干渉
+// ★先週の予約を一括コピー（既存枠保護・終了患者除外・営業時間外スキップ）
 
 import { getJapaneseHolidayName } from '../core/holidayCalc.js';
-import { formatDateYMD } from '../core/dateUtils.js';
+import { formatDateYMD, getWeekDates } from '../core/dateUtils.js';
+import { normalizeTimeHHmm } from '../core/timeSlotUtil.js';
+import { APPOINTMENT_TIME_STRINGS } from '../config/rules.js';
+import {
+  getAppointmentsByDate,
+  upsertAppointment,
+  checkPatientAppointmentConflict
+} from '../store/appointmentStore.js';
+import { getPatientById, evaluatePatientStatus } from '../store/patientStore.js';
 import { openAppointmentModal } from './modals/appointmentModal.js';
 import { showToast } from '../ui/toast.js';
 import { printDailyAppointmentChecklist } from '../print/dailyChecklistPrint.js';
@@ -13,6 +22,125 @@ import { calendarState } from './appointment/calendarState.js';
 import { setupAptPaletteEvents, renderAptPalette } from './appointment/palette.js';
 import { renderWeeklyTimetable } from './appointment/weeklyTimetable.js';
 import { renderMonthlyCalendar } from './appointment/monthlyCalendar.js';
+
+/** YYYY-MM-DD → M/D（確認ダイアログ用） */
+function formatDateMD(dateStr) {
+  const m = String(dateStr || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return String(dateStr || '');
+  return `${Number(m[2])}/${Number(m[3])}`;
+}
+
+/**
+ * 表示中の週（月〜土）へ、ちょうど7日前の同曜日予約を安全に一括コピーする。
+ * - 既存枠（コピー開始時点で埋まっている date|startTime）は上書きせずスキップ
+ * - 終了・退院済み／削除済み患者はスキップ
+ * - 現行の外来提供時間スロット外はスキップ
+ * - 新規IDで保存し、先週の元データは一切変更しない
+ */
+export function handleCopyPrevWeekAppointments() {
+  const targetWeekDates = getWeekDates(calendarState.baseDate);
+  const targetDateStrs = targetWeekDates.map(formatDateYMD);
+  const sourceDateStrs = targetWeekDates.map((d) => {
+    const prev = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    prev.setDate(prev.getDate() - 7);
+    return formatDateYMD(prev);
+  });
+
+  /** @type {{ apt: object, targetDate: string }[]} */
+  const sourcePairs = [];
+  sourceDateStrs.forEach((srcDate, idx) => {
+    getAppointmentsByDate(srcDate).forEach((apt) => {
+      sourcePairs.push({ apt, targetDate: targetDateStrs[idx] });
+    });
+  });
+
+  if (sourcePairs.length === 0) {
+    showToast('先週の予約データがありません', 'warn');
+    return;
+  }
+
+  const rangeLabel = `${formatDateMD(sourceDateStrs[0])}〜${formatDateMD(sourceDateStrs[sourceDateStrs.length - 1])}`;
+  const ok = window.confirm(
+    `先週（${rangeLabel}）の予約（全 ${sourcePairs.length}件）を今週の同じ曜日・時間帯にコピーしますか？\n`
+    + '※すでに予約が入っている枠や、終了・退院済みの患者は自動的にスキップされます。'
+  );
+  if (!ok) return;
+
+  // コピー開始前の「既存占有枠」スナップショット（並行コピーは空枠なら複数可）
+  const occupiedPreexisting = new Set();
+  targetDateStrs.forEach((dateStr) => {
+    getAppointmentsByDate(dateStr).forEach((a) => {
+      const t = normalizeTimeHHmm(a.startTime) || String(a.startTime || '');
+      if (t) occupiedPreexisting.add(`${dateStr}|${t}`);
+    });
+  });
+
+  const allowedSlots = Array.isArray(APPOINTMENT_TIME_STRINGS) ? APPOINTMENT_TIME_STRINGS : [];
+  let copied = 0;
+  let skipped = 0;
+
+  for (const { apt, targetDate } of sourcePairs) {
+    const startTime = normalizeTimeHHmm(apt.startTime) || String(apt.startTime || '');
+    const durationMinutes = Number(apt.durationMinutes) || 30;
+
+    // ルールC: 現行の外来提供時間（昼休み帯を含まないスロット表）の範囲外はスキップ
+    if (!startTime || !allowedSlots.includes(startTime)) {
+      skipped += 1;
+      continue;
+    }
+
+    // ルールA: コピー開始時点で既に埋まっている枠は保護（上書きしない）
+    if (occupiedPreexisting.has(`${targetDate}|${startTime}`)) {
+      skipped += 1;
+      continue;
+    }
+
+    // ルールB: 患者が削除済み、またはコピー先日付時点で終了・退院ならスキップ
+    const patient = getPatientById(apt.patientId);
+    if (!patient) {
+      skipped += 1;
+      continue;
+    }
+    const statusEv = evaluatePatientStatus(patient, targetDate);
+    if (statusEv.isEffectiveDiscontinued) {
+      skipped += 1;
+      continue;
+    }
+
+    // 同一患者の同日時間帯重複（既存の二重予約ガード）
+    const conflict = checkPatientAppointmentConflict(
+      apt.patientId,
+      targetDate,
+      startTime,
+      durationMinutes
+    );
+    if (conflict.hasConflict) {
+      skipped += 1;
+      continue;
+    }
+
+    // id を渡さない → 新規一意ID採番。先週レコードは変更しない
+    const result = upsertAppointment({
+      date: targetDate,
+      startTime,
+      durationMinutes,
+      patientId: apt.patientId,
+      therapistId: apt.therapistId || 'A',
+      treatmentType: apt.treatmentType || 'INDIVIDUAL',
+      status: 'CONFIRMED',
+      notes: apt.notes || ''
+    });
+
+    if (result.success) copied += 1;
+    else skipped += 1;
+  }
+
+  renderAppointmentCalendarView();
+  showToast(
+    `先週の予約から ${copied}件をコピーしました（重複・終了スキップ: ${skipped}件）`,
+    copied > 0 ? 'success' : 'warn'
+  );
+}
 
 /**
  * 週間予約受付簿（A4縦・午前／午後 2ページ）印刷
@@ -124,6 +252,7 @@ export function initAppointmentCalendarView() {
   const btnModeWeek = document.getElementById('btnAptViewModeWeek');
   const btnModeMonth = document.getElementById('btnAptViewModeMonth');
   const btnPrintDaily = document.getElementById('btnAptPrintDaily');
+  const btnCopyPrevWeek = document.getElementById('btnCopyPrevWeekAppointments');
 
   syncDateInput();
   ensureReceptionBookPrintToolbar();
@@ -179,6 +308,11 @@ export function initAppointmentCalendarView() {
   // ★印刷: 本日デイリー予約チェックリスト (A4縦)
   btnPrintDaily?.addEventListener('click', () => {
     printDailyAppointmentChecklist(calendarState.baseDate);
+  });
+
+  // ★先週の予約を表示中の週へ安全コピー
+  btnCopyPrevWeek?.addEventListener('click', () => {
+    handleCopyPrevWeekAppointments();
   });
 
   // 患者パレットの検索・ソート・区分切替イベント
