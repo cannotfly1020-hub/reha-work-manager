@@ -268,6 +268,7 @@ function collectLocalPlanAndEarlySplit(patient, slots, daysInMonth) {
 
   return {
     planDatesSummary,
+    planEntries,
     dailyEarly1Units,
     dailyEarly2Units,
     totalEarly1Units,
@@ -317,10 +318,18 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
   // ★帳票ローカル: 計画書算定日サマリー ＋ 早期Ⅰ/Ⅱ分離（共有集計は参照のみ）
   const localSplit = collectLocalPlanAndEarlySplit(patient, slots, daysInMonth);
   const planDatesSummary = localSplit.planDatesSummary;
+  const planEntries = Array.isArray(localSplit.planEntries) ? localSplit.planEntries : [];
   const dailyEarly1Units = localSplit.dailyEarly1Units;
   const dailyEarly2Units = localSplit.dailyEarly2Units;
   const totalEarly1Units = localSplit.totalEarly1Units;
   const totalEarly2Units = localSplit.totalEarly2Units;
+
+  // KPI「計画書算定」: 算定日を隣KPI数値と同格の主役サイズで表示
+  const planKpiMainHtml = planEntries.length > 0
+    ? `<div class="k-plan-main">${planEntries.map((e) => (
+      `<span class="plan-date-badge">${sanitizeHtml(`${fmtMdCompact(e.date)} (${e.tiny})`)}</span>`
+    )).join('')}</div>`
+    : '<div class="k-value k-plan-empty">なし</div>';
 
   const hasDialysis = isFeatureEnabled('hasDialysisReha');
   const hasOrthotics = isFeatureEnabled('hasOrthoticsBilling');
@@ -491,7 +500,7 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
       return String(a?.date || '').localeCompare(String(b?.date || ''))
         || String(a?.slotId || '').localeCompare(String(b?.slotId || ''));
     });
-  const maxDetailRows = (showStRow || hasDialysis) ? 5 : 6;
+  const maxDetailRows = (showStRow || hasDialysis) ? 6 : 8;
   const shownSlots = detailSlots.slice(0, maxDetailRows);
   const omitted = Math.max(0, detailSlots.length - shownSlots.length);
 
@@ -608,6 +617,7 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
       .sheet,
       .patient-monthly-report-container {
         width: 277mm !important;
+        height: 186mm !important;
         max-width: 277mm !important;
         max-height: 190mm !important;
         overflow: hidden !important;
@@ -624,7 +634,7 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
       color: #0f172a;
       background: #fff;
       font-size: 9pt;
-      line-height: 1.2;
+      line-height: 1.25;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
@@ -632,12 +642,14 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
     .patient-monthly-report-container {
       width: 100%;
       max-width: 277mm;
+      height: 186mm;
       max-height: 190mm;
       margin: 0 auto;
       overflow: hidden;
       display: flex;
       flex-direction: column;
-      gap: 3px;
+      justify-content: space-between;
+      gap: 6px;
       page-break-inside: avoid;
       break-inside: avoid;
     }
@@ -645,17 +657,17 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
       display: flex;
       justify-content: space-between;
       align-items: flex-end;
-      border-bottom: 2px solid #0f172a;
-      padding-bottom: 2px;
+      border-bottom: 2.5px solid #0f172a;
+      padding-bottom: 4px;
       flex-shrink: 0;
     }
     .head-title {
-      font-size: 13.5pt;
+      font-size: 14.5pt;
       font-weight: 800;
       letter-spacing: 0.02em;
     }
     .head-sub {
-      font-size: 7.5pt;
+      font-size: 8pt;
       color: #475569;
       font-weight: 700;
       margin-top: 2px;
@@ -675,49 +687,49 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
     .info-grid {
       display: grid;
       grid-template-columns: repeat(6, 1fr);
-      gap: 2px 6px;
+      gap: 3px 8px;
       border: 1px solid #94a3b8;
-      border-radius: 3px;
-      padding: 4px 6px;
+      border-radius: 4px;
+      padding: 5px 8px;
       background: #f8fafc;
-      font-size: 8pt;
+      font-size: 8.5pt;
       flex-shrink: 0;
     }
     .info-grid .cell { min-width: 0; }
     .info-grid .label {
       color: #64748b;
       font-weight: 700;
-      font-size: 6.5pt;
-      line-height: 1.1;
+      font-size: 7pt;
+      line-height: 1.15;
     }
     .info-grid .value {
       font-weight: 800;
       color: #0f172a;
-      font-size: 8pt;
-      line-height: 1.2;
+      font-size: 8.5pt;
+      line-height: 1.25;
       word-break: break-all;
     }
     .info-grid .span-2 { grid-column: span 2; }
     .info-grid .span-3 { grid-column: span 3; }
     .info-grid .span-6 { grid-column: 1 / -1; }
-    .kpi-row { display: flex; gap: 4px; flex-wrap: nowrap; flex-shrink: 0; }
+    .kpi-row { display: flex; gap: 6px; flex-wrap: nowrap; flex-shrink: 0; }
     .kpi {
       flex: 1;
       min-width: 0;
       border: 1px solid #cbd5e1;
-      border-radius: 3px;
-      padding: 2px 4px;
+      border-radius: 4px;
+      padding: 4px 6px;
       text-align: center;
       background: #fff;
     }
-    .kpi .k-label { font-size: 6.5pt; color: #64748b; font-weight: 700; }
-    .kpi .k-value { font-size: 12pt; font-weight: 800; color: #0369a1; }
+    .kpi .k-label { font-size: 7.5pt; color: #64748b; font-weight: 700; }
+    .kpi .k-value { font-size: 14pt; font-weight: 800; color: #0369a1; }
     .kpi.warn .k-value { color: #dc2626; }
     .kpi-early-split .k-split {
       display: flex;
       justify-content: space-around;
       gap: 4px;
-      margin-top: 1px;
+      margin-top: 2px;
     }
     .kpi-early-split .k-split > div {
       flex: 1;
@@ -725,30 +737,51 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
     }
     .kpi-early-split .k-sub {
       display: block;
-      font-size: 6pt;
+      font-size: 6.5pt;
       color: #64748b;
       font-weight: 700;
     }
     .kpi-early-split .k-num {
-      font-size: 11pt;
+      font-size: 13pt;
       font-weight: 800;
       color: #6d28d9;
     }
     .kpi-early-split .k-num.e2 { color: #047857; }
-    .kpi .k-plan-dates {
-      font-size: 6.5pt;
-      font-weight: 700;
-      color: #0f172a;
+    .kpi.kpi-plan {
+      background: #fff7ed;
+      border-color: #fdba74;
+    }
+    .kpi .k-plan-main {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+      gap: 4px;
+      margin-top: 2px;
+    }
+    .kpi .plan-date-badge {
+      display: inline-block;
+      font-size: 12.5pt;
+      font-weight: 800;
+      color: #c2410c;
       line-height: 1.2;
-      margin-top: 1px;
-      word-break: break-all;
+      letter-spacing: 0.01em;
+      padding: 1px 4px;
+      border: 1.5px solid #fb923c;
+      border-radius: 4px;
+      background: #fff;
+      white-space: nowrap;
+    }
+    .kpi .k-plan-empty {
+      color: #94a3b8;
+      font-size: 13pt;
     }
     .section-title {
-      font-size: 8.5pt;
+      font-size: 9pt;
       font-weight: 800;
       color: #0f172a;
-      border-left: 3px solid #0284c7;
-      padding-left: 5px;
+      border-left: 4px solid #0284c7;
+      padding-left: 6px;
       margin-top: 0;
       flex-shrink: 0;
     }
@@ -756,21 +789,21 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
       width: 100%;
       border-collapse: collapse;
       table-layout: fixed;
-      font-size: 7.5pt;
+      font-size: 8.5pt;
       flex-shrink: 0;
     }
     .matrix th, .matrix td {
       border: 1px solid #64748b;
       text-align: center;
       vertical-align: middle;
-      padding: 0;
-      height: 12px;
+      padding: 1px 0;
+      height: 16px;
     }
     .matrix th {
       background: #1e293b;
       color: #fff;
       font-weight: 800;
-      font-size: 7pt;
+      font-size: 8pt;
     }
     .matrix th.sat, .matrix td.sat { background: #eff6ff; color: #1d4ed8; }
     .matrix th.sun, .matrix td.sun { background: #fff1f2; color: #be123c; }
@@ -779,7 +812,7 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
       width: 58px;
       background: #f1f5f9;
       font-weight: 800;
-      font-size: 6.5pt;
+      font-size: 7.5pt;
       color: #334155;
     }
     .matrix td.on-exit { background: #ffedd5 !important; }
@@ -798,8 +831,8 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
     .matrix td.row-label.role-total { background: #e2e8f0; color: #0f172a; }
     .matrix td.row-label.early1-label { background: #f3e8ff; color: #6d28d9; }
     .matrix td.row-label.early2-label { background: #ecfdf5; color: #047857; }
-    .matrix .dow { font-size: 6pt; color: #64748b; height: 10px; background: #f8fafc; }
-    /* 下段: 明細＋押印を横並びにして高さを節約・横幅を活用 */
+    .matrix .dow { font-size: 7pt; color: #64748b; height: 13px; background: #f8fafc; }
+    /* 下段: 明細＋押印を横並び。flex:1 で用紙下部の空きを吸収 */
     .bottom-split {
       display: grid;
       grid-template-columns: 1.55fr 1fr;
@@ -812,25 +845,25 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
     .bottom-left, .bottom-right {
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 5px;
       min-width: 0;
       min-height: 0;
     }
     .detail-table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 7pt;
+      font-size: 8pt;
       table-layout: fixed;
     }
     .detail-table th, .detail-table td {
       border: 1px solid #94a3b8;
-      padding: 1px 3px;
+      padding: 2px 4px;
     }
     .detail-table th {
       background: #e2e8f0;
       font-weight: 800;
       text-align: center;
-      font-size: 6.5pt;
+      font-size: 7.5pt;
     }
     .detail-table .num { text-align: center; font-weight: 800; }
     .detail-table .empty-msg {
@@ -848,26 +881,26 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
     .sign-row {
       display: grid;
       grid-template-columns: 1fr;
-      gap: 4px;
+      gap: 6px;
       flex: 1;
     }
     .sign-box {
       border: 1px solid #64748b;
-      border-radius: 3px;
-      min-height: 28px;
+      border-radius: 4px;
+      min-height: 40px;
       flex: 1;
-      padding: 2px 5px;
-      font-size: 7pt;
+      padding: 4px 6px;
+      font-size: 8pt;
       font-weight: 700;
       color: #475569;
     }
     .sign-box .line {
-      margin-top: 10px;
+      margin-top: 16px;
       border-top: 1px solid #94a3b8;
-      font-size: 6.5pt;
+      font-size: 7.5pt;
       color: #94a3b8;
       text-align: right;
-      padding-top: 1px;
+      padding-top: 2px;
     }
     .footer {
       display: flex;
@@ -876,7 +909,8 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
       color: #64748b;
       border-top: 1px solid #cbd5e1;
       padding-top: 3px;
-      margin-top: auto;
+      margin-top: 0;
+      flex-shrink: 0;
       flex-shrink: 0;
     }
     .warn-banner {
@@ -964,9 +998,9 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
         <div class="k-label">個別リハ単位</div>
         <div class="k-value">${rehaTotal}</div>
       </div>
-      <div class="kpi">
+      <div class="kpi kpi-plan">
         <div class="k-label">計画書算定（${planCount}件）</div>
-        <div class="k-plan-dates">算定日: ${sanitizeHtml(planDatesSummary)}</div>
+        ${planKpiMainHtml}
       </div>
       <div class="kpi kpi-early-split">
         <div class="k-label">早期加算単位</div>
