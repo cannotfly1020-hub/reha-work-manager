@@ -229,8 +229,8 @@ export function generateDiaryWorkbook(aggregated, targetDay = null) {
 
           // 入院早期加算の算定
           if (isInput && p) {
-            // getEarlyBaseDate / calculatePatientDeadlines と同一（発症日は早期に代用しない）
-            const baseEarlyDate = p.earlyBonusStartDate || p.admissionDate || '';
+            // getEarlyBaseDate / calculatePatientDeadlines と同一（入院日のみ）
+            const baseEarlyDate = p.admissionDate || '';
             if (baseEarlyDate) {
               const ph = evaluateEarlyBonusPhase(baseEarlyDate, dateStr, 'INPATIENT');
               if (ph.points > 0) {

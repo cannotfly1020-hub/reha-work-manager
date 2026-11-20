@@ -143,9 +143,9 @@ function getEarlyBonusCellHtml(patient, deadlines) {
     return '<span class="text-muted" style="color:#94a3b8; font-size:0.72rem;">- (外来対象外)</span>';
   }
 
-  const earlyStart = deadlines.earlyStartDateStr || patient.earlyBonusStartDate || patient.admissionDate || '';
+  const earlyStart = deadlines.earlyStartDateStr || patient.admissionDate || '';
   if (!earlyStart) {
-    return '<span class="text-muted" style="color:#94a3b8; font-size:0.72rem;">起算日未設定</span>';
+    return '<span class="text-muted" style="color:#94a3b8; font-size:0.72rem;">入院日未設定</span>';
   }
 
   const eb = deadlines.earlyBonus || {};
@@ -408,7 +408,7 @@ function setupPatientModalListeners() {
       careInsuranceType: document.getElementById('patientFormCareType').value,
       planStatus: document.getElementById('patientFormPlanStatus')?.value || 'NOT_YET',
       admissionDate: document.getElementById('patientFormAdmissionDate').value,
-      earlyBonusStartDate: document.getElementById('patientFormEarlyStartDate').value,
+      // 早期加算は入院日基準のため専用起算日は保存しない（ストア側で入院日に揃える）
       onsetDate: document.getElementById('patientFormOnsetDate').value,
       exitDate,
       force13Limit: document.getElementById('patientFormForce13').checked,
@@ -476,7 +476,6 @@ function openPatientModal(patientId) {
   }
 
   document.getElementById('patientFormAdmissionDate').value = p ? (p.admissionDate || '') : '';
-  document.getElementById('patientFormEarlyStartDate').value = p ? (p.earlyBonusStartDate || '') : '';
   document.getElementById('patientFormOnsetDate').value = p ? (p.onsetDate || '') : '';
   const exitInput = document.getElementById('patientFormExitDate');
   if (exitInput) {

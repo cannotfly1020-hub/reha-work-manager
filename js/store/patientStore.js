@@ -250,7 +250,8 @@ export function upsertPatient(rawData) {
     planStatus: ['NOT_YET', 'PLAN_1_FOLLOW', 'PLAN_2_FOLLOW'].includes(rawData.planStatus)
       ? rawData.planStatus : 'NOT_YET',
     admissionDate: normalizeDateString(rawData.admissionDate),
-    earlyBonusStartDate: normalizeDateString(rawData.earlyBonusStartDate || rawData.admissionDate),
+    // 後方互換フィールド: 計算は admissionDate のみ。保存時は入院日に揃える
+    earlyBonusStartDate: normalizeDateString(rawData.admissionDate),
     onsetDate: normalizeDateString(rawData.onsetDate),
     exitDate,
     // 後方互換ミラー（月間単位表・旧読取経路は同一日を参照）

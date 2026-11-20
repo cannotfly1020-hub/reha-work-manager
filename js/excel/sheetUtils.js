@@ -96,13 +96,13 @@ export function getDiseaseInitial(type) {
 }
 
 /**
- * 早期加算の起算日（画面集計 calculatePatientDeadlines.earlyStartStr と同一優先順位）
- * earlyBonusStartDate（専用）→ admissionDate（入院日）。onsetDate（発症日）は代用しない。
+ * 早期加算の起算日（calculatePatientDeadlines.earlyStartStr と同一）
+ * 入院日（admissionDate）のみ。専用起算日・発症日は用いない。
  * @param {object} p 患者
  * @returns {string}
  */
 export function getEarlyBaseDate(p) {
-  return p?.earlyBonusStartDate || p?.admissionDate || '';
+  return p?.admissionDate || '';
 }
 
 /**

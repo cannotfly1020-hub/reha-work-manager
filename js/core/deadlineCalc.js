@@ -202,7 +202,8 @@ export function evaluateEarlyBonusPhase(admissionOrStart, sessionDate, category 
 export function calculatePatientDeadlines(patient, baseDate = new Date()) {
   const disease = REHA_RULES.LIMIT_DAYS[patient?.diseaseType] || REHA_RULES.LIMIT_DAYS.ANALGESIA;
   const startDateStr = patient?.onsetDate || patient?.admissionDate || '';
-  const earlyStartStr = patient?.earlyBonusStartDate || patient?.admissionDate || '';
+  // 早期加算は入院日のみ（専用 earlyBonusStartDate / 発症日は用いない）
+  const earlyStartStr = patient?.admissionDate || '';
 
   let limitDateStr = '';
   let remainingDays = null;

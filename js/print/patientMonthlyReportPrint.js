@@ -228,8 +228,8 @@ function collectLocalPlanAndEarlySplit(patient, slots, daysInMonth) {
 
   const isInpatient = patient?.category === 'INPATIENT';
   const isAnalgesiaPatient = patient?.diseaseType === 'ANALGESIA';
-  // 画面集計・getEarlyBaseDate と同一: 専用起算日 → 入院日のみ（発症日は代用しない）
-  const earlyBase = patient?.earlyBonusStartDate || patient?.admissionDate || '';
+  // 画面集計・getEarlyBaseDate と同一: 入院日のみ
+  const earlyBase = patient?.admissionDate || '';
 
   (Array.isArray(slots) ? slots : []).forEach((s) => {
     if (!s || !s.date) return;
@@ -351,7 +351,7 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
   const exitDate = patient.exitDate || patient.plannedDischargeDate || patient.discontinuedDate || patient.endDate || '';
   const admissionDate = patient.admissionDate || '';
   const onsetDate = patient.onsetDate || '';
-  const earlyStartDate = patient.earlyBonusStartDate || patient.admissionDate || '';
+  const earlyStartDate = patient.admissionDate || '';
   const monthEnd = `${y}-${String(m).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
   const deadlines = calculatePatientDeadlines(patient, monthEnd);
 
