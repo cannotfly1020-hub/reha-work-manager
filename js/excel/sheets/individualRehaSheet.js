@@ -20,8 +20,8 @@ import {
 
 const DAY_COLS = 31;
 const DAY_OF_WEEK = ['日', '月', '火', '水', '木', '金', '土'];
-/** A4横・縦方向収容: 1シートあたり最大患者数（PT/OT 2行×20名） */
-const PATIENTS_PER_SHEET = 20;
+/** A4横・縦方向収容: 1シートあたり最大患者数（PT/OT 2行×16名） */
+const PATIENTS_PER_SHEET = 16;
 
 /** @typedef {'FULL_NORMAL'|'FULL_REDUCED'|'SPLIT_NORMAL'|'SPLIT_REDUCED'} SheetPeriodMode */
 
@@ -998,9 +998,9 @@ function pushPatientRoleMerges(merges, rowStart, rowEnd) {
 }
 
 /**
- * 職種行配列を「患者ID順のグループ」にまとめ、20名チャンクへ分割する
+ * 職種行配列を「患者ID順のグループ」にまとめ、PATIENTS_PER_SHEET（16）名チャンクへ分割する
  * @param {object[]} rows
- * @param {number} [chunkSize=20]
+ * @param {number} [chunkSize=PATIENTS_PER_SHEET]
  * @returns {{ patientIds: string[], chunks: object[][], patientCount: number }}
  */
 function chunkRowsByPatient(rows, chunkSize = PATIENTS_PER_SHEET) {
@@ -1031,7 +1031,7 @@ function chunkRowsByPatient(rows, chunkSize = PATIENTS_PER_SHEET) {
 }
 
 /**
- * 分割シート名を生成（1枚のみは基名、複数は (1-20) 形式）
+ * 分割シート名を生成（1枚のみは基名、複数は (1-16) 形式）
  * @param {string} baseSheetName
  * @param {number} pageIndex 1始まり
  * @param {number} totalPages
@@ -1042,7 +1042,7 @@ function chunkRowsByPatient(rows, chunkSize = PATIENTS_PER_SHEET) {
 function buildPagedSheetName(baseSheetName, pageIndex, totalPages, patientStart, patientEnd) {
   const base = String(baseSheetName || 'Sheet');
   if (totalPages <= 1) return sanitizeSheetName(base);
-  // 例: 入院_脳血管(通常)(1-20)
+  // 例: 入院_脳血管(通常)(1-16)
   const rangeLabel = `(${patientStart}-${patientEnd})`;
   const maxBaseLen = Math.max(1, 31 - rangeLabel.length);
   return sanitizeSheetName(`${base.slice(0, maxBaseLen)}${rangeLabel}`);
@@ -1211,7 +1211,7 @@ function buildSingleGroupWorksheet(aggregated, groupRows, def, pageMeta = {}) {
 /**
  * 個別リハ実施リストを物理タブへ追加
  * ・入院/外来 × 疾患 × 通常/減算（最大12系統）
- * ・各系統で患者20名超は自動シート分割（A4横の縦ハミ出し防止）
+ * ・各系統で患者16名超は自動シート分割（A4横の縦ハミ出し防止）
  * @param {Object} wb
  * @param {Object} aggregated
  * @returns {string[]}
