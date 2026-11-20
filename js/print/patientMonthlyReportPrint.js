@@ -228,7 +228,8 @@ function collectLocalPlanAndEarlySplit(patient, slots, daysInMonth) {
 
   const isInpatient = patient?.category === 'INPATIENT';
   const isAnalgesiaPatient = patient?.diseaseType === 'ANALGESIA';
-  const earlyBase = patient?.earlyBonusStartDate || patient?.admissionDate || patient?.onsetDate || '';
+  // 画面集計・getEarlyBaseDate と同一: 専用起算日 → 入院日のみ（発症日は代用しない）
+  const earlyBase = patient?.earlyBonusStartDate || patient?.admissionDate || '';
 
   (Array.isArray(slots) ? slots : []).forEach((s) => {
     if (!s || !s.date) return;
