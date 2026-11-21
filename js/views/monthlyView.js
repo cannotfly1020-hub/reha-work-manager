@@ -20,6 +20,7 @@ import {
   renderMonthlyUnitsTable, collectVisibleMonthlyPatients
 } from './monthly/unitsTable.js';
 import { renderDailyDiaryPreview } from './monthly/diaryPreview.js';
+import { setupAnnualStatsModalListeners } from './modals/annualStatsModal.js';
 
 export function initMonthlyView() {
   const monthInput = document.getElementById('monthPicker')
@@ -127,6 +128,7 @@ export function initMonthlyView() {
   }
 
   setupRevenueBreakdownModalListeners();
+  setupAnnualStatsModalListeners();
 }
 
 function syncMonthInput() {

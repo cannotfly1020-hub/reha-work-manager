@@ -222,6 +222,11 @@
           title="赤ペン点検用A4横チェックシートを印刷（現在の絞り込みを反映）">
           <span aria-hidden="true">🖨️</span> 点検印刷
         </button>
+        <button type="button" id="btnOpenAnnualStats" class="monthly-tb-btn"
+          style="border:1px solid #7c3aed; color:#6d28d9; background:#f5f3ff; font-weight:700;"
+          title="診療報酬年度（4月〜翌3月）の1日平均単位・リハ退院統計を表示">
+          <span aria-hidden="true">📊</span> 年度統計（年報）
+        </button>
       </div>
 
       <div class="monthly-kpi-right monthly-kpi-group">
@@ -1202,6 +1207,75 @@
           </div>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- モーダル: 年度統計（年報） -->
+  <div id="modalAnnualStats" class="modal-overlay">
+    <div class="modal-card" style="max-width:920px; max-height:90vh; display:flex; flex-direction:column;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; gap:8px; flex-wrap:wrap;">
+        <h3 style="font-size:1.05rem; font-weight:800; color:#0f172a; margin:0;">📊 年度統計（年報）</h3>
+        <button type="button" id="btnCloseAnnualStatsX" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:#64748b;">✕</button>
+      </div>
+      <p style="font-size:0.75rem; color:#64748b; margin:0 0 10px;">
+        診療報酬年度（4月〜翌3月）の疾患別個別リハ実績から、患者1日平均単位数とリハ実施退院数を集計します（消炎・透析・業務ブロックは除外）。
+      </p>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <label for="annualStatsFiscalYearSelect" style="font-size:0.8rem; font-weight:800;">対象年度</label>
+          <select id="annualStatsFiscalYearSelect" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; font-weight:700; background:#fff;"></select>
+          <span id="annualStatsLoadingStatus" style="font-size:0.75rem; color:#0369a1; font-weight:600;"></span>
+        </div>
+        <button type="button" id="btnExportAnnualStatsExcel" style="padding:7px 14px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.82rem; cursor:pointer;">
+          📥 年度統計Excel出力
+        </button>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; margin-bottom:12px;">
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 10px; text-align:center;">
+          <div style="font-size:0.68rem; font-weight:700; color:#64748b;">年間総単位数</div>
+          <div id="annualStatTotalUnits" style="font-size:1.25rem; font-weight:800; color:#0369a1;">0</div>
+        </div>
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 10px; text-align:center;">
+          <div style="font-size:0.68rem; font-weight:700; color:#64748b;">延べ実施人数</div>
+          <div id="annualStatPatientDays" style="font-size:1.25rem; font-weight:800; color:#0369a1;">0</div>
+        </div>
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 10px; text-align:center;">
+          <div style="font-size:0.68rem; font-weight:700; color:#64748b;">年間1日平均単位</div>
+          <div id="annualStatAvgUnits" style="font-size:1.25rem; font-weight:800; color:#6d28d9;">0.00</div>
+        </div>
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 10px; text-align:center;">
+          <div style="font-size:0.68rem; font-weight:700; color:#64748b;">年間リハ退院数</div>
+          <div id="annualStatRehabDischarges" style="font-size:1.25rem; font-weight:800; color:#047857;">0</div>
+        </div>
+      </div>
+
+      <div style="overflow:auto; flex:1; border:1px solid #e2e8f0; border-radius:6px;">
+        <table style="width:100%; border-collapse:collapse; font-size:0.8rem;">
+          <thead>
+            <tr style="background:#1e293b; color:#fff;">
+              <th style="padding:6px 8px; text-align:left;">月</th>
+              <th style="padding:6px 8px; text-align:right;">総単位数</th>
+              <th style="padding:6px 8px; text-align:right;">延べ実施人数</th>
+              <th style="padding:6px 8px; text-align:right;">1日平均単位</th>
+              <th style="padding:6px 8px; text-align:right;">リハ実施退院数</th>
+              <th style="padding:6px 8px; text-align:center;">病院総退院数</th>
+              <th style="padding:6px 8px; text-align:right;">リハ退院率</th>
+            </tr>
+          </thead>
+          <tbody id="annualStatsTableBody"></tbody>
+          <tfoot id="annualStatsTableFoot"></tfoot>
+        </table>
+      </div>
+      <style>
+        #modalAnnualStats td.num { text-align:right; font-variant-numeric:tabular-nums; padding:5px 8px; border-bottom:1px solid #e2e8f0; }
+        #modalAnnualStats td { padding:5px 8px; border-bottom:1px solid #e2e8f0; }
+      </style>
+
+      <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+        <button type="button" id="btnCloseAnnualStats" style="padding:7px 16px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; cursor:pointer; font-size:0.85rem;">閉じる</button>
+      </div>
     </div>
   </div>
 
