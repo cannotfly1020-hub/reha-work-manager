@@ -152,7 +152,14 @@ function renderPatientCardHtml(apt, therapists, colorMap) {
   const anti = isAnalgesiaApt(apt, patient);
   const staffLabel = formatStaffLabel(therapists, apt.therapistId);
   const color = resolveStaffColor(colorMap, apt.therapistId, anti);
-  const badgeText = anti ? '⚡ 消炎鎮痛' : `[${staffLabel}]`;
+  // ゾーン内は狭いため、個別は担当頭文字／消炎は⚡のみのコンパクト表示
+  const head = anti
+    ? '⚡'
+    : (() => {
+      const raw = String(staffLabel || '').replace(/\s+/g, '');
+      return raw ? raw.charAt(0) : '・';
+    })();
+  const badgeText = anti ? '⚡' : head;
   const cardCls = anti ? 'patient-card anti' : 'patient-card';
   const cardStyle = anti
     ? `background:${ANALGESIA_COLOR.cardBg};border-color:#fde68a;border-left-color:${ANALGESIA_COLOR.bg};`
@@ -162,9 +169,48 @@ function renderPatientCardHtml(apt, therapists, colorMap) {
   return `
     <div class="${cardCls}" style="${cardStyle}">
       <div class="staff-tag" style="${badgeStyle}">${sanitizeHtml(badgeText)}</div>
-      <div class="name-text">${sanitizeHtml(name)} 様</div>
+      <div class="name-text">${sanitizeHtml(name)}</div>
     </div>
   `;
+}
+
+/**
+ * 1マスを左・個別リハ（白）／右・消炎（薄灰）に分割
+ * @param {object[]} slotResList
+ * @param {object[]} therapists
+ * @param {object} colorMap
+ * @param {string} extraCls
+ * @returns {string}
+ */
+function renderSplitSlotCellHtml(slotResList, therapists, colorMap, extraCls = '') {
+  const list = Array.isArray(slotResList) ? slotResList : [];
+  const rehaApts = [];
+  const antiApts = [];
+  list.forEach((apt) => {
+    const patient = getPatientById(apt.patientId);
+    if (isAnalgesiaApt(apt, patient)) antiApts.push(apt);
+    else rehaApts.push(apt);
+  });
+
+  const rehaInner = rehaApts.length > 0
+    ? `<div class="slot-patients-container${rehaApts.length >= 2 ? ' is-multi' : ''}">${
+      rehaApts.map((apt) => renderPatientCardHtml(apt, therapists, colorMap)).join('')
+    }</div>`
+    : '<div class="write-space zone-write" aria-hidden="true"></div>';
+
+  const antiInner = antiApts.length > 0
+    ? `<div class="slot-patients-container${antiApts.length >= 2 ? ' is-multi' : ''}">${
+      antiApts.map((apt) => renderPatientCardHtml(apt, therapists, colorMap)).join('')
+    }</div>`
+    : '<div class="write-space zone-write" aria-hidden="true"></div>';
+
+  return `
+    <td class="res-slot split-slot${extraCls}">
+      <div class="slot-zones">
+        <div class="zone zone-reha">${rehaInner}</div>
+        <div class="zone zone-anti">${antiInner}</div>
+      </div>
+    </td>`;
 }
 
 function buildWeekBodyRows(weekDates, weekAptList, allSlotTimes, therapists, colorMap, amEnd, pmStart, breakMin) {
@@ -195,22 +241,7 @@ function buildWeekBodyRows(weekDates, weekAptList, allSlotTimes, therapists, col
       if (holidayName) extra += ' holiday';
       else if (isSat) extra += ' sat';
 
-      if (slotResList.length === 0) {
-        bodyRows += `
-          <td class="res-slot empty-slot${extra}">
-            <div class="write-space" aria-hidden="true"></div>
-          </td>`;
-        return;
-      }
-
-      const multi = slotResList.length >= 2 ? ' is-multi' : '';
-      const cards = slotResList
-        .map((apt) => renderPatientCardHtml(apt, therapists, colorMap))
-        .join('');
-      bodyRows += `
-        <td class="res-slot${extra}">
-          <div class="slot-patients-container${multi}">${cards}</div>
-        </td>`;
+      bodyRows += renderSplitSlotCellHtml(slotResList, therapists, colorMap, extra);
     });
 
     bodyRows += `</tr>`;
@@ -237,7 +268,7 @@ function buildPageWrapperHtml(opts) {
         <div>
           <div class="title">【翌週予約受付表（紙予約用・A4縦1枚）】</div>
           <div class="period">${sanitizeHtml(periodLabel)}</div>
-          <div class="legend">担当色分け ／ <span class="lg-anti">⚡ 消炎鎮痛</span> ／ 白枠＝手書き空き（約9mm）</div>
+          <div class="legend">【記入方法】左（白地）：個別リハ（氏名＋担当頭文字） ／ 右（薄灰）：消炎鎮痛 ／ 担当色分け</div>
         </div>
         <div class="meta">出力 ${outStamp}<br>${weekOffsetShortLabel(weeksOffset)}・1枚完結</div>
       </div>
@@ -255,7 +286,7 @@ function buildPageWrapperHtml(opts) {
                 else if (isSat) cls = 'sat';
                 const hol = holidayName
                   ? `<div class="hol-name">${sanitizeHtml(holidayName)}</div>` : '';
-                return `<th class="${cls}"><span class="dow">${dayNames[idx]}</span><span class="date">${mmdd}</span>${hol}</th>`;
+                return `<th class="${cls}"><span class="dow">${dayNames[idx]}</span><span class="date">${mmdd}</span>${hol}<div class="zone-sub"><span class="zs-reha">個別</span><span class="zs-anti">消炎</span></div></th>`;
               }).join('')}
             </tr>
           </thead>
@@ -411,9 +442,15 @@ function buildSharedCss(ctx) {
       height: ${theadMm}mm; max-height: ${theadMm}mm; padding: 1px; color: #334155;
     }
     .paper-table thead th.th-time { width: 9%; color: #64748b; font-size: 8pt; }
-    .paper-table thead th .dow { display: block; font-weight: 800; }
-    .paper-table thead th .date { display: block; font-size: 8pt; color: #64748b; }
-    .paper-table thead th .hol-name { font-size: 6.5pt; color: #e11d48; font-weight: 800; }
+    .paper-table thead th .dow { display: block; font-weight: 800; line-height: 1.1; }
+    .paper-table thead th .date { display: block; font-size: 7.5pt; color: #64748b; line-height: 1.1; }
+    .paper-table thead th .hol-name { font-size: 6pt; color: #e11d48; font-weight: 800; line-height: 1.05; }
+    .paper-table thead th .zone-sub {
+      display: flex; width: 100%; margin-top: 1px; font-size: 5.5pt; font-weight: 800;
+      line-height: 1.1; border-top: 0.5px solid #e2e8f0; padding-top: 0.5px;
+    }
+    .paper-table thead th .zs-reha { flex: 0 0 65%; text-align: center; color: #334155; }
+    .paper-table thead th .zs-anti { flex: 0 0 35%; text-align: center; color: #64748b; background: #f1f5f9; }
     .paper-table thead th.sat { background: #f0f9ff; }
     .paper-table thead th.holiday { background: #fff1f2; }
     tr.lunch-band td {
@@ -429,35 +466,57 @@ function buildSharedCss(ctx) {
       vertical-align: middle !important;
     }
     td.res-slot {
-      height: ${rowMm}mm !important; min-height: 9mm; padding: 1px 2px !important;
+      height: ${rowMm}mm !important; min-height: 9mm; padding: 0 !important;
       vertical-align: middle !important; overflow: hidden;
     }
-    .res-slot.sat { background: #fafcff; }
-    .res-slot.holiday { background: #fffafa; }
-    .empty-slot { background: #ffffff !important; }
-    .write-space { width: 100%; height: 100%; min-height: 9mm; background: #ffffff; }
+    td.res-slot.split-slot { background: #ffffff; }
+    .slot-zones {
+      display: flex; width: 100%; height: 100%; min-height: 9mm;
+      align-items: stretch;
+    }
+    .zone {
+      display: flex; flex-direction: column; justify-content: center;
+      overflow: hidden; min-width: 0; height: 100%;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    }
+    .zone-reha {
+      flex: 0 0 65%; width: 65%;
+      background: #ffffff;
+      padding: 0 1px;
+    }
+    .zone-anti {
+      flex: 0 0 35%; width: 35%;
+      background: #f1f5f9;
+      border-left: 1px dashed #cbd5e1;
+      padding: 0 1px;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    }
+    .write-space, .zone-write {
+      width: 100%; height: 100%; min-height: 8mm; background: transparent;
+    }
     .slot-patients-container {
       display: flex; flex-direction: column; justify-content: space-around;
-      width: 100%; height: 100%; gap: 1px;
+      width: 100%; height: 100%; gap: 0;
     }
     .patient-card {
       display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 0; padding: 0 2px; border-radius: 2px;
-      background: #f8fafc; border: 1px solid #e2e8f0; border-left: 2.5px solid #1d4ed8;
+      gap: 0; padding: 0 1px; border-radius: 1px;
+      background: #f8fafc; border: 0.5px solid #e2e8f0; border-left: 2px solid #1d4ed8;
       width: 100%; text-align: center; box-sizing: border-box;
     }
     .patient-card.anti { background: #fffbeb; }
     .patient-card .staff-tag {
-      display: inline-block; font-size: 7pt; font-weight: 800;
-      padding: 0 3px; border-radius: 2px; line-height: 1.15;
+      display: inline-block; font-size: 6pt; font-weight: 800;
+      padding: 0 2px; border-radius: 1px; line-height: 1.1;
     }
     .patient-card .name-text {
-      font-size: 8pt; font-weight: 800; color: #0f172a; line-height: 1.15;
-      text-align: center; white-space: normal; overflow: visible; text-overflow: clip;
-      word-break: break-word; overflow-wrap: anywhere;
+      font-size: 7pt; font-weight: 800; color: #0f172a; line-height: 1.1;
+      text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      max-width: 100%;
     }
-    .slot-patients-container.is-multi .patient-card .name-text { font-size: 7.5pt; }
-    .slot-patients-container.is-multi .patient-card .staff-tag { font-size: 6.5pt; }
+    .slot-patients-container.is-multi .patient-card .name-text { font-size: 6.5pt; }
+    .slot-patients-container.is-multi .patient-card .staff-tag { font-size: 5.5pt; }
+    .zone-anti .patient-card .name-text { font-size: 6.5pt; }
     .footer {
       display: flex; justify-content: space-between; gap: 8px;
       margin: 1mm 4px 2px; padding-top: 1px; border-top: 1px solid #e2e8f0;
@@ -465,7 +524,11 @@ function buildSharedCss(ctx) {
       flex: 0 0 auto; height: ${footerMm}mm; max-height: ${footerMm}mm; overflow: hidden;
     }
     @media print {
-      html, body { background: #fff !important; }
+      html, body {
+        background: #fff !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
       .preview-toolbar { display: none !important; }
       .preview-stage { padding: 0 !important; gap: 0 !important; }
       .page-wrapper {
@@ -476,6 +539,11 @@ function buildSharedCss(ctx) {
       .page-wrapper-last { page-break-after: auto !important; }
       table.paper-table { height: 100% !important; }
       tr.slot-row { height: ${rowMm}mm !important; min-height: 9mm !important; }
+      .zone-anti, .paper-table thead th .zs-anti {
+        background: #f1f5f9 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
     }
   `;
 }
