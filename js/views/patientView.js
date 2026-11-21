@@ -9,6 +9,7 @@ import {
   PATIENT_STATUS, evaluatePatientStatus
 } from '../store/patientStore.js';
 import { showToast } from '../ui/toast.js';
+import { printInpatientDeadlineA6 } from '../print/inpatientDeadlineA6Print.js';
 
 let editingPatientId = null;
 let patientSortKey = 'ID_ASC';
@@ -19,6 +20,7 @@ export function initPatientView() {
   const statusFilter = document.getElementById('patientStatusFilter');
   const sortSelect = document.getElementById('patientSortSelect');
   const btnNew = document.getElementById('btnNewPatient');
+  const btnPrintA6 = document.getElementById('btnPrintInpatientDeadlineA6');
 
   searchInput?.addEventListener('input', () => renderPatientView());
   catFilter?.addEventListener('change', () => renderPatientView());
@@ -28,6 +30,14 @@ export function initPatientView() {
     renderPatientView();
   });
   btnNew?.addEventListener('click', () => openPatientModal(null));
+  btnPrintA6?.addEventListener('click', () => {
+    try {
+      printInpatientDeadlineA6();
+    } catch (err) {
+      console.error('[patientView] printInpatientDeadlineA6 error:', err);
+      showToast('リハ期限表の印刷に失敗しました', 'error');
+    }
+  });
 
   setupPatientModalListeners();
 }

@@ -271,7 +271,10 @@
           <option value="ADMISSION_DESC">並べ替え: 入院日 (新しい順)</option>
         </select>
       </div>
-      <button id="btnNewPatient" style="padding:8px 16px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.85rem; cursor:pointer;">＋ 新規患者登録</button>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <button id="btnPrintInpatientDeadlineA6" type="button" style="padding:8px 12px; background:#fff; border:1px solid #0284c7; color:#0369a1; border-radius:6px; font-weight:700; font-size:0.82rem; cursor:pointer;" title="入院中患者の算定期限・月13単位対象をA6縦1枚で印刷します">📄 リハ期限表(A6)</button>
+        <button id="btnNewPatient" style="padding:8px 16px; background:#0284c7; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:0.85rem; cursor:pointer;">＋ 新規患者登録</button>
+      </div>
     </div>
     <div class="table-container" id="patientTableContainer"></div>
   </section>
