@@ -586,7 +586,17 @@ export function openSlotModal(therapistId, slotId, currentItem) {
       taskTitleInput.value = currentItem.title || '';
       taskTitleInput.dataset.blockType = currentItem.itemType || 'TASK';
     }
-    if (taskDurationSelect) taskDurationSelect.value = String(currentItem.slotsCount || currentItem.units || 1);
+    if (taskDurationSelect) {
+      const dur = String(currentItem.slotsCount || currentItem.units || 1);
+      // 選択肢に無い値でも編集復元できるよう option を補完（1〜12・24以外のレガシー値対策）
+      if (![...taskDurationSelect.options].some((o) => o.value === dur)) {
+        const opt = document.createElement('option');
+        opt.value = dur;
+        opt.textContent = `${dur}コマ`;
+        taskDurationSelect.appendChild(opt);
+      }
+      taskDurationSelect.value = dur;
+    }
   } else {
     setSlotEditMode('PATIENT');
     if (taskTitleInput) {
