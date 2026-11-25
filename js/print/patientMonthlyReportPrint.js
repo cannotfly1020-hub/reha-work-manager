@@ -307,12 +307,15 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
   }
 
   const daysInMonth = aggregated?.daysInMonth || new Date(y, m, 0).getDate();
-  const dailyUnits = entry?.dailyUnits || Array(daysInMonth + 1).fill(0);
-  const dailyReha = entry?.dailyRehaUnits || dailyUnits;
+  // 帳票の単位表示は個別リハ専用値のみ使用（dailyUnits は消炎専任時に来院フラグ1が入る互換値のため使わない）
+  const dailyReha = Array.isArray(entry?.dailyRehaUnits)
+    ? entry.dailyRehaUnits
+    : Array(daysInMonth + 1).fill(0);
   const dailyAnalgesia = entry?.dailyAnalgesia || Array(daysInMonth + 1).fill(0);
   const slots = Array.isArray(entry?.slots) ? entry.slots : [];
-  const totalUnits = entry?.totalUnits ?? dailyUnits.reduce((s, v, i) => (i === 0 ? s : s + (v || 0)), 0);
-  const rehaTotal = entry?.rehaTotalUnits ?? totalUnits;
+  const rehaTotal = Number(entry?.rehaTotalUnits) || 0;
+  // KPI「当月総単位」も個別リハ単位に揃え、消炎来院日数の混入を防ぐ
+  const totalUnits = rehaTotal;
   const planCount = entry?.planCount || 0;
   const analgesiaDays = entry?.totalAnalgesiaDays || 0;
 
@@ -421,11 +424,11 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
   const dailyOt = roleAgg.dailyByRole.OT;
   const dailySt = roleAgg.dailyByRole.ST;
   const showStRow = roleAgg.hasRole.ST;
-  // スロット無しフォールバック: 合計を PT に寄せる
+  // スロット無しフォールバック: 個別リハ単位のみ PT に寄せる（消炎来院フラグは含めない）
   const roleSlotTotal = (roleAgg.totalsByRole.PT || 0) + (roleAgg.totalsByRole.OT || 0) + (roleAgg.totalsByRole.ST || 0);
   if (roleSlotTotal === 0) {
     for (let d = 1; d <= daysInMonth; d += 1) {
-      dailyPt[d] = dailyUnits[d] || 0;
+      dailyPt[d] = dailyReha[d] || 0;
     }
   }
 
@@ -452,7 +455,8 @@ export async function printPatientMonthlyReport(patientId, year, month, preAggre
     const ptU = dailyPt[d] || 0;
     const otU = dailyOt[d] || 0;
     const stU = dailySt[d] || 0;
-    const totU = (dailyUnits[d] || 0) || (ptU + otU + stU);
+    // 総計は個別リハのみ（消炎フラグ日を 1 単位と誤認しない）
+    const totU = (ptU + otU + stU) || (dailyReha[d] || 0);
     const e1 = dailyEarly1Units[d] || 0;
     const e2 = dailyEarly2Units[d] || 0;
     const au = dailyAnalgesia[d] || 0;
