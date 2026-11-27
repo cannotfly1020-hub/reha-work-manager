@@ -21,6 +21,10 @@ import {
   isMonth13LimitActiveOnDate
 } from '../../core/deadlineCalc.js';
 import {
+  getDiseaseLimitUrgency,
+  buildDeadlineBadgeHtml
+} from './deadlineUrgencyUi.js';
+import {
   validateTimeConflict, validateDailyLimit, validateTherapistWorkload, validateMonthly13Limit
 } from '../../core/validator.js';
 import {
@@ -136,6 +140,13 @@ export function buildSlotCardHtml(p, u, cellData, tId, slotId, isLunch = false) 
     }
   }
 
+  const deadlineUrgency = getDiseaseLimitUrgency(p, scheduleState.dateStr);
+  const deadlineBadge = buildDeadlineBadgeHtml(deadlineUrgency);
+  const deadlineClass = deadlineUrgency?.cardClass ? ` ${deadlineUrgency.cardClass}` : '';
+  const deadlineTitleAttr = deadlineUrgency?.title
+    ? ` title="${sanitizeHtml(deadlineUrgency.title)}"`
+    : '';
+
   // ★【セル枠完全密着の精密計算】
   // 1セル高さ52pxに対して、u単位（uコマ）分の高さを算出し、下枠線と重ならないよう -5px を適用
   // 1単位: 47px / 2単位: 99px / 3単位: 151px / 4単位: 203px
@@ -144,11 +155,11 @@ export function buildSlotCardHtml(p, u, cellData, tId, slotId, isLunch = false) 
 
   return `
     <div class="cell-slot${lunchCls}" data-therapist="${tId}" data-slot="${slotId}" data-occupied="1">
-      <div class="reha-slot-card ${cardClass} card-unit-${u}" draggable="true" data-therapist="${tId}" data-slot="${slotId}"
+      <div class="reha-slot-card ${cardClass} card-unit-${u}${deadlineClass}" draggable="true" data-therapist="${tId}" data-slot="${slotId}"${deadlineTitleAttr}
            style="height:${calculatedHeight}px !important; max-height:${calculatedHeight}px !important; box-sizing:border-box; overflow:hidden; cursor:grab;">
         <div style="display:flex; justify-content:space-between; align-items:center; gap:4px;">
           <div style="display:flex; align-items:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; flex:1;">
-            ${diseaseTag}<span style="font-weight:700; font-size:0.8rem; margin-left:3px;">${sanitizeHtml(p.name)}</span>
+            ${diseaseTag}<span style="font-weight:700; font-size:0.8rem; margin-left:3px;">${sanitizeHtml(p.name)}</span>${deadlineBadge}
           </div>
           <div style="display:flex; align-items:center; flex-shrink:0;">
             <span class="badge-unit badge-unit-${u}">${u}単位</span>${planBadge}${earlyBadge}

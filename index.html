@@ -76,6 +76,11 @@
           <span>本日の予約を一括反映</span>
           <span id="syncAppointmentCountBadge" style="font-size:0.75rem; background:#3b82f6; color:#ffffff; padding:1px 6px; border-radius:9999px; font-weight:700;">0件</span>
         </button>
+        <button id="btnMonthlyDeadline" type="button" title="表示中の月に算定満了日を迎える疾患別リハ患者一覧">
+          <span>⏰</span>
+          <span>当月期限</span>
+          <span id="monthlyDeadlineCountBadge">0</span>
+        </button>
       </div>
       <div id="dailyKpiStrip" style="display:flex; gap:16px; font-size:0.88rem; font-weight:600; background:#fff; padding:6px 16px; border-radius:6px; border:1px solid #e2e8f0;"></div>
     </div>
@@ -1213,6 +1218,40 @@
           </div>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- モーダル: 当月算定期限一覧（本日時間割） -->
+  <div id="modalMonthlyDeadline" class="modal-overlay">
+    <div class="modal-card" style="max-width:860px; max-height:85vh; display:flex; flex-direction:column;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px;">
+        <h3 id="monthlyDeadlineModalTitle" style="font-size:1.05rem; font-weight:800; color:#0f172a; margin:0;">⏰ 当月期限一覧</h3>
+        <button type="button" id="btnCloseMonthlyDeadlineX" style="background:none; border:none; font-size:1.2rem; cursor:pointer; color:#64748b;">✕</button>
+      </div>
+      <p id="monthlyDeadlineModalSub" style="font-size:0.75rem; color:#64748b; margin:0 0 12px;"></p>
+      <div style="overflow:auto; flex:1; border:1px solid #e2e8f0; border-radius:6px;">
+        <table style="width:100%; border-collapse:collapse; font-size:0.8rem;">
+          <thead>
+            <tr style="background:#1e293b; color:#fff;">
+              <th style="padding:7px 8px; text-align:left; white-space:nowrap;">区分</th>
+              <th style="padding:7px 8px; text-align:left;">患者名</th>
+              <th style="padding:7px 8px; text-align:left; white-space:nowrap;">疾患区分</th>
+              <th style="padding:7px 8px; text-align:left; white-space:nowrap;">起算日</th>
+              <th style="padding:7px 8px; text-align:left; white-space:nowrap;">算定満了日</th>
+              <th style="padding:7px 8px; text-align:left; white-space:nowrap;">状態</th>
+              <th style="padding:7px 8px; text-align:left; white-space:nowrap;">介護度</th>
+            </tr>
+          </thead>
+          <tbody id="monthlyDeadlineTableBody"></tbody>
+        </table>
+      </div>
+      <style>
+        #modalMonthlyDeadline td { padding:6px 8px; border-bottom:1px solid #e2e8f0; vertical-align:top; }
+        #modalMonthlyDeadline tbody tr:hover { background:#fff7ed; }
+      </style>
+      <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+        <button type="button" id="btnCloseMonthlyDeadline" style="padding:7px 16px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; cursor:pointer; font-size:0.85rem;">閉じる</button>
+      </div>
     </div>
   </div>
 

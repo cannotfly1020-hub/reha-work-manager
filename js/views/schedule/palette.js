@@ -6,6 +6,10 @@ import { REHA_RULES } from '../../config/rules.js';
 import { sanitizeHtml, normalizeToKatakana } from '../../core/dataNormalizer.js';
 import { searchPatients } from '../../store/patientStore.js';
 import { scheduleState } from './scheduleState.js';
+import {
+  getDiseaseLimitUrgency,
+  buildDeadlineBadgeHtml
+} from './deadlineUrgencyUi.js';
 
 const PALETTE_SEARCH_DEBOUNCE_MS = 120;
 
@@ -98,13 +102,19 @@ export function renderPatientPalette() {
       const borderCol = isOut ? 'var(--color-outpatient)' : 'var(--color-inpatient)';
       const disRule = REHA_RULES.LIMIT_DAYS[p.diseaseType] || REHA_RULES.LIMIT_DAYS.ANALGESIA;
       const tagHtml = `<span style="font-size:0.65rem; font-weight:700; background:${disRule.tagBg}; color:${disRule.tagColor}; border:1px solid ${disRule.tagBorder}; padding:1px 4px; border-radius:3px;">${disRule.shortLabel}</span> `;
+      const deadlineUrgency = getDiseaseLimitUrgency(p, scheduleState.dateStr);
+      const deadlineBadge = buildDeadlineBadgeHtml(deadlineUrgency);
+      const deadlineClass = deadlineUrgency?.cardClass ? ` ${deadlineUrgency.cardClass}` : '';
+      const deadlineTitleAttr = deadlineUrgency?.title
+        ? ` title="${sanitizeHtml(deadlineUrgency.title)}"`
+        : '';
 
       return `
-        <div class="patient-palette-card" draggable="true" data-patient-id="${p.id}"
+        <div class="patient-palette-card${deadlineClass}" draggable="true" data-patient-id="${p.id}"${deadlineTitleAttr}
              style="background:#fff; border:1px solid #e2e8f0; border-left:4px solid ${borderCol}; border-radius:4px; padding:6px 8px; cursor:grab; font-size:0.78rem;">
           <div style="font-weight:700; display:flex; justify-content:space-between; align-items:center;">
-            <div>${tagHtml}<span>${sanitizeHtml(p.name)}</span></div>
-            <span style="font-size:0.7rem; color:#64748b;">${p.id}</span>
+            <div style="display:flex; align-items:center; gap:2px; min-width:0; flex-wrap:wrap;">${tagHtml}<span>${sanitizeHtml(p.name)}</span>${deadlineBadge}</div>
+            <span style="font-size:0.7rem; color:#64748b; flex-shrink:0;">${p.id}</span>
           </div>
           <div style="font-size:0.7rem; color:#64748b; margin-top:2px;">${sanitizeHtml(p.diseaseName || '')}</div>
         </div>`;

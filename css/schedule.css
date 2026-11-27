@@ -588,3 +588,112 @@ border-radius: 4px;
 margin-left: 4px;
 }
 
+/* --- 疾患別リハ 算定期限接近（残り14日以内） --- */
+.reha-slot-card.deadline-urgent-warn,
+.patient-palette-card.deadline-urgent-warn {
+  box-shadow: 0 0 0 2px #eab308, var(--shadow-sm);
+}
+.reha-slot-card.deadline-urgent-danger,
+.patient-palette-card.deadline-urgent-danger {
+  box-shadow: 0 0 0 2px #ef4444, var(--shadow-sm);
+}
+.reha-slot-card.deadline-urgent-today,
+.patient-palette-card.deadline-urgent-today {
+  box-shadow: 0 0 0 2px #dc2626, 0 0 0 4px rgba(220, 38, 38, 0.18), var(--shadow-sm);
+}
+.reha-slot-card.deadline-urgent-warn:hover,
+.patient-palette-card.deadline-urgent-warn:hover {
+  box-shadow: 0 0 0 2px #ca8a04, var(--shadow-md);
+}
+.reha-slot-card.deadline-urgent-danger:hover,
+.patient-palette-card.deadline-urgent-danger:hover,
+.reha-slot-card.deadline-urgent-today:hover,
+.patient-palette-card.deadline-urgent-today:hover {
+  box-shadow: 0 0 0 2px #b91c1c, var(--shadow-md);
+}
+
+.badge-deadline {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 3px;
+  white-space: nowrap;
+  line-height: 1.3;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.badge-deadline-warn {
+  background: #fef9c3;
+  color: #a16207;
+  border: 1px solid #eab308;
+}
+.badge-deadline-danger {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #ef4444;
+}
+.badge-deadline-today {
+  background: #dc2626;
+  color: #fff;
+  border: 1px solid #b91c1c;
+}
+
+#btnMonthlyDeadline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #fff7ed;
+  border: 1px solid #fb923c;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #c2410c;
+  cursor: pointer;
+}
+#btnMonthlyDeadline.has-items {
+  background: #ffedd5;
+  border-color: #f97316;
+  color: #9a3412;
+}
+#btnMonthlyDeadline:hover {
+  background: #fed7aa;
+}
+#monthlyDeadlineCountBadge {
+  font-size: 0.75rem;
+  background: #ea580c;
+  color: #fff;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  font-weight: 800;
+  min-width: 1.25rem;
+  text-align: center;
+}
+.monthly-deadline-status {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: #334155;
+}
+.monthly-deadline-status.status-warn {
+  background: #fef9c3;
+  color: #a16207;
+}
+.monthly-deadline-status.status-danger {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+.monthly-deadline-status.status-today {
+  background: #dc2626;
+  color: #fff;
+}
+.monthly-deadline-status.status-exceeded {
+  background: #e2e8f0;
+  color: #475569;
+}
+
