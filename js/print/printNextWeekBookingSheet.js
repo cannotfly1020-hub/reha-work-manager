@@ -5,11 +5,12 @@
 
 import { formatDateYMD, getWeekDates, getMondayOfWeek } from '../core/dateUtils.js';
 import { TIME_SLOTS } from '../config/appointmentSlots.js';
-import { snapToNearestAppointmentSlot } from '../core/timeSlotUtil.js';
+import { snapToFloorAppointmentSlot } from '../core/timeSlotUtil.js';
 import { generateAppointmentTimeStrings } from '../core/timeSlotGenerator.js';
 import { OUTPATIENT_HOURS } from '../config/rules.js';
 import { sanitizeHtml } from '../core/dataNormalizer.js';
 import { getJapaneseHolidayName } from '../core/holidayCalc.js';
+import { isClinicClosed, getClinicClosedReason } from '../core/clinicClosedUtil.js';
 import { getPatientById } from '../store/patientStore.js';
 import { getAllTherapists } from '../store/therapistStore.js';
 import { getAllAppointments } from '../store/appointmentStore.js';
@@ -102,7 +103,7 @@ function filterReservationsForSlot(weekAptList, dateStr, timeStr, allSlotTimes) 
     const aptDate = String(apt.date || '').replace(/\//g, '-').slice(0, 10);
     const target = String(dateStr || '').replace(/\//g, '-').slice(0, 10);
     if (aptDate !== target) return false;
-    const snapped = snapToNearestAppointmentSlot(apt.startTime, allSlotTimes);
+    const snapped = snapToFloorAppointmentSlot(apt.startTime, allSlotTimes);
     return snapped === timeStr;
   });
 }
@@ -182,7 +183,7 @@ function renderPatientCardHtml(apt, therapists, colorMap) {
  * @param {string} extraCls
  * @returns {string}
  */
-function renderSplitSlotCellHtml(slotResList, therapists, colorMap, extraCls = '') {
+function renderSplitSlotCellHtml(slotResList, therapists, colorMap, extraCls = '', closedLabel = '') {
   const list = Array.isArray(slotResList) ? slotResList : [];
   const rehaApts = [];
   const antiApts = [];
@@ -192,20 +193,29 @@ function renderSplitSlotCellHtml(slotResList, therapists, colorMap, extraCls = '
     else rehaApts.push(apt);
   });
 
+  const closedBanner = closedLabel
+    ? `<div class="closed-mark" title="${sanitizeHtml(closedLabel)}">休診</div>`
+    : '';
+
   const rehaInner = rehaApts.length > 0
     ? `<div class="slot-patients-container${rehaApts.length >= 2 ? ' is-multi' : ''}">${
       rehaApts.map((apt) => renderPatientCardHtml(apt, therapists, colorMap)).join('')
     }</div>`
-    : '<div class="write-space zone-write" aria-hidden="true"></div>';
+    : (closedLabel
+      ? `<div class="closed-empty">${closedBanner}</div>`
+      : '<div class="write-space zone-write" aria-hidden="true"></div>');
 
   const antiInner = antiApts.length > 0
     ? `<div class="slot-patients-container${antiApts.length >= 2 ? ' is-multi' : ''}">${
       antiApts.map((apt) => renderPatientCardHtml(apt, therapists, colorMap)).join('')
     }</div>`
-    : '<div class="write-space zone-write" aria-hidden="true"></div>';
+    : (closedLabel
+      ? '<div class="closed-empty" aria-hidden="true"></div>'
+      : '<div class="write-space zone-write" aria-hidden="true"></div>');
 
   return `
     <td class="res-slot split-slot${extraCls}">
+      ${list.length > 0 && closedLabel ? closedBanner : ''}
       <div class="slot-zones">
         <div class="zone zone-reha">${rehaInner}</div>
         <div class="zone zone-anti">${antiInner}</div>
@@ -235,13 +245,21 @@ function buildWeekBodyRows(weekDates, weekAptList, allSlotTimes, therapists, col
       const dateStr = formatDateYMD(d);
       const isSat = d.getDay() === 6;
       const holidayName = getJapaneseHolidayName(d);
+      const closed = isClinicClosed(dateStr, slotTime);
+      const closedReason = getClinicClosedReason(dateStr, slotTime);
       const slotResList = filterReservationsForSlot(weekAptList, dateStr, slotTime, allSlotTimes);
 
       let extra = '';
-      if (holidayName) extra += ' holiday';
+      if (closed) extra += ' holiday closed';
       else if (isSat) extra += ' sat';
 
-      bodyRows += renderSplitSlotCellHtml(slotResList, therapists, colorMap, extra);
+      bodyRows += renderSplitSlotCellHtml(
+        slotResList,
+        therapists,
+        colorMap,
+        extra,
+        closed ? (closedReason || holidayName || '休診') : ''
+      );
     });
 
     bodyRows += `</tr>`;
@@ -470,6 +488,24 @@ function buildSharedCss(ctx) {
       vertical-align: middle !important; overflow: hidden;
     }
     td.res-slot.split-slot { background: #ffffff; }
+    td.res-slot.holiday, td.res-slot.closed {
+      background: #fff1f2 !important;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    }
+    td.res-slot.holiday .zone-reha,
+    td.res-slot.closed .zone-reha { background: #fff5f5; }
+    td.res-slot.holiday .zone-anti,
+    td.res-slot.closed .zone-anti { background: #ffe4e6; }
+    .closed-mark {
+      display: block; text-align: center; font-size: 6.5pt; font-weight: 800;
+      color: #be123c; background: #ffe4e6; border-bottom: 0.5px solid #fecdd3;
+      line-height: 1.2; padding: 0 1px;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    }
+    .closed-empty {
+      display: flex; align-items: center; justify-content: center;
+      width: 100%; height: 100%; min-height: 8mm;
+    }
     .slot-zones {
       display: flex; width: 100%; height: 100%; min-height: 9mm;
       align-items: stretch;

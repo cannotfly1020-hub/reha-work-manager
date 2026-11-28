@@ -91,9 +91,26 @@ export const DEFAULT_FACILITY_HOURS = {
   defaultLunchEnd: '13:00'
 };
 
+/** 外来予約枠の刻み候補（分） */
+export const OUTPATIENT_SLOT_INTERVAL_OPTIONS = Object.freeze([15, 20, 30]);
+
+/**
+ * @param {unknown} value
+ * @returns {15|20|30}
+ */
+export function normalizeSlotIntervalMinutes(value) {
+  const n = Number(value);
+  if (n === 15 || n === 20 || n === 30) return n;
+  return 20;
+}
+
 /**
  * 外来予約カレンダー専用の既定提供時間（施設時間とは独立）
- * @type {FacilityHours}
+ * ※ slotIntervalMinutes / closedPeriods は外来専用。本日時間割には使わない
+ * @type {FacilityHours & {
+ *   slotIntervalMinutes: 15|20|30,
+ *   closedPeriods: Record<string, { am: boolean, pm: boolean }>
+ * }}
  */
 export const DEFAULT_OUTPATIENT_HOURS = {
   amStart: '09:00',
@@ -101,7 +118,17 @@ export const DEFAULT_OUTPATIENT_HOURS = {
   pmStart: '13:00',
   pmEnd: '18:00',
   defaultLunchStart: '12:00',
-  defaultLunchEnd: '13:00'
+  defaultLunchEnd: '13:00',
+  slotIntervalMinutes: 20,
+  closedPeriods: {
+    mon: { am: false, pm: false },
+    tue: { am: false, pm: false },
+    wed: { am: false, pm: false },
+    thu: { am: false, pm: true },
+    fri: { am: false, pm: false },
+    sat: { am: false, pm: true },
+    sun: { am: false, pm: false }
+  }
 };
 
 /**
@@ -340,8 +367,8 @@ export function saveFacilityHours(hours) {
 
 /**
  * 外来専用時間を正規化（欠落は DEFAULT_OUTPATIENT_HOURS で補完）
- * @param {Partial<FacilityHours>|null|undefined} hours
- * @returns {FacilityHours}
+ * @param {Partial<typeof DEFAULT_OUTPATIENT_HOURS>|null|undefined} hours
+ * @returns {typeof DEFAULT_OUTPATIENT_HOURS}
  */
 export function normalizeOutpatientHours(hours) {
   // ★外来は連続枠（昼休みゼロ＝lunchStart===lunchEnd）を許容する。
@@ -353,24 +380,83 @@ export function normalizeOutpatientHours(hours) {
   if (defaultLunchEnd < defaultLunchStart) {
     defaultLunchEnd = defaultLunchStart;
   }
+
+  // closedPeriods: 未保存環境でも木PM・土PM デフォルトを適用
+  let closedPeriods = DEFAULT_OUTPATIENT_HOURS.closedPeriods;
+  try {
+    // 遅延 import を避け、同一モジュール内で浅い正規化
+    const raw = hours?.closedPeriods;
+    if (raw && typeof raw === 'object') {
+      const keys = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+      const next = {};
+      keys.forEach((k) => {
+        const def = DEFAULT_OUTPATIENT_HOURS.closedPeriods[k] || { am: false, pm: false };
+        const row = raw[k];
+        if (!row || typeof row !== 'object') {
+          next[k] = { ...def };
+        } else {
+          next[k] = { am: Boolean(row.am), pm: Boolean(row.pm) };
+        }
+      });
+      closedPeriods = next;
+    } else {
+      closedPeriods = {
+        mon: { ...DEFAULT_OUTPATIENT_HOURS.closedPeriods.mon },
+        tue: { ...DEFAULT_OUTPATIENT_HOURS.closedPeriods.tue },
+        wed: { ...DEFAULT_OUTPATIENT_HOURS.closedPeriods.wed },
+        thu: { ...DEFAULT_OUTPATIENT_HOURS.closedPeriods.thu },
+        fri: { ...DEFAULT_OUTPATIENT_HOURS.closedPeriods.fri },
+        sat: { ...DEFAULT_OUTPATIENT_HOURS.closedPeriods.sat },
+        sun: { ...DEFAULT_OUTPATIENT_HOURS.closedPeriods.sun }
+      };
+    }
+  } catch (_) {
+    closedPeriods = { ...DEFAULT_OUTPATIENT_HOURS.closedPeriods };
+  }
+
   return {
     amStart: normalizeTimeString(hours?.amStart) || DEFAULT_OUTPATIENT_HOURS.amStart,
     amEnd: normalizeTimeString(hours?.amEnd) || DEFAULT_OUTPATIENT_HOURS.amEnd,
     pmStart: normalizeTimeString(hours?.pmStart) || DEFAULT_OUTPATIENT_HOURS.pmStart,
     pmEnd: normalizeTimeString(hours?.pmEnd) || DEFAULT_OUTPATIENT_HOURS.pmEnd,
     defaultLunchStart,
-    defaultLunchEnd
+    defaultLunchEnd,
+    slotIntervalMinutes: normalizeSlotIntervalMinutes(
+      hours?.slotIntervalMinutes ?? DEFAULT_OUTPATIENT_HOURS.slotIntervalMinutes
+    ),
+    closedPeriods
   };
 }
 
 /**
- * 外来専用時間の検証（施設時間と同じルール）
- * @param {Partial<FacilityHours>|null|undefined} hours
- * @returns {{ ok: boolean, message: string, hours: FacilityHours }}
+ * 外来専用時間の検証（刻み幅に応じた最低帯幅）
+ * @param {Partial<typeof DEFAULT_OUTPATIENT_HOURS>|null|undefined} hours
+ * @returns {{ ok: boolean, message: string, hours: typeof DEFAULT_OUTPATIENT_HOURS }}
  */
 export function validateOutpatientHours(hours) {
-  const normalized = normalizeOutpatientHours(hours);
-  return validateFacilityHours(normalized);
+  const h = normalizeOutpatientHours(hours);
+  const amStart = timeToMinutes(h.amStart);
+  const amEnd = timeToMinutes(h.amEnd);
+  const pmStart = timeToMinutes(h.pmStart);
+  const pmEnd = timeToMinutes(h.pmEnd);
+  const interval = h.slotIntervalMinutes;
+
+  if (!(amStart < amEnd)) {
+    return { ok: false, message: '午前開始は午前終了より前である必要があります', hours: h };
+  }
+  if (!(amEnd <= pmStart)) {
+    return { ok: false, message: '午前終了は午後開始以前である必要があります（昼休憩の逆転を禁止）', hours: h };
+  }
+  if (!(pmStart < pmEnd)) {
+    return { ok: false, message: '午後開始は業務終了より前である必要があります', hours: h };
+  }
+  if (amEnd - amStart < interval) {
+    return { ok: false, message: `午前帯は最低${interval}分（1コマ）以上必要です`, hours: h };
+  }
+  if (pmEnd - pmStart < interval) {
+    return { ok: false, message: `午後帯は最低${interval}分（1コマ）以上必要です`, hours: h };
+  }
+  return { ok: true, message: '', hours: h };
 }
 
 /**
@@ -438,19 +524,30 @@ export function saveOutpatientHours(hours) {
 
 /**
  * 外来専用時間のバッジ用サマリー
- * @param {Partial<FacilityHours>|null|undefined} hours
+ * @param {Partial<typeof DEFAULT_OUTPATIENT_HOURS>|null|undefined} hours
  * @returns {string}
  */
 export function formatOutpatientHoursSummary(hours) {
-  return formatFacilityHoursSummary(normalizeOutpatientHours(hours));
+  const check = validateOutpatientHours(hours);
+  const h = check.hours;
+  if (!check.ok) {
+    return `⚠ ${check.message}`;
+  }
+  const am = getAmSlotCount(h);
+  const pm = getPmSlotCount(h);
+  const total = am + pm;
+  const breakMin = timeToMinutes(h.pmStart) - timeToMinutes(h.amEnd);
+  const breakLabel = breakMin > 0 ? `昼休憩 ${breakMin}分` : '昼休憩なし（連続）';
+  return `${h.slotIntervalMinutes}分刻み ／ 午前 ${am}コマ ／ 午後 ${pm}コマ ＝ 計 ${total}コマ（${breakLabel}）`;
 }
 
 /**
- * 施設設定に基づいて20分刻みの TIME_SLOTS 配列を動的生成する。
- * 既存画面互換のため period は 'am'|'pm'、label は 'HH:MM - HH:MM'、start/end を必ず付与する。
- * 既定では am_1(09:00)〜am_12(12:40)、pm_1(13:00)〜pm_15(17:40) の27コマ。
+ * 診療時間から刻み幅つき TIME_SLOTS 配列を動的生成する。
+ * - 本日時間割: intervalMinutes 未指定／hours に slotIntervalMinutes 無し → **常に20分**
+ * - 外来カレンダー: hours.slotIntervalMinutes（15/20/30）を使用
  *
- * @param {Partial<FacilityHours>} [hours]
+ * @param {Partial<FacilityHours>|Partial<typeof DEFAULT_OUTPATIENT_HOURS>} [hours]
+ * @param {number|null} [intervalMinutes] 明示指定時はそちら優先（施設側は渡さない）
  * @returns {Array<{
  *   id: string,
  *   label: string,
@@ -462,22 +559,29 @@ export function formatOutpatientHoursSummary(hours) {
  *   order: number
  * }>}
  */
-export function generateTimeSlots(hours = DEFAULT_FACILITY_HOURS) {
-  const h = normalizeFacilityHours(hours);
-  const slots = [];
+export function generateTimeSlots(hours = DEFAULT_FACILITY_HOURS, intervalMinutes = null) {
+  // 外来オブジェクト（slotIntervalMinutes あり）か施設かで正規化を分ける
+  const looksOutpatient = hours && Object.prototype.hasOwnProperty.call(hours, 'slotIntervalMinutes');
+  const h = looksOutpatient
+    ? normalizeOutpatientHours(hours)
+    : normalizeFacilityHours(hours);
+  const step = intervalMinutes != null
+    ? normalizeSlotIntervalMinutes(intervalMinutes)
+    : (looksOutpatient
+      ? normalizeSlotIntervalMinutes(h.slotIntervalMinutes)
+      : 20);
 
+  const slots = [];
   const amStartMin = timeToMinutes(h.amStart);
   const amEndMin = timeToMinutes(h.amEnd);
   const pmStartMin = timeToMinutes(h.pmStart);
   const pmEndMin = timeToMinutes(h.pmEnd);
 
   let order = 1;
-
-  // 午前スロット（例: 09:00〜13:00 → 12コマ: am_1…am_12、最終枠 12:40-13:00）
   let amCount = 1;
-  for (let t = amStartMin; t + 20 <= amEndMin; t += 20) {
+  for (let t = amStartMin; t + step <= amEndMin; t += step) {
     const startStr = minutesToTime(t);
-    const endStr = minutesToTime(t + 20);
+    const endStr = minutesToTime(t + step);
     slots.push({
       id: `am_${amCount}`,
       label: `${startStr} - ${endStr}`,
@@ -492,11 +596,10 @@ export function generateTimeSlots(hours = DEFAULT_FACILITY_HOURS) {
     order += 1;
   }
 
-  // 午後スロット（例: 13:00〜18:00 → 15コマ: pm_1…pm_15、先頭3枠が 13:00/13:20/13:40）
   let pmCount = 1;
-  for (let t = pmStartMin; t + 20 <= pmEndMin; t += 20) {
+  for (let t = pmStartMin; t + step <= pmEndMin; t += step) {
     const startStr = minutesToTime(t);
-    const endStr = minutesToTime(t + 20);
+    const endStr = minutesToTime(t + step);
     slots.push({
       id: `pm_${pmCount}`,
       label: `${startStr} - ${endStr}`,
@@ -515,13 +618,16 @@ export function generateTimeSlots(hours = DEFAULT_FACILITY_HOURS) {
 }
 
 /**
- * 外来予約カレンダー用の開始時刻文字列配列（TIME_SLOTS の start と完全一致）
- * 既定では '13:00','13:20','13:40' を含む
- * @param {Partial<FacilityHours>} [hours]
+ * 外来予約カレンダー用の開始時刻文字列配列（刻みは hours.slotIntervalMinutes）
+ * @param {Partial<typeof DEFAULT_OUTPATIENT_HOURS>|Partial<FacilityHours>} [hours]
  * @returns {string[]}
  */
-export function generateAppointmentTimeStrings(hours = DEFAULT_FACILITY_HOURS) {
-  return generateTimeSlots(hours).map((slot) => slot.start);
+export function generateAppointmentTimeStrings(hours = DEFAULT_OUTPATIENT_HOURS) {
+  const h = normalizeOutpatientHours({
+    ...DEFAULT_OUTPATIENT_HOURS,
+    ...(hours || {})
+  });
+  return generateTimeSlots(h).map((slot) => slot.start);
 }
 
 /**

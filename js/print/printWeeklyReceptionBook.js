@@ -4,7 +4,8 @@
 
 import { formatDateYMD, getWeekDates } from '../core/dateUtils.js';
 import { TIME_SLOTS } from '../config/appointmentSlots.js';
-import { snapToNearestAppointmentSlot } from '../core/timeSlotUtil.js';
+import { snapToFloorAppointmentSlot } from '../core/timeSlotUtil.js';
+import { isClinicClosed, getClinicClosedReason } from '../core/clinicClosedUtil.js';
 import { generateAppointmentTimeStrings } from '../core/timeSlotGenerator.js';
 import { OUTPATIENT_HOURS } from '../config/rules.js';
 import { sanitizeHtml } from '../core/dataNormalizer.js';
@@ -92,7 +93,7 @@ function resolveStaffColor(colorMap, therapistId, anti) {
 function buildSlotAptMap(weekAptList, allSlotTimes) {
   const slotAptMap = Object.create(null);
   weekAptList.forEach((apt) => {
-    const snapped = snapToNearestAppointmentSlot(apt.startTime, allSlotTimes);
+    const snapped = snapToFloorAppointmentSlot(apt.startTime, allSlotTimes);
     const k = `${apt.date}_${snapped}`;
     if (!slotAptMap[k]) slotAptMap[k] = [];
     slotAptMap[k].push(apt);
@@ -190,18 +191,24 @@ function buildBookBodyRows(pageSlots, weekDates, slotAptMap, therapists, colorMa
       const dateStr = formatDateYMD(d);
       const isSat = d.getDay() === 6;
       const holidayName = getJapaneseHolidayName(d);
+      const closed = isClinicClosed(dateStr, slotTime);
+      const closedReason = getClinicClosedReason(dateStr, slotTime);
       const key = `${dateStr}_${slotTime}`;
       // 同一日・同一時間の全予約を漏れなく取得（filter 相当）
       const slotResList = slotAptMap[key] || [];
 
       let extra = '';
-      if (holidayName) extra += ' holiday';
+      if (closed) extra += ' holiday closed';
       else if (isSat) extra += ' sat';
+
+      const closedMark = closed
+        ? `<div class="closed-mark" title="${sanitizeHtml(closedReason || holidayName || '休診')}">休診</div>`
+        : '';
 
       if (slotResList.length === 0) {
         bodyRows += `
           <td class="res-slot empty-slot${extra}">
-            <div class="write-space" aria-hidden="true"></div>
+            ${closed ? closedMark : '<div class="write-space" aria-hidden="true"></div>'}
           </td>`;
         return;
       }
@@ -212,6 +219,7 @@ function buildBookBodyRows(pageSlots, weekDates, slotAptMap, therapists, colorMa
         .join('');
       bodyRows += `
         <td class="res-slot${extra}">
+          ${closedMark}
           <div class="slot-patients-container${multi}">${cards}</div>
         </td>`;
     });
@@ -389,8 +397,21 @@ const BOOK_SHARED_CSS = `
     height: var(--row-mm, 20mm) !important; overflow: hidden;
   }
   .res-slot.sat { background: #fafcff; }
-  .res-slot.holiday { background: #fffafa; }
+  .res-slot.holiday, .res-slot.closed {
+    background: #fff1f2 !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
   .empty-slot { background: #ffffff !important; }
+  .empty-slot.holiday, .empty-slot.closed {
+    background: #fff1f2 !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .closed-mark {
+    display: inline-block; font-size: 7.5pt; font-weight: 800;
+    color: #be123c; background: #ffe4e6; border: 0.5px solid #fecdd3;
+    border-radius: 2px; padding: 0 3px; margin: 0 0 1px;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
   .write-space { width: 100%; height: 100%; min-height: calc(var(--row-mm, 20mm) - 3px); }
   .slot-patients-container {
     display: flex; flex-direction: column; justify-content: space-around;

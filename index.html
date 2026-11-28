@@ -1063,9 +1063,68 @@
             </div>
             <div id="outpatientHoursSlotSummaryBadge"
                  style="margin-top:8px; display:inline-block; padding:4px 10px; border-radius:999px; border:1px solid #a7f3d0; background:#fff; color:#065f46; font-size:0.72rem; font-weight:700;">
-              午前 12コマ ／ 午後 15コマ ＝ 計 27コマ（昼休憩なし）
+              20分刻み ／ 午前 12コマ ／ 午後 15コマ ＝ 計 27コマ（昼休憩なし）
             </div>
-            <p style="font-size:0.68rem; color:#64748b; margin:6px 0 0;">
+
+            <div style="margin-top:10px; padding-top:10px; border-top:1px dashed #a7f3d0;">
+              <label for="settingAptSlotIntervalSelect" style="font-size:0.75rem; font-weight:800; color:#065f46; display:block; margin-bottom:4px;">予約枠の時間刻み</label>
+              <select id="settingAptSlotIntervalSelect"
+                      style="width:100%; max-width:280px; padding:6px 8px; border:1px solid #a7f3d0; border-radius:4px; font-size:0.82rem; font-weight:700; background:#fff; color:#065f46;">
+                <option value="15">15分刻み</option>
+                <option value="20" selected>20分刻み（標準）</option>
+                <option value="30">30分刻み</option>
+              </select>
+              <p style="font-size:0.65rem; color:#64748b; margin:4px 0 0; line-height:1.35;">
+                外来カレンダー・週間印刷の行のみ変更します（本日時間割の20分は維持）。既存予約の時刻データは書き換えません。
+              </p>
+            </div>
+
+            <div style="margin-top:10px; padding-top:10px; border-top:1px dashed #a7f3d0;">
+              <div style="font-size:0.75rem; font-weight:800; color:#065f46; margin-bottom:6px;">休診設定（曜日 × 午前／午後）</div>
+              <p style="font-size:0.65rem; color:#64748b; margin:0 0 6px; line-height:1.35;">
+                初期値は「木曜・午後」「土曜・午後」。祝日は別途自動判定されます。休診枠への新規予約は不可／既存予約は表示・編集可能です。
+              </p>
+              <div style="overflow-x:auto;">
+                <table id="outpatientClosedPeriodsTable" style="width:100%; border-collapse:collapse; font-size:0.72rem; background:#fff; border:1px solid #a7f3d0; border-radius:4px;">
+                  <thead>
+                    <tr style="background:#d1fae5; color:#065f46;">
+                      <th style="padding:4px 6px; text-align:left;">帯</th>
+                      <th style="padding:4px 4px; text-align:center;">月</th>
+                      <th style="padding:4px 4px; text-align:center;">火</th>
+                      <th style="padding:4px 4px; text-align:center;">水</th>
+                      <th style="padding:4px 4px; text-align:center;">木</th>
+                      <th style="padding:4px 4px; text-align:center;">金</th>
+                      <th style="padding:4px 4px; text-align:center;">土</th>
+                      <th style="padding:4px 4px; text-align:center;">日</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style="padding:4px 6px; font-weight:700; color:#047857;">午前休診</td>
+                      <td style="text-align:center;"><input type="checkbox" class="apt-closed-chk" data-day="mon" data-period="am"></td>
+                      <td style="text-align:center;"><input type="checkbox" class="apt-closed-chk" data-day="tue" data-period="am"></td>
+                      <td style="text-align:center;"><input type="checkbox" class="apt-closed-chk" data-day="wed" data-period="am"></td>
+                      <td style="text-align:center;"><input type="checkbox" class="apt-closed-chk" data-day="thu" data-period="am"></td>
+                      <td style="text-align:center;"><input type="checkbox" class="apt-closed-chk" data-day="fri" data-period="am"></td>
+                      <td style="text-align:center;"><input type="checkbox" class="apt-closed-chk" data-day="sat" data-period="am"></td>
+                      <td style="text-align:center;"><input type="checkbox" class="apt-closed-chk" data-day="sun" data-period="am"></td>
+                    </tr>
+                    <tr style="background:#ecfdf5;">
+                      <td style="padding:4px 6px; font-weight:700; color:#047857;">午後休診</td>
+                      <td style="text-align:center;"><input type="checkbox" class="apt-closed-chk" data-day="mon" data-period="pm"></td>
+                      <td style="text-align:center;"><input type="checkbox" class="apt-closed-chk" data-day="tue" data-period="pm"></td>
+                      <td style="text-align:center;"><input type="checkbox" class="apt-closed-chk" data-day="wed" data-period="pm"></td>
+                      <td style="text-align:center;"><input type="checkbox" class="apt-closed-chk" data-day="thu" data-period="pm" checked></td>
+                      <td style="text-align:center;"><input type="checkbox" class="apt-closed-chk" data-day="fri" data-period="pm"></td>
+                      <td style="text-align:center;"><input type="checkbox" class="apt-closed-chk" data-day="sat" data-period="pm" checked></td>
+                      <td style="text-align:center;"><input type="checkbox" class="apt-closed-chk" data-day="sun" data-period="pm"></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <p style="font-size:0.68rem; color:#64748b; margin:8px 0 0;">
               午前終了〜午後開始のあいだが外来カレンダー上の昼休み帯になります。既存の予約データはそのまま保持されます。
             </p>
           </div>

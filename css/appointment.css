@@ -237,6 +237,27 @@ background: #e0f2fe !important;
 outline: 2px dashed #0284c7;
 outline-offset: -2px;
 }
+.apt-weekly-slot-cell.apt-closed-cell,
+.apt-weekly-slot-cell.apt-holiday-cell {
+background: #fff5f5;
+}
+.apt-closed-label {
+font-size: 0.62rem;
+font-weight: 800;
+color: #be123c;
+background: #ffe4e6;
+border: 1px solid #fecdd3;
+border-radius: 3px;
+padding: 1px 4px;
+align-self: flex-start;
+line-height: 1.2;
+pointer-events: none;
+}
+.apt-closed-label-compact {
+opacity: 0.85;
+font-size: 0.58rem;
+padding: 0 3px;
+}
 
 /* 週間タイムテーブル用 予約カード (同一時間帯の複数並行表示対応) */
 .apt-weekly-card {

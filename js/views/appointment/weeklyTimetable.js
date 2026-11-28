@@ -3,6 +3,10 @@
 
 import { sanitizeHtml } from '../../core/dataNormalizer.js';
 import { getJapaneseHolidayName } from '../../core/holidayCalc.js';
+import {
+  isClinicClosed,
+  getClinicClosedReason
+} from '../../core/clinicClosedUtil.js';
 import { formatDateYMD, getWeekDates } from '../../core/dateUtils.js';
 import { TIME_SLOTS } from '../../config/appointmentSlots.js';
 import { getPatientById } from '../../store/patientStore.js';
@@ -13,7 +17,7 @@ import { showToast } from '../../ui/toast.js';
 import { calendarState } from './calendarState.js';
 import { renderAppointmentCalendarView } from '../appointmentCalendarView.js';
 import {
-  snapToNearestAppointmentSlot,
+  snapToFloorAppointmentSlot,
   formatOffSlotHint
 } from '../../core/timeSlotUtil.js';
 
@@ -43,11 +47,11 @@ export function renderWeeklyTimetable() {
     countBadge.textContent = `週間予約: 計 ${weekAptList.length} 件`;
   }
 
-  // 予約マップ [日付][吸着後スロット] -> Appointment[]
-  // ★端数時刻（10:30等）も最寄り正本スロットへ吸着し、画面から絶対に脱落させない
+  // 予約マップ [日付][直前吸着スロット] -> Appointment[]
+  // ★刻み変更後も startTime 以下で最大の枠へ表示（データは非破壊）
   const slotAptMap = {};
   weekAptList.forEach((apt) => {
-    const snapped = snapToNearestAppointmentSlot(apt.startTime, TIME_SLOTS);
+    const snapped = snapToFloorAppointmentSlot(apt.startTime, TIME_SLOTS);
     const k = `${apt.date}_${snapped}`;
     if (!slotAptMap[k]) slotAptMap[k] = [];
     slotAptMap[k].push(apt);
@@ -110,13 +114,14 @@ export function renderWeeklyTimetable() {
       const isToday = dateStr === todayStr;
       const isSat = d.getDay() === 6;
       const holidayName = getJapaneseHolidayName(d);
-      const isHoliday = !!holidayName;
+      const closedReason = getClinicClosedReason(dateStr, slotTime);
+      const isClosed = isClinicClosed(dateStr, slotTime);
 
       let cellCls = 'apt-weekly-slot-cell';
       let cellStyle = '';
 
-      if (isHoliday) {
-        cellCls += ' apt-holiday-cell';
+      if (isClosed) {
+        cellCls += ' apt-holiday-cell apt-closed-cell';
         cellStyle = 'background:#fff5f5; border-left:1px dashed #fecdd3; border-right:1px dashed #fecdd3;';
       } else if (isSat) {
         cellCls += ' apt-sat-cell';
@@ -128,9 +133,9 @@ export function renderWeeklyTimetable() {
       const key = `${dateStr}_${slotTime}`;
       const aptsInSlot = slotAptMap[key] || [];
 
-      html += `<div class="${cellCls}" data-date="${dateStr}" data-time="${slotTime}" data-is-holiday="${isHoliday ? 'true' : 'false'}" data-holiday-name="${holidayName || ''}" style="${cellStyle}">`;
+      html += `<div class="${cellCls}" data-date="${dateStr}" data-time="${slotTime}" data-is-holiday="${holidayName ? 'true' : 'false'}" data-is-closed="${isClosed ? 'true' : 'false'}" data-holiday-name="${sanitizeHtml(holidayName || '')}" data-closed-reason="${sanitizeHtml(closedReason || '')}" style="${cellStyle}">`;
 
-      // 同一枠内の予約カードたち
+      // 同一枠内の予約カードたち（休診でも既存予約は表示・編集可）
       aptsInSlot.forEach((apt) => {
         const p = getPatientById(apt.patientId);
         const pName = p ? p.name : apt.patientId;
@@ -151,6 +156,12 @@ export function renderWeeklyTimetable() {
           </div>
         `;
       });
+
+      if (isClosed && aptsInSlot.length === 0) {
+        html += `<div class="apt-closed-label" title="${sanitizeHtml(closedReason || '休診')}">休診</div>`;
+      } else if (isClosed && aptsInSlot.length > 0) {
+        html += `<div class="apt-closed-label apt-closed-label-compact" title="${sanitizeHtml(closedReason || '休診')}">休診</div>`;
+      }
 
       html += `</div>`;
     });
@@ -199,8 +210,8 @@ function setupWeeklyDragAndDrop(gridEl) {
   gridEl.querySelectorAll('.apt-weekly-slot-cell').forEach((cell) => {
     cell.addEventListener('dragover', (e) => {
       e.preventDefault();
-      const isHoliday = cell.dataset.isHoliday === 'true';
-      if (isHoliday) {
+      const isClosed = cell.dataset.isClosed === 'true' || cell.dataset.isHoliday === 'true';
+      if (isClosed) {
         e.dataTransfer.dropEffect = 'none';
         return;
       }
@@ -223,12 +234,14 @@ function setupWeeklyDragAndDrop(gridEl) {
 
       const date = targetCell.dataset.date;
       const time = targetCell.dataset.time;
-      const isHoliday = targetCell.dataset.isHoliday === 'true';
-      const holidayName = targetCell.dataset.holidayName;
+      const isClosed = targetCell.dataset.isClosed === 'true' || targetCell.dataset.isHoliday === 'true';
+      const closedReason = targetCell.dataset.closedReason
+        || targetCell.dataset.holidayName
+        || '休診';
 
-      // ★祝日へのドロップを物理遮断
-      if (isHoliday) {
-        showToast(`⚠️ 祝日（${holidayName || '休診日'}）のため予約は配置できません`, 'error');
+      // ★祝日・定休への新規／移動ドロップを物理遮断（既存予約カードの編集は別経路）
+      if (isClosed) {
+        showToast(`⚠️ ${closedReason}のため予約は配置できません`, 'error');
         calendarState.dragPayload = null;
         return;
       }
@@ -289,15 +302,16 @@ function setupWeeklyDragAndDrop(gridEl) {
       calendarState.dragPayload = null;
     });
 
-    // セルの空き余白クリックで新規予約モーダルを開く（祝日の場合は物理遮断）
+    // セルの空き余白クリックで新規予約モーダルを開く（休診は物理遮断／既存カード編集は可）
     cell.addEventListener('click', (e) => {
       if (e.target.closest('.apt-weekly-card')) return;
-      const isHoliday = cell.dataset.isHoliday === 'true';
-      const holidayName = cell.dataset.holidayName;
+      const isClosed = cell.dataset.isClosed === 'true' || cell.dataset.isHoliday === 'true';
+      const closedReason = cell.dataset.closedReason
+        || cell.dataset.holidayName
+        || '休診';
 
-      // ★祝日セルのクリックを物理遮断
-      if (isHoliday) {
-        showToast(`⚠️ 祝日（${holidayName || '休診日'}）のため外来予約は登録できません`, 'warn');
+      if (isClosed) {
+        showToast(`⚠️ ${closedReason}のため外来予約は登録できません`, 'warn');
         return;
       }
 

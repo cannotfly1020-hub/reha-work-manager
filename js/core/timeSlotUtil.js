@@ -71,6 +71,38 @@ export function snapToNearestAppointmentSlot(timeStr, allowedSlots = APPOINTMENT
 }
 
 /**
+ * 外来カレンダー表示用: 予約 startTime 以下で最大の枠へ「直前吸着」（データは書き換えない）
+ * 例: 30分刻みで 09:20 → 09:00。候補より前なら先頭枠。
+ * @param {string} timeStr
+ * @param {string[]} [allowedSlots=APPOINTMENT_TIME_STRINGS]
+ * @returns {string}
+ */
+export function snapToFloorAppointmentSlot(timeStr, allowedSlots = APPOINTMENT_TIME_STRINGS) {
+  const slots = (Array.isArray(allowedSlots) && allowedSlots.length > 0)
+    ? allowedSlots
+    : ['09:00'];
+  const normalized = normalizeTimeHHmm(timeStr);
+  if (!normalized) return slots[0];
+  if (slots.includes(normalized)) return normalized;
+
+  const targetMinutes = timeStringToMinutes(normalized);
+  if (targetMinutes === null) return slots[0];
+
+  let floorSlot = null;
+  let floorMinutes = -1;
+  for (let i = 0; i < slots.length; i += 1) {
+    const slot = slots[i];
+    const slotMinutes = timeStringToMinutes(slot);
+    if (slotMinutes === null) continue;
+    if (slotMinutes <= targetMinutes && slotMinutes > floorMinutes) {
+      floorSlot = slot;
+      floorMinutes = slotMinutes;
+    }
+  }
+  return floorSlot || slots[0];
+}
+
+/**
  * 本日時間割用: 開始時刻を TIME_SLOTS の id へ吸着
  * @param {string} timeStr
  * @returns {string} slot.id

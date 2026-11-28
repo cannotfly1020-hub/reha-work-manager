@@ -120,8 +120,47 @@ function resolveOutpatientLunchFromGap(amEnd, pmStart) {
 }
 
 /**
+ * 休診チェック群から closedPeriods を読む
+ * @returns {Record<string, { am: boolean, pm: boolean }>}
+ */
+function readClosedPeriodsFromForm() {
+  const base = {
+    mon: { am: false, pm: false },
+    tue: { am: false, pm: false },
+    wed: { am: false, pm: false },
+    thu: { am: false, pm: false },
+    fri: { am: false, pm: false },
+    sat: { am: false, pm: false },
+    sun: { am: false, pm: false }
+  };
+  document.querySelectorAll('.apt-closed-chk').forEach((el) => {
+    const day = el.getAttribute('data-day');
+    const period = el.getAttribute('data-period');
+    if (!day || !period || !base[day]) return;
+    if (period === 'am' || period === 'pm') {
+      base[day][period] = Boolean(el.checked);
+    }
+  });
+  return base;
+}
+
+/**
+ * 休診チェック群へセット
+ * @param {Record<string, { am?: boolean, pm?: boolean }>|null|undefined} closedPeriods
+ */
+function fillClosedPeriodsForm(closedPeriods) {
+  const periods = closedPeriods || DEFAULT_OUTPATIENT_HOURS.closedPeriods;
+  document.querySelectorAll('.apt-closed-chk').forEach((el) => {
+    const day = el.getAttribute('data-day');
+    const period = el.getAttribute('data-period');
+    if (!day || !period) return;
+    el.checked = Boolean(periods?.[day]?.[period]);
+  });
+}
+
+/**
  * フォームから外来専用時間を読み取る
- * @returns {{ amStart: string, amEnd: string, pmStart: string, pmEnd: string, defaultLunchStart: string, defaultLunchEnd: string }}
+ * @returns {typeof DEFAULT_OUTPATIENT_HOURS}
  */
 function readOutpatientHoursFromForm() {
   const amStart = document.getElementById('settingAptAmStartInput')?.value || '';
@@ -129,19 +168,22 @@ function readOutpatientHoursFromForm() {
   const pmStart = document.getElementById('settingAptPmStartInput')?.value || '';
   const pmEnd = document.getElementById('settingAptPmEndInput')?.value || '';
   const lunch = resolveOutpatientLunchFromGap(amEnd, pmStart);
+  const intervalRaw = document.getElementById('settingAptSlotIntervalSelect')?.value;
   return {
     amStart,
     amEnd,
     pmStart,
     pmEnd,
     defaultLunchStart: lunch.start,
-    defaultLunchEnd: lunch.end
+    defaultLunchEnd: lunch.end,
+    slotIntervalMinutes: Number(intervalRaw) || DEFAULT_OUTPATIENT_HOURS.slotIntervalMinutes,
+    closedPeriods: readClosedPeriodsFromForm()
   };
 }
 
 /**
  * 外来専用時間をフォームへセット（保存済み am/pm を確実に復元）
- * @param {Partial<import('../../core/timeSlotGenerator.js').FacilityHours>|null|undefined} [hours]
+ * @param {Partial<typeof DEFAULT_OUTPATIENT_HOURS>|null|undefined} [hours]
  */
 function fillOutpatientHoursForm(hours) {
   const h = hours || getSavedOutpatientHours();
@@ -149,11 +191,16 @@ function fillOutpatientHoursForm(hours) {
   const amEnd = document.getElementById('settingAptAmEndInput');
   const pmStart = document.getElementById('settingAptPmStartInput');
   const pmEnd = document.getElementById('settingAptPmEndInput');
+  const intervalSelect = document.getElementById('settingAptSlotIntervalSelect');
   // time input は HH:MM 必須。保存値をそのまま復元（デフォルト補完は欠落時のみ）
   if (amStart) amStart.value = h.amStart || DEFAULT_OUTPATIENT_HOURS.amStart;
   if (amEnd) amEnd.value = h.amEnd || DEFAULT_OUTPATIENT_HOURS.amEnd;
   if (pmStart) pmStart.value = h.pmStart || DEFAULT_OUTPATIENT_HOURS.pmStart;
   if (pmEnd) pmEnd.value = h.pmEnd || DEFAULT_OUTPATIENT_HOURS.pmEnd;
+  if (intervalSelect) {
+    intervalSelect.value = String(h.slotIntervalMinutes || DEFAULT_OUTPATIENT_HOURS.slotIntervalMinutes);
+  }
+  fillClosedPeriodsForm(h.closedPeriods);
   updateOutpatientHoursSlotSummaryBadge();
 }
 
@@ -460,11 +507,15 @@ export function setupStaffSettingsModalListeners(onUpdate) {
     document.getElementById('settingAptAmStartInput'),
     document.getElementById('settingAptAmEndInput'),
     document.getElementById('settingAptPmStartInput'),
-    document.getElementById('settingAptPmEndInput')
+    document.getElementById('settingAptPmEndInput'),
+    document.getElementById('settingAptSlotIntervalSelect')
   ];
   outpatientTimeInputs.forEach((el) => {
     el?.addEventListener('input', updateOutpatientHoursSlotSummaryBadge);
     el?.addEventListener('change', updateOutpatientHoursSlotSummaryBadge);
+  });
+  document.querySelectorAll('.apt-closed-chk').forEach((el) => {
+    el.addEventListener('change', updateOutpatientHoursSlotSummaryBadge);
   });
 
   // 施設標準昼休み → 全スタッフ一括適用

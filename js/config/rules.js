@@ -253,6 +253,8 @@ export function reloadOutpatientTimeSlots(newHours) {
   OUTPATIENT_HOURS.pmEnd = hours.pmEnd;
   OUTPATIENT_HOURS.defaultLunchStart = hours.defaultLunchStart;
   OUTPATIENT_HOURS.defaultLunchEnd = hours.defaultLunchEnd;
+  OUTPATIENT_HOURS.slotIntervalMinutes = hours.slotIntervalMinutes;
+  OUTPATIENT_HOURS.closedPeriods = hours.closedPeriods;
 
   const aptStrings = generateAppointmentTimeStrings(OUTPATIENT_HOURS);
   APPOINTMENT_TIME_STRINGS.length = 0;

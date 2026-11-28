@@ -6,14 +6,16 @@ import { sanitizeHtml } from '../../core/dataNormalizer.js';
 import { getPatientById, searchPatients } from '../../store/patientStore.js';
 import { getActiveTherapists } from '../../store/therapistStore.js';
 import {
-  upsertAppointment, deleteAppointment, calculateEndTime
+  upsertAppointment, deleteAppointment, calculateEndTime, getAllAppointments
 } from '../../store/appointmentStore.js';
 import { showToast } from '../../ui/toast.js';
 import { getJapaneseHolidayName } from '../../core/holidayCalc.js';
+import { getClinicClosedReason } from '../../core/clinicClosedUtil.js';
 import { printAppointmentTicket } from '../../print/appointmentTicketPrint.js';
 import { APPOINTMENT_TIME_STRINGS } from '../../config/rules.js';
 import {
   snapToNearestAppointmentSlot,
+  snapToFloorAppointmentSlot,
   normalizeTimeHHmm
 } from '../../core/timeSlotUtil.js';
 
@@ -27,11 +29,24 @@ function populateAppointmentStartTimeSelect(selectEl, selectedTime = '09:00') {
   const slots = (APPOINTMENT_TIME_STRINGS && APPOINTMENT_TIME_STRINGS.length)
     ? [...APPOINTMENT_TIME_STRINGS]
     : ['09:00', '09:20', '09:40', '10:00'];
-  const snapped = snapToNearestAppointmentSlot(selectedTime || slots[0], slots);
+  // 編集時は直前吸着、新規は最寄り（選択肢に無い実時刻を落とさない）
+  const snapped = activeAppointmentId
+    ? snapToFloorAppointmentSlot(selectedTime || slots[0], slots)
+    : snapToNearestAppointmentSlot(selectedTime || slots[0], slots);
   selectEl.innerHTML = slots
     .map((t) => `<option value="${t}"${t === snapped ? ' selected' : ''}>${t}</option>`)
     .join('');
-  selectEl.value = snapped;
+  // 既存予約の実時刻が選択肢外でも option を補完して保持表示
+  if (selectedTime && !slots.includes(normalizeTimeHHmm(selectedTime)) && normalizeTimeHHmm(selectedTime)) {
+    const raw = normalizeTimeHHmm(selectedTime);
+    const opt = document.createElement('option');
+    opt.value = raw;
+    opt.textContent = `${raw}（保存時刻）`;
+    selectEl.appendChild(opt);
+    selectEl.value = raw;
+  } else {
+    selectEl.value = snapped;
+  }
 }
 
 let activeAppointmentId = null;
@@ -196,16 +211,28 @@ function handleAppointmentFormSubmit() {
     return;
   }
 
-  // ★祝日への登録を物理遮断ガード
-  const holidayName = getJapaneseHolidayName(date);
-  if (holidayName) {
-    showToast(`⚠️ 祝日（${holidayName}）のため外来予約は登録できません`, 'error');
-    validateAppointmentDateHoliday(date);
-    return;
-  }
-
   const rawStart = normalizeTimeHHmm(startTime) || startTime;
-  const snappedStart = snapToNearestAppointmentSlot(rawStart);
+  // 保存時刻は入力値を優先（刻み外の既存時刻を壊さない）。新規はグリッド刻みへ吸着
+  const snappedStart = activeAppointmentId
+    ? rawStart
+    : snapToNearestAppointmentSlot(rawStart);
+
+  // ★祝日・定休への新規／枠移動を遮断（同一枠の既存編集は許可）
+  const closedReason = getClinicClosedReason(date, snappedStart)
+    || (getJapaneseHolidayName(date) ? `祝日（${getJapaneseHolidayName(date)}）` : null);
+  if (closedReason) {
+    const existing = activeAppointmentId ? getAllAppointments()[activeAppointmentId] : null;
+    const sameSlot = Boolean(
+      existing
+      && existing.date === date
+      && snapToFloorAppointmentSlot(existing.startTime) === snapToFloorAppointmentSlot(snappedStart)
+    );
+    if (!sameSlot) {
+      showToast(`⚠️ ${closedReason}のため外来予約は登録できません`, 'error');
+      validateAppointmentDateHoliday(date);
+      return;
+    }
+  }
 
   const res = upsertAppointment({
     id: activeAppointmentId,
