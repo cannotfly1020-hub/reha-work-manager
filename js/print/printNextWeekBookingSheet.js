@@ -32,12 +32,13 @@ const ANALGESIA_COLOR = Object.freeze({
 });
 
 const WEEK_PICKER_OPTIONS = Object.freeze([
-  { id: 'w1', label: '① 翌週（1週先）', weeksOffsets: [1] },
-  { id: 'w2', label: '② 翌々週（2週先）', weeksOffsets: [2] },
-  { id: 'w3', label: '③ 3週先', weeksOffsets: [3] },
-  { id: 'w4', label: '④ 4週先', weeksOffsets: [4] },
-  { id: 'b12', label: '⑤ 【一括】翌週〜翌々週（2週間分・各A4縦1枚）', weeksOffsets: [1, 2] },
-  { id: 'b13', label: '⑥ 【一括】翌週〜3週先（3週間分・各A4縦1枚）', weeksOffsets: [1, 2, 3] }
+  { id: 'w0', label: '① 表示中の週（当週）', weeksOffsets: [0] },
+  { id: 'w1', label: '② 翌週（1週先）', weeksOffsets: [1] },
+  { id: 'w2', label: '③ 翌々週（2週先）', weeksOffsets: [2] },
+  { id: 'w3', label: '④ 3週先', weeksOffsets: [3] },
+  { id: 'w4', label: '⑤ 4週先', weeksOffsets: [4] },
+  { id: 'b12', label: '⑥ 【一括】翌週〜翌々週（2週間分・各A4縦1枚）', weeksOffsets: [1, 2] },
+  { id: 'b13', label: '⑦ 【一括】翌週〜3週先（3週間分・各A4縦1枚）', weeksOffsets: [1, 2, 3] }
 ]);
 
 /** @type {{ win: Window|null, baseDate: Date, mode: 'single'|'batch', offset: number, offsets: number[] }} */
@@ -111,7 +112,7 @@ function filterReservationsForSlot(weekAptList, dateStr, timeStr, allSlotTimes) 
 /**
  * カレンダー基準日の月曜から weeksOffset 週先の月〜土
  * @param {Date} baseDate
- * @param {number} weeksOffset 1=翌週, 2=翌々週 …
+ * @param {number} weeksOffset 0=当週, 1=翌週, 2=翌々週 …
  * @returns {Date[]}
  */
 function resolveWeekDatesByOffset(baseDate, weeksOffset) {
@@ -127,9 +128,65 @@ function formatSlashYMD(d) {
 }
 
 function weekOffsetShortLabel(off) {
+  if (Number(off) === 0) return '当週';
   if (Number(off) === 1) return '翌週';
   if (Number(off) === 2) return '翌々週';
   return `${off}週先`;
+}
+
+/**
+ * 氏名を姓・名に分割（全角・半角スペース区切り）
+ * @param {string} fullName
+ * @returns {{ family: string, given: string }}
+ */
+function splitFamilyGivenName(fullName) {
+  const raw = String(fullName || '').trim();
+  if (!raw) return { family: '', given: '' };
+  const parts = raw.split(/[\s\u3000]+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return { family: parts[0], given: parts.slice(1).join('') };
+  }
+  return { family: raw, given: '' };
+}
+
+/**
+ * 週内予約から患者ID → 表示用姓ラベル（同姓が複数なら 姓(名1文字)）
+ * @param {object[]} weekAptList
+ * @returns {Map<string, string>}
+ */
+function buildSurnameLabelMap(weekAptList) {
+  /** @type {Map<string, { family: string, given: string }>} */
+  const byPatient = new Map();
+  (weekAptList || []).forEach((apt) => {
+    const pid = String(apt?.patientId || '');
+    if (!pid || byPatient.has(pid)) return;
+    const patient = getPatientById(pid);
+    const full = patient?.name || pid;
+    byPatient.set(pid, splitFamilyGivenName(full));
+  });
+
+  /** @type {Map<string, string[]>} */
+  const familyToPids = new Map();
+  byPatient.forEach((parts, pid) => {
+    const key = parts.family || pid;
+    if (!familyToPids.has(key)) familyToPids.set(key, []);
+    familyToPids.get(key).push(pid);
+  });
+
+  /** @type {Map<string, string>} */
+  const labelMap = new Map();
+  familyToPids.forEach((pids, family) => {
+    if (pids.length <= 1) {
+      labelMap.set(pids[0], family);
+      return;
+    }
+    pids.forEach((pid) => {
+      const given = byPatient.get(pid)?.given || '';
+      const initial = given ? given.charAt(0) : '';
+      labelMap.set(pid, initial ? `${family}(${initial})` : family);
+    });
+  });
+  return labelMap;
 }
 
 function formatNavWeekLabel(weeksOffset, weekDates) {
@@ -147,32 +204,49 @@ function formatOptionSubLabel(baseDate, weeksOffsets) {
   }).join(' ／ ');
 }
 
-function renderPatientCardHtml(apt, therapists, colorMap) {
+/**
+ * @param {object} apt
+ * @param {object[]} therapists
+ * @param {object} colorMap
+ * @param {Map<string, string>} [surnameLabelMap]
+ * @returns {string}
+ */
+function renderPatientCardHtml(apt, therapists, colorMap, surnameLabelMap = null) {
   const patient = getPatientById(apt.patientId);
-  const name = patient?.name || apt.patientId || '';
+  const pid = String(apt.patientId || '');
+  const fullName = patient?.name || pid || '';
+  const displayName = (surnameLabelMap && surnameLabelMap.get(pid))
+    || splitFamilyGivenName(fullName).family
+    || fullName
+    || '—';
   const anti = isAnalgesiaApt(apt, patient);
   const staffLabel = formatStaffLabel(therapists, apt.therapistId);
   const color = resolveStaffColor(colorMap, apt.therapistId, anti);
-  // ゾーン内は狭いため、個別は担当頭文字／消炎は⚡のみのコンパクト表示
-  const head = anti
-    ? '⚡'
-    : (() => {
-      const raw = String(staffLabel || '').replace(/\s+/g, '');
-      return raw ? raw.charAt(0) : '・';
-    })();
-  const badgeText = anti ? '⚡' : head;
-  const cardCls = anti ? 'patient-card anti' : 'patient-card';
+  const cardCls = anti ? 'patient-card anti' : 'patient-card reha';
   const cardStyle = anti
     ? `background:${ANALGESIA_COLOR.cardBg};border-color:#fde68a;border-left-color:${ANALGESIA_COLOR.bg};`
     : `border-left-color:${color.border};`;
-  const badgeStyle = `background:${color.bg};color:${color.fg};border-color:${color.border};`;
+  const titleAttr = ` title="${sanitizeHtml(fullName)}"`;
 
+  // 消炎ゾーン: ⚡省略・姓のみを枠いっぱいに
+  if (anti) {
+    return `
+    <div class="${cardCls}" style="${cardStyle}"${titleAttr}>
+      <div class="name-text">${sanitizeHtml(displayName)}</div>
+    </div>`;
+  }
+
+  // 個別ゾーン: 担当頭文字＋姓を横並びコンパクト
+  const head = (() => {
+    const raw = String(staffLabel || '').replace(/\s+/g, '');
+    return raw ? raw.charAt(0) : '・';
+  })();
+  const badgeStyle = `background:${color.bg};color:${color.fg};border-color:${color.border};`;
   return `
-    <div class="${cardCls}" style="${cardStyle}">
-      <div class="staff-tag" style="${badgeStyle}">${sanitizeHtml(badgeText)}</div>
-      <div class="name-text">${sanitizeHtml(name)}</div>
-    </div>
-  `;
+    <div class="${cardCls}" style="${cardStyle}"${titleAttr}>
+      <div class="staff-tag" style="${badgeStyle}">${sanitizeHtml(head)}</div>
+      <div class="name-text">${sanitizeHtml(displayName)}</div>
+    </div>`;
 }
 
 /**
@@ -181,9 +255,18 @@ function renderPatientCardHtml(apt, therapists, colorMap) {
  * @param {object[]} therapists
  * @param {object} colorMap
  * @param {string} extraCls
+ * @param {string} [closedLabel]
+ * @param {Map<string, string>|null} [surnameLabelMap]
  * @returns {string}
  */
-function renderSplitSlotCellHtml(slotResList, therapists, colorMap, extraCls = '', closedLabel = '') {
+function renderSplitSlotCellHtml(
+  slotResList,
+  therapists,
+  colorMap,
+  extraCls = '',
+  closedLabel = '',
+  surnameLabelMap = null
+) {
   const list = Array.isArray(slotResList) ? slotResList : [];
   const rehaApts = [];
   const antiApts = [];
@@ -199,7 +282,7 @@ function renderSplitSlotCellHtml(slotResList, therapists, colorMap, extraCls = '
 
   const rehaInner = rehaApts.length > 0
     ? `<div class="slot-patients-container${rehaApts.length >= 2 ? ' is-multi' : ''}">${
-      rehaApts.map((apt) => renderPatientCardHtml(apt, therapists, colorMap)).join('')
+      rehaApts.map((apt) => renderPatientCardHtml(apt, therapists, colorMap, surnameLabelMap)).join('')
     }</div>`
     : (closedLabel
       ? `<div class="closed-empty">${closedBanner}</div>`
@@ -207,7 +290,7 @@ function renderSplitSlotCellHtml(slotResList, therapists, colorMap, extraCls = '
 
   const antiInner = antiApts.length > 0
     ? `<div class="slot-patients-container${antiApts.length >= 2 ? ' is-multi' : ''}">${
-      antiApts.map((apt) => renderPatientCardHtml(apt, therapists, colorMap)).join('')
+      antiApts.map((apt) => renderPatientCardHtml(apt, therapists, colorMap, surnameLabelMap)).join('')
     }</div>`
     : (closedLabel
       ? '<div class="closed-empty" aria-hidden="true"></div>'
@@ -226,6 +309,7 @@ function renderSplitSlotCellHtml(slotResList, therapists, colorMap, extraCls = '
 function buildWeekBodyRows(weekDates, weekAptList, allSlotTimes, therapists, colorMap, amEnd, pmStart, breakMin) {
   let bodyRows = '';
   let lunchBandInserted = false;
+  const surnameLabelMap = buildSurnameLabelMap(weekAptList);
 
   allSlotTimes.forEach((slotTime) => {
     if (!lunchBandInserted && String(slotTime) >= pmStart) {
@@ -258,7 +342,8 @@ function buildWeekBodyRows(weekDates, weekAptList, allSlotTimes, therapists, col
         therapists,
         colorMap,
         extra,
-        closed ? (closedReason || holidayName || '休診') : ''
+        closed ? (closedReason || holidayName || '休診') : '',
+        surnameLabelMap
       );
     });
 
@@ -535,24 +620,34 @@ function buildSharedCss(ctx) {
       width: 100%; height: 100%; gap: 0;
     }
     .patient-card {
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 0; padding: 0 1px; border-radius: 1px;
+      display: flex; flex-direction: row; align-items: center; justify-content: flex-start;
+      gap: 1px; padding: 0 1px; border-radius: 1px;
       background: #f8fafc; border: 0.5px solid #e2e8f0; border-left: 2px solid #1d4ed8;
-      width: 100%; text-align: center; box-sizing: border-box;
+      width: 100%; text-align: left; box-sizing: border-box; min-width: 0;
     }
-    .patient-card.anti { background: #fffbeb; }
+    .patient-card.anti {
+      background: #fffbeb;
+      justify-content: center;
+      text-align: center;
+      border-left-width: 2px;
+    }
     .patient-card .staff-tag {
-      display: inline-block; font-size: 6pt; font-weight: 800;
+      display: inline-flex; align-items: center; justify-content: center;
+      flex: 0 0 auto; min-width: 8px; font-size: 6pt; font-weight: 800;
       padding: 0 2px; border-radius: 1px; line-height: 1.1;
     }
     .patient-card .name-text {
-      font-size: 7pt; font-weight: 800; color: #0f172a; line-height: 1.1;
-      text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      max-width: 100%;
+      flex: 1 1 auto; min-width: 0;
+      font-size: 8pt; font-weight: 800; color: #0f172a; line-height: 1.15;
+      white-space: nowrap; overflow: visible; text-overflow: clip;
+      letter-spacing: -0.02em;
     }
-    .slot-patients-container.is-multi .patient-card .name-text { font-size: 6.5pt; }
+    .patient-card.anti .name-text {
+      flex: 0 1 auto; font-size: 7.5pt; text-align: center; overflow: visible;
+    }
+    .slot-patients-container.is-multi .patient-card .name-text { font-size: 7pt; }
     .slot-patients-container.is-multi .patient-card .staff-tag { font-size: 5.5pt; }
-    .zone-anti .patient-card .name-text { font-size: 6.5pt; }
+    .zone-anti .patient-card .name-text { font-size: 7.5pt; }
     .footer {
       display: flex; justify-content: space-between; gap: 8px;
       margin: 1mm 4px 2px; padding-top: 1px; border-top: 1px solid #e2e8f0;
@@ -603,7 +698,7 @@ function buildPreviewToolbarHtml(mode, offset, weekDates, batchOffsets, baseDate
   }
 
   const label = formatNavWeekLabel(offset, weekDates);
-  const prevDisabled = offset <= 1 ? 'disabled' : '';
+  const prevDisabled = offset <= 0 ? 'disabled' : '';
   const nextDisabled = offset >= 12 ? 'disabled' : '';
   return `
     <div class="preview-toolbar" id="previewToolbar">
@@ -679,7 +774,7 @@ function writePreviewDocument(printWindow, opts) {
   // opener 側ナビAPI
   window.__rehaNextWeekPreviewNavigate = (delta) => {
     if (previewSession.mode !== 'single') return;
-    const next = Math.min(12, Math.max(1, Number(previewSession.offset) + Number(delta)));
+    const next = Math.min(12, Math.max(0, Number(previewSession.offset) + Number(delta)));
     if (next === previewSession.offset) return;
     previewSession.offset = next;
     renderPreviewIntoSessionWindow();
@@ -770,7 +865,7 @@ export function showNextWeekPrintWeekPicker(baseDate = new Date()) {
     panel.innerHTML = `
       <div style="padding:14px 16px 10px;border-bottom:1px solid #e2e8f0;">
         <div style="font-size:1rem;font-weight:800;color:#0f172a;">翌週予約受付表 — 対象週</div>
-        <div style="font-size:0.78rem;color:#64748b;margin-top:4px;font-weight:600;">カレンダー基準週から先の週を選択。プレビューで予約状況を確認してから印刷できます。</div>
+        <div style="font-size:0.78rem;color:#64748b;margin-top:4px;font-weight:600;">表示中の当週、または基準週から先の週を選択。プレビューで予約状況を確認してから印刷できます。</div>
       </div>
       <div style="padding:12px 16px;display:flex;flex-direction:column;gap:8px;max-height:min(58vh,420px);overflow:auto;">
         ${optionsHtml}
@@ -820,7 +915,9 @@ export function printNextWeekBookingSheet(baseDate, options = {}) {
   } else {
     weeksOffsets = [1];
   }
-  weeksOffsets = [...new Set(weeksOffsets.filter((n) => n >= 1 && n <= 12))].sort((a, b) => a - b);
+  // 0=表示中の当週を許可（1〜12は従来どおり）
+  weeksOffsets = [...new Set(weeksOffsets.filter((n) => Number.isFinite(n) && n >= 0 && n <= 12))]
+    .sort((a, b) => a - b);
   if (!weeksOffsets.length) weeksOffsets = [1];
 
   const ctx = collectPrintContext();
