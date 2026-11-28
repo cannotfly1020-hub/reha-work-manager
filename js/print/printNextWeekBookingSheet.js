@@ -135,58 +135,20 @@ function weekOffsetShortLabel(off) {
 }
 
 /**
- * 氏名を姓・名に分割（全角・半角スペース区切り）
+ * 印刷用フルネーム正規化（文字は省略せず、空白のみ半角スペース1つへ）
  * @param {string} fullName
- * @returns {{ family: string, given: string }}
+ * @returns {{ text: string, family: string, given: string }}
  */
-function splitFamilyGivenName(fullName) {
+function normalizeFullNameForPrint(fullName) {
   const raw = String(fullName || '').trim();
-  if (!raw) return { family: '', given: '' };
+  if (!raw) return { text: '—', family: '', given: '' };
   const parts = raw.split(/[\s\u3000]+/).filter(Boolean);
   if (parts.length >= 2) {
-    return { family: parts[0], given: parts.slice(1).join('') };
+    const family = parts[0];
+    const given = parts.slice(1).join('');
+    return { text: `${family} ${given}`, family, given };
   }
-  return { family: raw, given: '' };
-}
-
-/**
- * 週内予約から患者ID → 表示用姓ラベル（同姓が複数なら 姓(名1文字)）
- * @param {object[]} weekAptList
- * @returns {Map<string, string>}
- */
-function buildSurnameLabelMap(weekAptList) {
-  /** @type {Map<string, { family: string, given: string }>} */
-  const byPatient = new Map();
-  (weekAptList || []).forEach((apt) => {
-    const pid = String(apt?.patientId || '');
-    if (!pid || byPatient.has(pid)) return;
-    const patient = getPatientById(pid);
-    const full = patient?.name || pid;
-    byPatient.set(pid, splitFamilyGivenName(full));
-  });
-
-  /** @type {Map<string, string[]>} */
-  const familyToPids = new Map();
-  byPatient.forEach((parts, pid) => {
-    const key = parts.family || pid;
-    if (!familyToPids.has(key)) familyToPids.set(key, []);
-    familyToPids.get(key).push(pid);
-  });
-
-  /** @type {Map<string, string>} */
-  const labelMap = new Map();
-  familyToPids.forEach((pids, family) => {
-    if (pids.length <= 1) {
-      labelMap.set(pids[0], family);
-      return;
-    }
-    pids.forEach((pid) => {
-      const given = byPatient.get(pid)?.given || '';
-      const initial = given ? given.charAt(0) : '';
-      labelMap.set(pid, initial ? `${family}(${initial})` : family);
-    });
-  });
-  return labelMap;
+  return { text: raw, family: raw, given: '' };
 }
 
 function formatNavWeekLabel(weeksOffset, weekDates) {
@@ -205,20 +167,35 @@ function formatOptionSubLabel(baseDate, weeksOffsets) {
 }
 
 /**
+ * フルネーム表示HTML（省略なし。消炎は姓/名の2行、個別はスペース正規化のまま折り返し可）
+ * @param {{ text: string, family: string, given: string }} nameParts
+ * @param {boolean} stacked 消炎ゾーン用の上下2行
+ * @returns {string}
+ */
+function buildFullNameHtml(nameParts, stacked) {
+  const family = nameParts.family || '';
+  const given = nameParts.given || '';
+  if (stacked && family && given) {
+    return `
+      <div class="name-text name-stack">
+        <span class="name-line">${sanitizeHtml(family)}</span>
+        <span class="name-line">${sanitizeHtml(given)}</span>
+      </div>`;
+  }
+  return `<div class="name-text">${sanitizeHtml(nameParts.text || '—')}</div>`;
+}
+
+/**
  * @param {object} apt
  * @param {object[]} therapists
  * @param {object} colorMap
- * @param {Map<string, string>} [surnameLabelMap]
  * @returns {string}
  */
-function renderPatientCardHtml(apt, therapists, colorMap, surnameLabelMap = null) {
+function renderPatientCardHtml(apt, therapists, colorMap) {
   const patient = getPatientById(apt.patientId);
   const pid = String(apt.patientId || '');
-  const fullName = patient?.name || pid || '';
-  const displayName = (surnameLabelMap && surnameLabelMap.get(pid))
-    || splitFamilyGivenName(fullName).family
-    || fullName
-    || '—';
+  const rawName = patient?.name || pid || '';
+  const nameParts = normalizeFullNameForPrint(rawName);
   const anti = isAnalgesiaApt(apt, patient);
   const staffLabel = formatStaffLabel(therapists, apt.therapistId);
   const color = resolveStaffColor(colorMap, apt.therapistId, anti);
@@ -226,17 +203,17 @@ function renderPatientCardHtml(apt, therapists, colorMap, surnameLabelMap = null
   const cardStyle = anti
     ? `background:${ANALGESIA_COLOR.cardBg};border-color:#fde68a;border-left-color:${ANALGESIA_COLOR.bg};`
     : `border-left-color:${color.border};`;
-  const titleAttr = ` title="${sanitizeHtml(fullName)}"`;
+  const titleAttr = ` title="${sanitizeHtml(nameParts.text)}"`;
 
-  // 消炎ゾーン: ⚡省略・姓のみを枠いっぱいに
+  // 消炎ゾーン: ⚡省略・フルネームを姓/名の2行で全文字表示
   if (anti) {
     return `
     <div class="${cardCls}" style="${cardStyle}"${titleAttr}>
-      <div class="name-text">${sanitizeHtml(displayName)}</div>
+      ${buildFullNameHtml(nameParts, true)}
     </div>`;
   }
 
-  // 個別ゾーン: 担当頭文字＋姓を横並びコンパクト
+  // 個別ゾーン: 担当頭文字＋フルネーム（折り返し可・省略禁止）
   const head = (() => {
     const raw = String(staffLabel || '').replace(/\s+/g, '');
     return raw ? raw.charAt(0) : '・';
@@ -245,7 +222,7 @@ function renderPatientCardHtml(apt, therapists, colorMap, surnameLabelMap = null
   return `
     <div class="${cardCls}" style="${cardStyle}"${titleAttr}>
       <div class="staff-tag" style="${badgeStyle}">${sanitizeHtml(head)}</div>
-      <div class="name-text">${sanitizeHtml(displayName)}</div>
+      ${buildFullNameHtml(nameParts, false)}
     </div>`;
 }
 
@@ -256,7 +233,6 @@ function renderPatientCardHtml(apt, therapists, colorMap, surnameLabelMap = null
  * @param {object} colorMap
  * @param {string} extraCls
  * @param {string} [closedLabel]
- * @param {Map<string, string>|null} [surnameLabelMap]
  * @returns {string}
  */
 function renderSplitSlotCellHtml(
@@ -264,8 +240,7 @@ function renderSplitSlotCellHtml(
   therapists,
   colorMap,
   extraCls = '',
-  closedLabel = '',
-  surnameLabelMap = null
+  closedLabel = ''
 ) {
   const list = Array.isArray(slotResList) ? slotResList : [];
   const rehaApts = [];
@@ -282,7 +257,7 @@ function renderSplitSlotCellHtml(
 
   const rehaInner = rehaApts.length > 0
     ? `<div class="slot-patients-container${rehaApts.length >= 2 ? ' is-multi' : ''}">${
-      rehaApts.map((apt) => renderPatientCardHtml(apt, therapists, colorMap, surnameLabelMap)).join('')
+      rehaApts.map((apt) => renderPatientCardHtml(apt, therapists, colorMap)).join('')
     }</div>`
     : (closedLabel
       ? `<div class="closed-empty">${closedBanner}</div>`
@@ -290,7 +265,7 @@ function renderSplitSlotCellHtml(
 
   const antiInner = antiApts.length > 0
     ? `<div class="slot-patients-container${antiApts.length >= 2 ? ' is-multi' : ''}">${
-      antiApts.map((apt) => renderPatientCardHtml(apt, therapists, colorMap, surnameLabelMap)).join('')
+      antiApts.map((apt) => renderPatientCardHtml(apt, therapists, colorMap)).join('')
     }</div>`
     : (closedLabel
       ? '<div class="closed-empty" aria-hidden="true"></div>'
@@ -309,7 +284,6 @@ function renderSplitSlotCellHtml(
 function buildWeekBodyRows(weekDates, weekAptList, allSlotTimes, therapists, colorMap, amEnd, pmStart, breakMin) {
   let bodyRows = '';
   let lunchBandInserted = false;
-  const surnameLabelMap = buildSurnameLabelMap(weekAptList);
 
   allSlotTimes.forEach((slotTime) => {
     if (!lunchBandInserted && String(slotTime) >= pmStart) {
@@ -342,8 +316,7 @@ function buildWeekBodyRows(weekDates, weekAptList, allSlotTimes, therapists, col
         therapists,
         colorMap,
         extra,
-        closed ? (closedReason || holidayName || '休診') : '',
-        surnameLabelMap
+        closed ? (closedReason || holidayName || '休診') : ''
       );
     });
 
@@ -572,6 +545,7 @@ function buildSharedCss(ctx) {
       height: ${rowMm}mm !important; min-height: 9mm; padding: 0 !important;
       vertical-align: middle !important; overflow: hidden;
     }
+    td.res-slot .slot-zones { overflow: visible; }
     td.res-slot.split-slot { background: #ffffff; }
     td.res-slot.holiday, td.res-slot.closed {
       background: #fff1f2 !important;
@@ -597,7 +571,7 @@ function buildSharedCss(ctx) {
     }
     .zone {
       display: flex; flex-direction: column; justify-content: center;
-      overflow: hidden; min-width: 0; height: 100%;
+      overflow: visible; min-width: 0; height: 100%;
       -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
     .zone-reha {
@@ -624,30 +598,51 @@ function buildSharedCss(ctx) {
       gap: 1px; padding: 0 1px; border-radius: 1px;
       background: #f8fafc; border: 0.5px solid #e2e8f0; border-left: 2px solid #1d4ed8;
       width: 100%; text-align: left; box-sizing: border-box; min-width: 0;
+      max-height: 100%; overflow: visible;
     }
     .patient-card.anti {
       background: #fffbeb;
       justify-content: center;
       text-align: center;
       border-left-width: 2px;
+      align-items: center;
     }
     .patient-card .staff-tag {
       display: inline-flex; align-items: center; justify-content: center;
-      flex: 0 0 auto; min-width: 8px; font-size: 6pt; font-weight: 800;
-      padding: 0 2px; border-radius: 1px; line-height: 1.1;
+      flex: 0 0 auto; min-width: 7px; font-size: 5.5pt; font-weight: 800;
+      padding: 0 1px; border-radius: 1px; line-height: 1.0;
     }
+    /* 省略（...）禁止・フルネーム全文字表示 */
     .patient-card .name-text {
       flex: 1 1 auto; min-width: 0;
-      font-size: 8pt; font-weight: 800; color: #0f172a; line-height: 1.15;
-      white-space: nowrap; overflow: visible; text-overflow: clip;
+      font-size: 6.8pt; font-weight: 800; color: #0f172a; line-height: 1.05;
+      white-space: normal; word-break: keep-all; overflow-wrap: anywhere;
+      overflow: visible; text-overflow: clip;
       letter-spacing: -0.02em;
     }
-    .patient-card.anti .name-text {
-      flex: 0 1 auto; font-size: 7.5pt; text-align: center; overflow: visible;
+    .patient-card.anti .name-text,
+    .patient-card.anti .name-stack {
+      flex: 0 1 auto; width: 100%;
+      font-size: 6.2pt; line-height: 1.05; text-align: center;
+      white-space: normal; word-break: keep-all; overflow: visible;
     }
-    .slot-patients-container.is-multi .patient-card .name-text { font-size: 7pt; }
-    .slot-patients-container.is-multi .patient-card .staff-tag { font-size: 5.5pt; }
-    .zone-anti .patient-card .name-text { font-size: 7.5pt; }
+    .name-stack {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 0; width: 100%;
+    }
+    .name-stack .name-line {
+      display: block; width: 100%; text-align: center;
+      font-size: inherit; font-weight: 800; line-height: 1.05;
+      white-space: nowrap; overflow: visible; letter-spacing: -0.02em;
+    }
+    .slot-patients-container.is-multi .patient-card .name-text,
+    .slot-patients-container.is-multi .patient-card .name-stack,
+    .slot-patients-container.is-multi .name-stack .name-line {
+      font-size: 5.6pt; line-height: 1.0;
+    }
+    .slot-patients-container.is-multi .patient-card .staff-tag { font-size: 5pt; }
+    .zone-anti .patient-card .name-text,
+    .zone-anti .patient-card .name-stack { font-size: 6.2pt; line-height: 1.05; }
     .footer {
       display: flex; justify-content: space-between; gap: 8px;
       margin: 1mm 4px 2px; padding-top: 1px; border-top: 1px solid #e2e8f0;
