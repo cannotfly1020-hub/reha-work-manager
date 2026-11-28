@@ -28,7 +28,11 @@ const STAFF_PALETTE = Object.freeze([
 ]);
 
 const ANALGESIA_COLOR = Object.freeze({
-  bg: '#d97706', border: '#b45309', fg: '#ffffff', cardBg: '#fffbeb'
+  bg: '#ea580c', border: '#c2410c', fg: '#ffffff', cardBg: '#fff7ed'
+});
+
+const REHA_CARD = Object.freeze({
+  bg: '#eff6ff', border: '#93c5fd', accent: '#2563eb'
 });
 
 const WEEK_PICKER_OPTIONS = Object.freeze([
@@ -97,18 +101,6 @@ function resolveStaffColor(colorMap, therapistId, anti) {
   return colorMap[id] || colorMap.NONE || STAFF_PALETTE[0];
 }
 
-function filterReservationsForSlot(weekAptList, dateStr, timeStr, allSlotTimes) {
-  return weekAptList.filter((apt) => {
-    if (!apt || apt.status === 'CANCELLED') return false;
-    // YYYY-MM-DD / YYYY/MM/DD 両対応で突合
-    const aptDate = String(apt.date || '').replace(/\//g, '-').slice(0, 10);
-    const target = String(dateStr || '').replace(/\//g, '-').slice(0, 10);
-    if (aptDate !== target) return false;
-    const snapped = snapToFloorAppointmentSlot(apt.startTime, allSlotTimes);
-    return snapped === timeStr;
-  });
-}
-
 /**
  * カレンダー基準日の月曜から weeksOffset 週先の月〜土
  * @param {Date} baseDate
@@ -137,18 +129,42 @@ function weekOffsetShortLabel(off) {
 /**
  * 印刷用フルネーム正規化（文字は省略せず、空白のみ半角スペース1つへ）
  * @param {string} fullName
- * @returns {{ text: string, family: string, given: string }}
+ * @returns {string}
  */
 function normalizeFullNameForPrint(fullName) {
   const raw = String(fullName || '').trim();
-  if (!raw) return { text: '—', family: '', given: '' };
+  if (!raw) return '—';
   const parts = raw.split(/[\s\u3000]+/).filter(Boolean);
-  if (parts.length >= 2) {
-    const family = parts[0];
-    const given = parts.slice(1).join('');
-    return { text: `${family} ${given}`, family, given };
-  }
-  return { text: raw, family: raw, given: '' };
+  if (parts.length >= 2) return `${parts[0]} ${parts.slice(1).join('')}`;
+  return raw;
+}
+
+function resolveSlotIntervalMinutes() {
+  const n = Number(OUTPATIENT_HOURS?.slotIntervalMinutes);
+  return (n === 15 || n === 20 || n === 30) ? n : 20;
+}
+
+function calcSpanCount(durationMinutes, intervalMinutes) {
+  const interval = Math.max(1, Number(intervalMinutes) || 20);
+  const dur = Number(durationMinutes);
+  const d = Number.isFinite(dur) && dur > 0 ? dur : interval;
+  return Math.max(1, Math.ceil(d / interval));
+}
+
+function isHourSlot(slotTime) {
+  return /:00$/.test(String(slotTime || ''));
+}
+
+/**
+ * 昼休みギャップをまたぐか（AM開始 → PM枠へは継続しない）
+ * @param {string} startSlot
+ * @param {string} nextSlot
+ * @param {string} amEnd
+ * @param {string} pmStart
+ */
+function crossesLunchGap(startSlot, nextSlot, amEnd, pmStart) {
+  if (!(String(amEnd) < String(pmStart))) return false;
+  return String(startSlot) < String(pmStart) && String(nextSlot) >= String(pmStart);
 }
 
 function formatNavWeekLabel(weeksOffset, weekDates) {
@@ -167,114 +183,151 @@ function formatOptionSubLabel(baseDate, weeksOffsets) {
 }
 
 /**
- * フルネーム表示HTML（省略なし。消炎は姓/名の2行、個別はスペース正規化のまま折り返し可）
- * @param {{ text: string, family: string, given: string }} nameParts
- * @param {boolean} stacked 消炎ゾーン用の上下2行
- * @returns {string}
+ * 日付×スロット×ゾーンの開始／継続占有マップを構築
+ * @returns {Map<string, { rehaStarts: object[], rehaCont: object[], antiStarts: object[], antiCont: object[] }>}
  */
-function buildFullNameHtml(nameParts, stacked) {
-  const family = nameParts.family || '';
-  const given = nameParts.given || '';
-  if (stacked && family && given) {
-    return `
-      <div class="name-text name-stack">
-        <span class="name-line">${sanitizeHtml(family)}</span>
-        <span class="name-line">${sanitizeHtml(given)}</span>
-      </div>`;
-  }
-  return `<div class="name-text">${sanitizeHtml(nameParts.text || '—')}</div>`;
+function buildOccupancyMap(weekAptList, allSlotTimes, interval, amEnd, pmStart) {
+  /** @type {Map<string, { rehaStarts: object[], rehaCont: object[], antiStarts: object[], antiCont: object[] }>} */
+  const map = new Map();
+  const ensure = (key) => {
+    if (!map.has(key)) {
+      map.set(key, { rehaStarts: [], rehaCont: [], antiStarts: [], antiCont: [] });
+    }
+    return map.get(key);
+  };
+
+  (weekAptList || []).forEach((apt) => {
+    if (!apt || apt.status === 'CANCELLED') return;
+    const dateStr = String(apt.date || '').replace(/\//g, '-').slice(0, 10);
+    if (!dateStr) return;
+    const startSlot = snapToFloorAppointmentSlot(apt.startTime, allSlotTimes);
+    const startIdx = allSlotTimes.indexOf(startSlot);
+    if (startIdx < 0) return;
+
+    const patient = getPatientById(apt.patientId);
+    const anti = isAnalgesiaApt(apt, patient);
+    const span = calcSpanCount(apt.durationMinutes, interval);
+    const startKey = `${dateStr}|${startSlot}`;
+    const bucket = ensure(startKey);
+    if (anti) bucket.antiStarts.push(apt);
+    else bucket.rehaStarts.push(apt);
+
+    for (let i = 1; i < span; i += 1) {
+      const nextSlot = allSlotTimes[startIdx + i];
+      if (!nextSlot) break;
+      if (crossesLunchGap(startSlot, nextSlot, amEnd, pmStart)) break;
+      if (isClinicClosed(dateStr, nextSlot)) break;
+      const contKey = `${dateStr}|${nextSlot}`;
+      const contBucket = ensure(contKey);
+      if (anti) contBucket.antiCont.push(apt);
+      else contBucket.rehaCont.push(apt);
+    }
+  });
+
+  return map;
 }
 
 /**
  * @param {object} apt
  * @param {object[]} therapists
  * @param {object} colorMap
+ * @param {boolean} anti
  * @returns {string}
  */
-function renderPatientCardHtml(apt, therapists, colorMap) {
+function renderStartCardHtml(apt, therapists, colorMap, anti) {
   const patient = getPatientById(apt.patientId);
-  const pid = String(apt.patientId || '');
-  const rawName = patient?.name || pid || '';
-  const nameParts = normalizeFullNameForPrint(rawName);
-  const anti = isAnalgesiaApt(apt, patient);
+  const fullName = normalizeFullNameForPrint(patient?.name || apt.patientId || '');
   const staffLabel = formatStaffLabel(therapists, apt.therapistId);
   const color = resolveStaffColor(colorMap, apt.therapistId, anti);
-  const cardCls = anti ? 'patient-card anti' : 'patient-card reha';
-  const cardStyle = anti
-    ? `background:${ANALGESIA_COLOR.cardBg};border-color:#fde68a;border-left-color:${ANALGESIA_COLOR.bg};`
-    : `border-left-color:${color.border};`;
-  const titleAttr = ` title="${sanitizeHtml(nameParts.text)}"`;
-
-  // 消炎ゾーン: ⚡省略・フルネームを姓/名の2行で全文字表示
-  if (anti) {
-    return `
-    <div class="${cardCls}" style="${cardStyle}"${titleAttr}>
-      ${buildFullNameHtml(nameParts, true)}
-    </div>`;
-  }
-
-  // 個別ゾーン: 担当頭文字＋フルネーム（折り返し可・省略禁止）
   const head = (() => {
     const raw = String(staffLabel || '').replace(/\s+/g, '');
     return raw ? raw.charAt(0) : '・';
   })();
-  const badgeStyle = `background:${color.bg};color:${color.fg};border-color:${color.border};`;
+  const cardCls = anti ? 'patient-card anti' : 'patient-card reha';
+  const badgeStyle = anti
+    ? `background:${ANALGESIA_COLOR.bg};color:#fff;`
+    : `background:${color.bg};color:${color.fg};`;
+
+  if (anti) {
+    return `
+      <div class="${cardCls}" title="${sanitizeHtml(fullName)}">
+        <div class="name-text">${sanitizeHtml(fullName)}</div>
+      </div>`;
+  }
   return `
-    <div class="${cardCls}" style="${cardStyle}"${titleAttr}>
+    <div class="${cardCls}" title="${sanitizeHtml(fullName)}">
       <div class="staff-tag" style="${badgeStyle}">${sanitizeHtml(head)}</div>
-      ${buildFullNameHtml(nameParts, false)}
+      <div class="name-text">${sanitizeHtml(fullName)}</div>
     </div>`;
 }
 
 /**
- * 1マスを左・個別リハ（白）／右・消炎（薄灰）に分割
- * @param {object[]} slotResList
+ * 継続占有カード
+ * @param {object} apt
+ * @param {boolean} anti
+ */
+function renderContinuationCardHtml(apt, anti) {
+  const patient = getPatientById(apt.patientId);
+  const fullName = normalizeFullNameForPrint(patient?.name || apt.patientId || '');
+  const cls = anti ? 'cont-card anti' : 'cont-card reha';
+  return `
+    <div class="${cls}" title="継続予約: ${sanitizeHtml(fullName)}">
+      <span class="cont-mark">↳</span>
+      <span class="cont-text">継続（${sanitizeHtml(fullName)}）</span>
+    </div>`;
+}
+
+/**
+ * ゾーン内HTML（開始＋継続）
+ * @param {object[]} starts
+ * @param {object[]} conts
+ * @param {boolean} anti
  * @param {object[]} therapists
  * @param {object} colorMap
- * @param {string} extraCls
- * @param {string} [closedLabel]
- * @returns {string}
  */
-function renderSplitSlotCellHtml(
-  slotResList,
-  therapists,
-  colorMap,
-  extraCls = '',
-  closedLabel = ''
-) {
-  const list = Array.isArray(slotResList) ? slotResList : [];
-  const rehaApts = [];
-  const antiApts = [];
-  list.forEach((apt) => {
-    const patient = getPatientById(apt.patientId);
-    if (isAnalgesiaApt(apt, patient)) antiApts.push(apt);
-    else rehaApts.push(apt);
-  });
+function renderZoneInnerHtml(starts, conts, anti, therapists, colorMap) {
+  const s = Array.isArray(starts) ? starts : [];
+  const c = Array.isArray(conts) ? conts : [];
+  if (s.length === 0 && c.length === 0) {
+    return `<div class="write-space ${anti ? 'write-anti' : 'write-reha'}" aria-hidden="true"></div>`;
+  }
+  const multi = (s.length + c.length) >= 2 ? ' is-multi' : '';
+  const cards = [
+    ...s.map((apt) => renderStartCardHtml(apt, therapists, colorMap, anti)),
+    ...c.map((apt) => renderContinuationCardHtml(apt, anti))
+  ].join('');
+  return `<div class="slot-patients-container${multi}">${cards}</div>`;
+}
 
-  const closedBanner = closedLabel
-    ? `<div class="closed-mark" title="${sanitizeHtml(closedLabel)}">休診</div>`
-    : '';
+/**
+ * 縦2段セル（上：個別／下：消炎）
+ */
+function renderVerticalSlotCellHtml(opts) {
+  const {
+    occupancy, therapists, colorMap, extraCls = '', closed = false, closedReason = '', holidayName = ''
+  } = opts;
 
-  const rehaInner = rehaApts.length > 0
-    ? `<div class="slot-patients-container${rehaApts.length >= 2 ? ' is-multi' : ''}">${
-      rehaApts.map((apt) => renderPatientCardHtml(apt, therapists, colorMap)).join('')
-    }</div>`
-    : (closedLabel
-      ? `<div class="closed-empty">${closedBanner}</div>`
-      : '<div class="write-space zone-write" aria-hidden="true"></div>');
+  if (closed) {
+    const reason = closedReason || holidayName || '休診';
+    const holExtra = holidayName && closedReason && !String(closedReason).includes(holidayName)
+      ? `<div class="closed-sub">${sanitizeHtml(holidayName)}</div>`
+      : '';
+    return `
+      <td class="res-slot closed-slot${extraCls}">
+        <div class="closed-unified">
+          <div class="closed-label">休診</div>
+          ${holExtra || (reason && reason !== '休診' ? `<div class="closed-sub">${sanitizeHtml(reason)}</div>` : '')}
+        </div>
+      </td>`;
+  }
 
-  const antiInner = antiApts.length > 0
-    ? `<div class="slot-patients-container${antiApts.length >= 2 ? ' is-multi' : ''}">${
-      antiApts.map((apt) => renderPatientCardHtml(apt, therapists, colorMap)).join('')
-    }</div>`
-    : (closedLabel
-      ? '<div class="closed-empty" aria-hidden="true"></div>'
-      : '<div class="write-space zone-write" aria-hidden="true"></div>');
+  const occ = occupancy || { rehaStarts: [], rehaCont: [], antiStarts: [], antiCont: [] };
+  const rehaInner = renderZoneInnerHtml(occ.rehaStarts, occ.rehaCont, false, therapists, colorMap);
+  const antiInner = renderZoneInnerHtml(occ.antiStarts, occ.antiCont, true, therapists, colorMap);
 
   return `
-    <td class="res-slot split-slot${extraCls}">
-      ${list.length > 0 && closedLabel ? closedBanner : ''}
-      <div class="slot-zones">
+    <td class="res-slot v-split${extraCls}">
+      <div class="slot-stack">
         <div class="zone zone-reha">${rehaInner}</div>
         <div class="zone zone-anti">${antiInner}</div>
       </div>
@@ -284,6 +337,8 @@ function renderSplitSlotCellHtml(
 function buildWeekBodyRows(weekDates, weekAptList, allSlotTimes, therapists, colorMap, amEnd, pmStart, breakMin) {
   let bodyRows = '';
   let lunchBandInserted = false;
+  const interval = resolveSlotIntervalMinutes();
+  const occupancyMap = buildOccupancyMap(weekAptList, allSlotTimes, interval, amEnd, pmStart);
 
   allSlotTimes.forEach((slotTime) => {
     if (!lunchBandInserted && String(slotTime) >= pmStart) {
@@ -297,7 +352,8 @@ function buildWeekBodyRows(weekDates, weekAptList, allSlotTimes, therapists, col
         </tr>`;
     }
 
-    bodyRows += `<tr class="slot-row"><td class="time-col">${slotTime}</td>`;
+    const hourCls = isHourSlot(slotTime) ? ' hour-slot' : '';
+    bodyRows += `<tr class="slot-row${hourCls}"><td class="time-col">${slotTime}</td>`;
 
     weekDates.forEach((d) => {
       const dateStr = formatDateYMD(d);
@@ -305,19 +361,23 @@ function buildWeekBodyRows(weekDates, weekAptList, allSlotTimes, therapists, col
       const holidayName = getJapaneseHolidayName(d);
       const closed = isClinicClosed(dateStr, slotTime);
       const closedReason = getClinicClosedReason(dateStr, slotTime);
-      const slotResList = filterReservationsForSlot(weekAptList, dateStr, slotTime, allSlotTimes);
+      const key = `${dateStr}|${slotTime}`;
+      const occupancy = occupancyMap.get(key);
 
       let extra = '';
-      if (closed) extra += ' holiday closed';
+      if (closed) extra += ' closed';
       else if (isSat) extra += ' sat';
+      if (hourCls) extra += ' hour-border';
 
-      bodyRows += renderSplitSlotCellHtml(
-        slotResList,
+      bodyRows += renderVerticalSlotCellHtml({
+        occupancy,
         therapists,
         colorMap,
-        extra,
-        closed ? (closedReason || holidayName || '休診') : ''
-      );
+        extraCls: extra,
+        closed,
+        closedReason: closed ? (closedReason || '') : '',
+        holidayName: holidayName || ''
+      });
     });
 
     bodyRows += `</tr>`;
@@ -335,34 +395,39 @@ function buildWeekBodyRows(weekDates, weekAptList, allSlotTimes, therapists, col
 function buildPageWrapperHtml(opts) {
   const {
     weekDates, bodyRows, dayNames, periodLabel, outStamp,
-    firstSlot, lastSlot, slotCount, weekAptCount, isLast, weeksOffset
+    firstSlot, lastSlot, slotCount, weekAptCount, isLast, weeksOffset, intervalMinutes
   } = opts;
 
   return `
     <div class="page-wrapper${isLast ? ' page-wrapper-last' : ''}" data-weeks-offset="${weeksOffset}">
       <div class="page-header">
-        <div>
-          <div class="title">【翌週予約受付表（紙予約用・A4縦1枚）】</div>
+        <div class="header-main">
+          <div class="title">翌週予約受付表（紙予約用・A4縦1枚）</div>
           <div class="period">${sanitizeHtml(periodLabel)}</div>
-          <div class="legend">【記入方法】左（白地）：個別リハ（氏名＋担当頭文字） ／ 右（薄灰）：消炎鎮痛 ／ 担当色分け</div>
+          <div class="legend-row">
+            <span class="lg-chip lg-reha">上段・青 個別リハ</span>
+            <span class="lg-chip lg-anti">下段・橙 消炎鎮痛</span>
+            <span class="lg-chip lg-cont">斜線 継続予約中</span>
+            <span class="lg-chip lg-closed">赤網 休診</span>
+          </div>
         </div>
-        <div class="meta">出力 ${outStamp}<br>${weekOffsetShortLabel(weeksOffset)}・1枚完結</div>
+        <div class="meta">出力 ${outStamp}<br>${weekOffsetShortLabel(weeksOffset)}・${intervalMinutes || 20}分刻み・1枚完結</div>
       </div>
       <div class="sheet-wrap">
         <table class="paper-table">
           <thead>
             <tr>
-              <th class="th-time">時間</th>
+              <th class="th-time">時間<div class="th-time-hint">上：個別／下：消炎</div></th>
               ${weekDates.map((d, idx) => {
                 const mmdd = `${d.getMonth() + 1}/${d.getDate()}`;
                 const holidayName = getJapaneseHolidayName(d);
                 const isSat = d.getDay() === 6;
-                let cls = '';
-                if (holidayName) cls = 'holiday';
-                else if (isSat) cls = 'sat';
+                let cls = 'th-day';
+                if (holidayName) cls += ' holiday';
+                else if (isSat) cls += ' sat';
                 const hol = holidayName
-                  ? `<div class="hol-name">${sanitizeHtml(holidayName)}</div>` : '';
-                return `<th class="${cls}"><span class="dow">${dayNames[idx]}</span><span class="date">${mmdd}</span>${hol}<div class="zone-sub"><span class="zs-reha">個別</span><span class="zs-anti">消炎</span></div></th>`;
+                  ? `<span class="hol-name">${sanitizeHtml(holidayName)}</span>` : '';
+                return `<th class="${cls}"><span class="dow">${dayNames[idx]}</span> <span class="date">${mmdd}</span>${hol}</th>`;
               }).join('')}
             </tr>
           </thead>
@@ -387,16 +452,22 @@ function collectPrintContext() {
   const amEnd = String(OUTPATIENT_HOURS?.amEnd || '13:00');
   const pmStart = String(OUTPATIENT_HOURS?.pmStart || '13:00');
   const breakMin = Math.max(0, timeToMin(pmStart) - timeToMin(amEnd));
+  const intervalMinutes = resolveSlotIntervalMinutes();
   const now = new Date();
   const outStamp = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  const pageMm = 285;
-  const headerMm = 11;
-  const theadMm = 7.5;
-  const footerMm = 4.5;
-  const lunchMm = 4;
+  // A4縦 有効高 ~284mm（margin 5–6mm 想定）
+  const pageMm = 284;
+  const headerMm = 12;
+  const theadMm = 7;
+  const footerMm = 4;
+  const lunchMm = 3.2;
   const slotCount = allSlotTimes.length;
   const dataAreaMm = pageMm - headerMm - theadMm - footerMm - lunchMm;
   const rowMm = dataAreaMm / Math.max(1, slotCount || 1);
+  // 行が多いほど文字を小さく
+  const namePt = slotCount >= 36 ? 5.4 : (slotCount >= 28 ? 5.8 : (slotCount >= 22 ? 6.2 : 6.5));
+  const antiPt = Math.max(5.2, namePt - 0.3);
+  const multiPt = Math.max(5.0, namePt - 1.0);
   return {
     allSlotTimes,
     allAppointments,
@@ -405,6 +476,7 @@ function collectPrintContext() {
     amEnd,
     pmStart,
     breakMin,
+    intervalMinutes,
     outStamp,
     dayNames: ['月', '火', '水', '木', '金', '土'],
     pageMm,
@@ -414,6 +486,9 @@ function collectPrintContext() {
     lunchMm,
     slotCount,
     rowMm,
+    namePt,
+    antiPt,
+    multiPt,
     firstSlot: allSlotTimes[0] || '-',
     lastSlot: allSlotTimes[allSlotTimes.length - 1] || '-'
   };
@@ -448,15 +523,19 @@ function buildPagesHtmlForOffsets(baseDate, weeksOffsets, ctx) {
       slotCount: ctx.slotCount,
       weekAptCount: weekAptList.length,
       isLast: idx === weeksOffsets.length - 1,
-      weeksOffset: off
+      weeksOffset: off,
+      intervalMinutes: ctx.intervalMinutes
     });
   }).join('');
 }
 
 function buildSharedCss(ctx) {
-  const { headerMm, theadMm, footerMm, lunchMm, rowMm } = ctx;
+  const {
+    headerMm, theadMm, footerMm, lunchMm, rowMm, pageMm, namePt, antiPt, multiPt
+  } = ctx;
+  const pageH = pageMm || 284;
   return `
-    @page { size: A4 portrait; margin: 5mm; }
+    @page { size: A4 portrait; margin: 5mm 6mm; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
       width: 100%; background: #f1f5f9; color: #0f172a;
@@ -483,14 +562,12 @@ function buildSharedCss(ctx) {
       font-weight: 800; font-size: 0.85rem; padding: 7px 12px; border-radius: 6px; cursor: pointer;
     }
     .preview-toolbar button:hover { background: rgba(255,255,255,0.28); }
-    .preview-toolbar button.primary {
-      background: #fff; color: #0f766e; border-color: #fff;
-    }
+    .preview-toolbar button.primary { background: #fff; color: #0f766e; border-color: #fff; }
     .preview-toolbar button:disabled { opacity: 0.45; cursor: not-allowed; }
     .preview-stage { padding: 12px; display: flex; flex-direction: column; gap: 14px; align-items: center; }
     .page-wrapper {
       width: 100%; max-width: 210mm;
-      height: 285mm !important; max-height: 285mm !important; min-height: 285mm !important;
+      height: ${pageH}mm !important; max-height: ${pageH}mm !important; min-height: ${pageH}mm !important;
       background: #fff;
       display: flex; flex-direction: column; overflow: hidden;
       box-shadow: 0 4px 16px rgba(15,23,42,0.12);
@@ -499,154 +576,177 @@ function buildSharedCss(ctx) {
     .page-wrapper-last { page-break-after: auto; break-after: auto; }
     .page-header {
       display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
-      border-bottom: 1px solid #cbd5e1; padding: 4px 6px 2px; margin: 0 4px 2px;
+      border-bottom: 1px solid #cbd5e1; padding: 3px 4px 2px; margin: 0 2px 1px;
       flex: 0 0 auto; height: ${headerMm}mm; max-height: ${headerMm}mm;
     }
-    .title { font-size: 12pt; font-weight: 800; color: #0f172a; }
-    .period { font-size: 8.5pt; font-weight: 700; color: #0f766e; margin-top: 1px; }
-    .meta { font-size: 7pt; font-weight: 600; color: #94a3b8; text-align: right; }
-    .legend { font-size: 7pt; font-weight: 700; color: #475569; margin-top: 1px; }
-    .lg-anti { color: #d97706; font-weight: 800; }
-    .sheet-wrap { flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 0 4px; }
+    .title { font-size: 11pt; font-weight: 800; color: #0f172a; letter-spacing: 0.02em; }
+    .period { font-size: 8pt; font-weight: 700; color: #0f766e; margin-top: 1px; }
+    .meta { font-size: 6.5pt; font-weight: 600; color: #94a3b8; text-align: right; white-space: nowrap; }
+    .legend-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+    .lg-chip {
+      display: inline-block; font-size: 5.8pt; font-weight: 800; padding: 1px 5px;
+      border-radius: 3px; border: 0.5px solid #cbd5e1; line-height: 1.2;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    }
+    .lg-reha { background: #eff6ff; color: #1d4ed8; border-color: #93c5fd; }
+    .lg-anti { background: #fff7ed; color: #c2410c; border-color: #fdba74; }
+    .lg-cont { background: #f8fafc; color: #475569; border-color: #94a3b8;
+      background-image: repeating-linear-gradient(-45deg, transparent, transparent 1px, rgba(148,163,184,0.35) 1px, rgba(148,163,184,0.35) 2px);
+    }
+    .lg-closed { background: #fee2e2; color: #be123c; border-color: #fecaca; }
+    .sheet-wrap { flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 0 2px; }
     table.paper-table {
       width: 100%; height: 100% !important;
       border-collapse: collapse; table-layout: fixed;
     }
     .paper-table th, .paper-table td { border: 0.5px solid #cbd5e1; vertical-align: middle; }
     .paper-table thead th {
-      background: #f8fafc; font-size: 9pt; font-weight: 700; text-align: center;
-      height: ${theadMm}mm; max-height: ${theadMm}mm; padding: 1px; color: #334155;
+      background: #f8fafc; font-size: 8.5pt; font-weight: 700; text-align: center;
+      height: ${theadMm}mm; max-height: ${theadMm}mm; padding: 1px 2px; color: #334155;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
-    .paper-table thead th.th-time { width: 9%; color: #64748b; font-size: 8pt; }
-    .paper-table thead th .dow { display: block; font-weight: 800; line-height: 1.1; }
-    .paper-table thead th .date { display: block; font-size: 7.5pt; color: #64748b; line-height: 1.1; }
-    .paper-table thead th .hol-name { font-size: 6pt; color: #e11d48; font-weight: 800; line-height: 1.05; }
-    .paper-table thead th .zone-sub {
-      display: flex; width: 100%; margin-top: 1px; font-size: 5.5pt; font-weight: 800;
-      line-height: 1.1; border-top: 0.5px solid #e2e8f0; padding-top: 0.5px;
+    .paper-table thead th.th-time {
+      width: 11mm; color: #64748b; font-size: 7pt; line-height: 1.15;
     }
-    .paper-table thead th .zs-reha { flex: 0 0 65%; text-align: center; color: #334155; }
-    .paper-table thead th .zs-anti { flex: 0 0 35%; text-align: center; color: #64748b; background: #f1f5f9; }
-    .paper-table thead th.sat { background: #f0f9ff; }
+    .th-time-hint { display: block; font-size: 5pt; font-weight: 700; color: #94a3b8; margin-top: 1px; }
+    .paper-table thead th .dow { font-weight: 800; }
+    .paper-table thead th .date { font-size: 7pt; font-weight: 600; color: #64748b; }
+    .paper-table thead th .hol-name {
+      display: inline-block; margin-left: 2px; font-size: 5.5pt; color: #e11d48; font-weight: 800;
+    }
+    .paper-table thead th.sat { background: #eff6ff; }
+    .paper-table thead th.sat .dow { color: #1d4ed8; }
     .paper-table thead th.holiday { background: #fff1f2; }
+    .paper-table thead th.holiday .dow { color: #be123c; }
     tr.lunch-band td {
       height: ${lunchMm}mm; max-height: ${lunchMm}mm;
-      background: #f1f5f9; color: #475569; font-size: 8pt; font-weight: 800;
-      text-align: center; vertical-align: middle; letter-spacing: 0.06em;
+      background: #f1f5f9; color: #64748b; font-size: 6.5pt; font-weight: 800;
+      text-align: center; vertical-align: middle; letter-spacing: 0.08em;
       border: 0.5px solid #cbd5e1;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
-    tr.slot-row { height: ${rowMm}mm !important; min-height: 9mm; }
+    tr.slot-row { height: ${rowMm}mm !important; }
+    tr.slot-row.hour-slot td { border-top-color: #94a3b8; border-top-width: 1px; }
     .time-col {
-      width: 9%; text-align: center; font-weight: 800; font-size: 9pt;
+      width: 11mm; text-align: center; font-weight: 800; font-size: 7.5pt;
       background: #f8fafc; color: #475569; height: ${rowMm}mm !important;
-      vertical-align: middle !important;
+      vertical-align: middle !important; font-variant-numeric: tabular-nums;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
     td.res-slot {
-      height: ${rowMm}mm !important; min-height: 9mm; padding: 0 !important;
-      vertical-align: middle !important; overflow: hidden;
+      height: ${rowMm}mm !important; padding: 0 !important;
+      vertical-align: top !important; overflow: hidden;
     }
-    td.res-slot .slot-zones { overflow: visible; }
-    td.res-slot.split-slot { background: #ffffff; }
-    td.res-slot.holiday, td.res-slot.closed {
-      background: #fff1f2 !important;
-      -webkit-print-color-adjust: exact; print-color-adjust: exact;
-    }
-    td.res-slot.holiday .zone-reha,
-    td.res-slot.closed .zone-reha { background: #fff5f5; }
-    td.res-slot.holiday .zone-anti,
-    td.res-slot.closed .zone-anti { background: #ffe4e6; }
-    .closed-mark {
-      display: block; text-align: center; font-size: 6.5pt; font-weight: 800;
-      color: #be123c; background: #ffe4e6; border-bottom: 0.5px solid #fecdd3;
-      line-height: 1.2; padding: 0 1px;
-      -webkit-print-color-adjust: exact; print-color-adjust: exact;
-    }
-    .closed-empty {
-      display: flex; align-items: center; justify-content: center;
-      width: 100%; height: 100%; min-height: 8mm;
-    }
-    .slot-zones {
-      display: flex; width: 100%; height: 100%; min-height: 9mm;
-      align-items: stretch;
+    td.res-slot.sat { background: #fafcff; }
+    td.res-slot.hour-border { border-top-color: #94a3b8; border-top-width: 1px; }
+    .slot-stack {
+      display: flex; flex-direction: column; width: 100%; height: 100%;
+      min-height: 0;
     }
     .zone {
       display: flex; flex-direction: column; justify-content: center;
-      overflow: visible; min-width: 0; height: 100%;
+      min-width: 0; min-height: 0; overflow: hidden; padding: 0.3px 1.5px;
       -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
     .zone-reha {
-      flex: 0 0 65%; width: 65%;
+      flex: 0 0 54%; height: 54%;
       background: #ffffff;
-      padding: 0 1px;
+      border-bottom: 1px dotted #cbd5e1;
     }
     .zone-anti {
-      flex: 0 0 35%; width: 35%;
-      background: #f1f5f9;
-      border-left: 1px dashed #cbd5e1;
-      padding: 0 1px;
+      flex: 0 0 46%; height: 46%;
+      background: #f8fafc;
+    }
+    .write-space {
+      width: 100%; height: 100%; min-height: 2.5mm; background: transparent;
+    }
+    .write-reha { background: #ffffff; }
+    .write-anti { background: transparent; }
+    td.res-slot.closed-slot, td.closed-slot {
+      background: #fee2e2 !important;
+      background-image: repeating-linear-gradient(
+        -45deg, transparent, transparent 2px, rgba(248,113,113,0.18) 2px, rgba(248,113,113,0.18) 4px
+      ) !important;
       -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
-    .write-space, .zone-write {
-      width: 100%; height: 100%; min-height: 8mm; background: transparent;
-    }
-    .slot-patients-container {
-      display: flex; flex-direction: column; justify-content: space-around;
+    .closed-unified {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
       width: 100%; height: 100%; gap: 0;
+    }
+    .closed-label {
+      font-size: 7pt; font-weight: 800; color: #be123c; letter-spacing: 0.12em;
+    }
+    .closed-sub { font-size: 5pt; font-weight: 700; color: #e11d48; line-height: 1.1; }
+    .slot-patients-container {
+      display: flex; flex-direction: column; justify-content: center; align-items: stretch;
+      width: 100%; height: 100%; gap: 0.5px; min-height: 0;
+    }
+    .slot-patients-container.is-multi {
+      flex-direction: row; flex-wrap: wrap; align-content: center; gap: 0.5px;
     }
     .patient-card {
       display: flex; flex-direction: row; align-items: center; justify-content: flex-start;
-      gap: 1px; padding: 0 1px; border-radius: 1px;
-      background: #f8fafc; border: 0.5px solid #e2e8f0; border-left: 2px solid #1d4ed8;
-      width: 100%; text-align: left; box-sizing: border-box; min-width: 0;
-      max-height: 100%; overflow: visible;
+      gap: 1.5px; padding: 0.5px 2px; border-radius: 2px;
+      width: 100%; min-width: 0; box-sizing: border-box;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    }
+    .slot-patients-container.is-multi .patient-card,
+    .slot-patients-container.is-multi .cont-card {
+      width: auto; flex: 1 1 45%; max-width: 100%;
+    }
+    .patient-card.reha {
+      background: ${REHA_CARD.bg}; border: 0.5px solid ${REHA_CARD.border};
+      border-left: 2px solid ${REHA_CARD.accent};
     }
     .patient-card.anti {
-      background: #fffbeb;
-      justify-content: center;
-      text-align: center;
-      border-left-width: 2px;
-      align-items: center;
+      background: ${ANALGESIA_COLOR.cardBg}; border: 0.5px solid #fdba74;
+      border-left: 2px solid ${ANALGESIA_COLOR.bg};
     }
     .patient-card .staff-tag {
       display: inline-flex; align-items: center; justify-content: center;
-      flex: 0 0 auto; min-width: 7px; font-size: 5.5pt; font-weight: 800;
-      padding: 0 1px; border-radius: 1px; line-height: 1.0;
+      flex: 0 0 auto; min-width: 7px; font-size: 5pt; font-weight: 800;
+      padding: 0 2px; border-radius: 2px; line-height: 1.05; color: #fff;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
-    /* 省略（...）禁止・フルネーム全文字表示 */
     .patient-card .name-text {
       flex: 1 1 auto; min-width: 0;
-      font-size: 6.8pt; font-weight: 800; color: #0f172a; line-height: 1.05;
-      white-space: normal; word-break: keep-all; overflow-wrap: anywhere;
-      overflow: visible; text-overflow: clip;
-      letter-spacing: -0.02em;
+      font-size: ${namePt}pt; font-weight: 800; color: #0f172a; line-height: 1.05;
+      white-space: nowrap; overflow: visible; text-overflow: clip;
+      letter-spacing: -0.015em;
     }
-    .patient-card.anti .name-text,
-    .patient-card.anti .name-stack {
-      flex: 0 1 auto; width: 100%;
-      font-size: 6.2pt; line-height: 1.05; text-align: center;
-      white-space: normal; word-break: keep-all; overflow: visible;
+    .patient-card.anti .name-text {
+      font-size: ${antiPt}pt; text-align: left;
     }
-    .name-stack {
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 0; width: 100%;
+    .cont-card {
+      display: flex; flex-direction: row; align-items: center; gap: 1px;
+      padding: 0.5px 2px; border-radius: 2px; width: 100%; min-width: 0;
+      font-size: ${Math.max(4.8, multiPt)}pt; font-weight: 700; line-height: 1.0;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
-    .name-stack .name-line {
-      display: block; width: 100%; text-align: center;
-      font-size: inherit; font-weight: 800; line-height: 1.05;
-      white-space: nowrap; overflow: visible; letter-spacing: -0.02em;
+    .cont-card.reha {
+      color: #1e40af; border: 0.5px solid #bfdbfe;
+      background: repeating-linear-gradient(
+        -45deg, #eff6ff, #eff6ff 2px, #dbeafe 2px, #dbeafe 4px
+      );
+    }
+    .cont-card.anti {
+      color: #9a3412; border: 0.5px solid #fed7aa;
+      background: repeating-linear-gradient(
+        -45deg, #fff7ed, #fff7ed 2px, #ffedd5 2px, #ffedd5 4px
+      );
+    }
+    .cont-mark { flex: 0 0 auto; font-weight: 800; }
+    .cont-text {
+      flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: visible; text-overflow: clip;
     }
     .slot-patients-container.is-multi .patient-card .name-text,
-    .slot-patients-container.is-multi .patient-card .name-stack,
-    .slot-patients-container.is-multi .name-stack .name-line {
-      font-size: 5.6pt; line-height: 1.0;
+    .slot-patients-container.is-multi .cont-text {
+      font-size: ${multiPt}pt; line-height: 1.0;
     }
-    .slot-patients-container.is-multi .patient-card .staff-tag { font-size: 5pt; }
-    .zone-anti .patient-card .name-text,
-    .zone-anti .patient-card .name-stack { font-size: 6.2pt; line-height: 1.05; }
     .footer {
       display: flex; justify-content: space-between; gap: 8px;
-      margin: 1mm 4px 2px; padding-top: 1px; border-top: 1px solid #e2e8f0;
-      font-size: 7pt; font-weight: 600; color: #94a3b8;
+      margin: 0.5mm 4px 1px; padding-top: 1px; border-top: 1px solid #e2e8f0;
+      font-size: 6.5pt; font-weight: 600; color: #94a3b8;
       flex: 0 0 auto; height: ${footerMm}mm; max-height: ${footerMm}mm; overflow: hidden;
     }
     @media print {
@@ -659,16 +759,21 @@ function buildSharedCss(ctx) {
       .preview-stage { padding: 0 !important; gap: 0 !important; }
       .page-wrapper {
         max-width: none !important; box-shadow: none !important;
-        height: 285mm !important; max-height: 285mm !important; min-height: 285mm !important;
+        height: ${pageH}mm !important; max-height: ${pageH}mm !important; min-height: ${pageH}mm !important;
         overflow: hidden !important; page-break-after: always !important;
       }
       .page-wrapper-last { page-break-after: auto !important; }
       table.paper-table { height: 100% !important; }
-      tr.slot-row { height: ${rowMm}mm !important; min-height: 9mm !important; }
-      .zone-anti, .paper-table thead th .zs-anti {
-        background: #f1f5f9 !important;
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
+      tr.slot-row { height: ${rowMm}mm !important; }
+      .zone-reha { background: #ffffff !important; }
+      .zone-anti { background: #f8fafc !important; }
+      .patient-card.reha { background: ${REHA_CARD.bg} !important; }
+      .patient-card.anti { background: ${ANALGESIA_COLOR.cardBg} !important; }
+      td.closed-slot {
+        background: #fee2e2 !important;
+        background-image: repeating-linear-gradient(
+          -45deg, transparent, transparent 2px, rgba(248,113,113,0.18) 2px, rgba(248,113,113,0.18) 4px
+        ) !important;
       }
     }
   `;
